@@ -1,5 +1,6 @@
 import sqlite3
 from app.constants import TAG_ALIAS
+from pathlib import Path
 
 def open_db(path):
     conn = sqlite3.connect(path)
@@ -97,3 +98,18 @@ def load_card_detail(conn, pid):
         (pid,),
     ).fetchone()
     return dict(r) if r else None
+
+def get_print_brief(conn, print_id: int) -> dict | None:
+    row = conn.execute(
+        """
+        SELECT print_id, card_number, COALESCE(name_ja,'') AS name_ja, COALESCE(image_url,'') AS image_url
+        FROM prints
+        WHERE print_id=?
+        """,
+        (print_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+def db_exists(path: str) -> bool:
+    p = Path(path)
+    return p.exists() and p.is_file() and p.stat().st_size > 0
