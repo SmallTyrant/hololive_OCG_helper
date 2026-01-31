@@ -446,11 +446,15 @@ def detect_pagination_param(html: bytes) -> str:
     return "page"
 
 
-def build_list_url(expansion: str, page: int, page_param: str) -> str:
+def build_list_url(expansion: str | None, page: int, page_param: str) -> str:
     # always use view=text so card numbers appear in anchor text reliably
+    if expansion:
+        base = f"{CARDSEARCH_BASE}?expansion={expansion}&view=text"
+    else:
+        base = f"{CARDSEARCH_BASE}?view=text"
     if page <= 1:
-        return f"{CARDSEARCH_BASE}?expansion={expansion}&view=text"
-    return f"{CARDSEARCH_BASE}?expansion={expansion}&view=text&{page_param}={page}"
+        return base
+    return f"{base}&{page_param}={page}"
 
 
 def fetch(session: requests.Session, url: str, verbose: bool) -> bytes:
@@ -462,7 +466,7 @@ def fetch(session: requests.Session, url: str, verbose: bool) -> bytes:
     return r.content
 
 
-def process_list_page(expansion: str, page: int, html: bytes, args, session: requests.Session, conn: sqlite3.Connection) -> Tuple[int, int]:
+def process_list_page(expansion: str | None, page: int, html: bytes, args, session: requests.Session, conn: sqlite3.Connection) -> Tuple[int, int]:
     items = parse_list_page(html)
     log(f"[PAGE {page}] items={len(items)} (seen_total={args._seen_total})", args.verbose)
 
@@ -491,7 +495,11 @@ def process_list_page(expansion: str, page: int, html: bytes, args, session: req
 
         detail["detail_id"] = int(it.card_id)
         detail["detail_url"] = detail_url
-        detail["set_code"] = expansion
+        if expansion:
+            detail["set_code"] = expansion
+        else:
+            card_no = (detail.get("card_number") or it.card_number or "").strip()
+            detail["set_code"] = card_no.split("-", 1)[0] if "-" in card_no else ""
 
         print_id = upsert_print(conn, detail.get("card_number") or it.card_number, detail)
         upsert_text_ja(conn, print_id, detail.get("name") or "", detail.get("raw_text") or "")
@@ -509,12 +517,13 @@ def process_list_page(expansion: str, page: int, html: bytes, args, session: req
     return new_items, 0
 
 
-def scrape_expansion(conn: sqlite3.Connection, session: requests.Session, expansion: str, args) -> int:
+def scrape_expansion(conn: sqlite3.Connection, session: requests.Session, expansion: str | None, args) -> int:
     first_url = build_list_url(expansion, 1, "page")
     first_html = fetch(session, first_url, args.verbose)
 
     page_param = detect_pagination_param(first_html)
-    log(f"[PAGINATION] exp={expansion} param='{page_param}'", True)
+    exp_label = expansion if expansion else "ALL"
+    log(f"[PAGINATION] exp={exp_label} param='{page_param}'", True)
 
     for page in range(1, args.max_pages + 1):
         url = build_list_url(expansion, page, page_param)
@@ -540,16 +549,19 @@ def cmd_scrape(args) -> int:
 
     if args.expansion == "all":
         exps = sorted(parse_expansion_codes(fetch(session, f"{CARDSEARCH_BASE}?view=text", args.verbose)))
-        if not exps:
-            raise RuntimeError("no expansion codes detected")
-        log(f"[INFO] expansions={len(exps)}", True)
-        for exp in exps:
-            if args.max_cards and args._seen_total >= args.max_cards:
-                break
-            log(f"[EXP] {exp}", True)
-            stop = scrape_expansion(conn, session, exp, args)
-            if stop:
-                break
+        if exps:
+            log(f"[INFO] expansions={len(exps)}", True)
+            for exp in exps:
+                if args.max_cards and args._seen_total >= args.max_cards:
+                    break
+                log(f"[EXP] {exp}", True)
+                stop = scrape_expansion(conn, session, exp, args)
+                if stop:
+                    break
+        else:
+            # Fallback: crawl all cards without expansion filter
+            log("[WARN] expansions not found; fallback to ALL cards", True)
+            scrape_expansion(conn, session, None, args)
     else:
         scrape_expansion(conn, session, args.expansion, args)
 
