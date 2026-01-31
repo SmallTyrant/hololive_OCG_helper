@@ -358,10 +358,19 @@ def normalize_raw_text(text: str, *, remove_private: bool = False) -> str:
                 i = j
                 continue
 
+        def _is_label_line(s: str) -> bool:
+            s = _normalize_label(s)
+            if s in ALL_LABELS:
+                return True
+            for lbl in ALL_LABELS:
+                if s.startswith(lbl + " "):
+                    return True
+            return False
+
         # merge label + next line value (next가 라벨이면 병합하지 않음)
         if label in MERGE_LABELS and i + 1 < len(lines):
             nxt = lines[i + 1]
-            if nxt in ALL_LABELS:
+            if _is_label_line(nxt):
                 out.append(label)
                 i += 1
                 continue

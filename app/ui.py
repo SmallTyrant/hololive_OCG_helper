@@ -235,31 +235,60 @@ def launch_app(db_path: str):
                     )
             return dots
 
+        def build_section_chip(text: str):
+            return ft.Container(
+                content=ft.Text(text, weight=ft.FontWeight.BOLD, size=12),
+                bgcolor=with_opacity(0.18, COLORS.BLUE_GREY_700),
+                padding=ft.padding.symmetric(horizontal=8, vertical=3),
+                border_radius=12,
+            )
+
+        def build_color_row(rest: str):
+            dots = build_color_dots(rest)
+            if not dots:
+                return None
+            return ft.Row(
+                [
+                    build_section_chip("色"),
+                    *dots,
+                    ft.Text(rest),
+                ],
+                spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            )
+
         def build_detail_line(line: str):
-            bold_labels = ("カードタイプ", "タグ", "レアリティ")
-            if line in bold_labels:
-                return ft.Container(
-                    content=ft.Text(line, weight=ft.FontWeight.BOLD),
-                    padding=ft.padding.only(top=6, bottom=2),
-                )
+            section_labels = (
+                "カードタイプ",
+                "タグ",
+                "レアリティ",
+                "推しスキル",
+                "SP推しスキル",
+                "アーツ",
+                "バトンタッチ",
+                "エクストラ",
+                "Bloomレベル",
+                "キーワード",
+                "色",
+                "LIFE",
+                "HP",
+            )
+            if line in section_labels:
+                return build_section_chip(line)
 
             if line.startswith("色 "):
                 rest = line[2:].strip()
-                dots = build_color_dots(rest)
-                if dots:
-                    return ft.Row(
-                        [
-                            ft.Text("色", weight=ft.FontWeight.BOLD),
-                            *dots,
-                            ft.Text(rest),
-                        ],
-                        spacing=6,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    )
+                row = build_color_row(rest)
+                if row:
+                    return row
 
-            for label in bold_labels:
+            for label in section_labels:
                 if line.startswith(label + " "):
                     rest = line[len(label):]
+                    if label == "色":
+                        row = build_color_row(rest.strip())
+                        if row:
+                            return row
                     return ft.Text(
                         spans=[
                             ft.TextSpan(label, style=ft.TextStyle(weight=ft.FontWeight.BOLD)),
@@ -273,11 +302,23 @@ def launch_app(db_path: str):
             if not text:
                 detail_lv.controls.append(ft.Text("(본문 없음)"))
             else:
-                for line in text.splitlines():
+                lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+                i = 0
+                while i < len(lines):
+                    line = lines[i]
+                    if line == "色" and i + 1 < len(lines):
+                        next_line = lines[i + 1]
+                        row = build_color_row(next_line)
+                        if row:
+                            detail_lv.controls.append(row)
+                            i += 2
+                            continue
                     line = line.strip()
                     if not line:
+                        i += 1
                         continue
                     detail_lv.controls.append(build_detail_line(line))
+                    i += 1
             page.update()
 
         def show_detail(pid: int):
