@@ -32,7 +32,7 @@ def _center_alignment():
 ALIGN_CENTER = _center_alignment()
 
 def icon_dir(project_root: Path) -> Path:
-    return project_root / "assets"
+    return project_root / "app"
 
 def icon_paths(project_root: Path) -> tuple[Path, Path]:
     d = icon_dir(project_root)

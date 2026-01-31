@@ -2,4 +2,4 @@
 __pycache__/
 .venv/
 data/images/
-assets/app_icon.*
+app/app_icon.*
