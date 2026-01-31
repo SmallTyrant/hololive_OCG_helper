@@ -7,6 +7,8 @@ from pathlib import Path
 
 import flet as ft
 
+import shutil
+
 from app.services.db import (
     open_db,
     query_suggest,
@@ -28,19 +30,20 @@ def launch_app(db_path: str):
     def main(page: ft.Page):
         nonlocal conn_ui
 
-        page.title = "hololive OCG helper"
-        page.window_width = 1280
+        page.title = "hOCG Tool (Tk) - Viewer + AutoUpdate + Images + Verify"
+        page.window_width = 1230
         page.window_height = 820
 
         # --- Controls ---
-        tf_db = ft.TextField(label="DB", value=db_path, expand=True)
-        tf_search = ft.TextField(label="카드번호 / 이름 / 태그 검색", expand=True)
+        tf_db = ft.TextField(value=db_path, expand=True)
+        tf_search = ft.TextField(value="", expand=True, height=36, hint_text="hBP04-002")
 
-        btn_update = ft.ElevatedButton("DB 생성/업데이트+정제")  # DB 없을 때도 이 버튼으로 생성
+        btn_backup = ft.ElevatedButton("DB 백업")
+        btn_restore = ft.ElevatedButton("DB 복원 + 자동검증")
+        cb_missing_only = ft.Checkbox(label="이미지: 누락분만", value=True)
+
+        btn_update = ft.ElevatedButton("자동 업데이트 + 이미지 + 자동검증")  # DB 없을 때도 이 버튼으로 생성
         pb = ft.ProgressBar(visible=False, width=180)
-
-        # --- Left: results ---
-        lv = ft.ListView(expand=True, spacing=2, padding=0)
 
         # --- Image area (중요: ft.Image()를 빈 생성자로 만들지 않음) ---
         def build_image_widget(image_path: Path | None):
@@ -67,19 +70,21 @@ def launch_app(db_path: str):
             border=ft.border.all(1, ft.colors.with_opacity(0.15, ft.colors.WHITE)),
         )
 
-        btn_img_dl = ft.ElevatedButton("현재 카드 이미지 다운로드")
-        btn_img_dl.disabled = True  # 카드 선택 후 활성화
-
         # --- Right: detail ---
         detail_tf = ft.TextField(
-            label="본문(raw_text)",
             multiline=True,
             read_only=True,
             expand=True,
         )
 
         # --- Bottom: log ---
-        log_tf = ft.TextField(label="로그", multiline=True, read_only=True, expand=True)
+        log_tf = ft.TextField(
+            multiline=True,
+            read_only=True,
+            expand=True,
+            bgcolor=ft.colors.BLACK,
+            text_style=ft.TextStyle(color=ft.colors.WHITE),
+        )
 
         # currently selected
         selected_print_id = {"id": None}
@@ -126,82 +131,110 @@ def launch_app(db_path: str):
                 else:
                     detail_tf.value = card.get("raw_text", "") or "(본문 없음)"
 
-                # 이미지 다운로드 버튼 활성화 조건
-                btn_img_dl.disabled = not (selected_card_number["no"] and selected_image_url["url"])
-
             except Exception as ex:
                 detail_tf.value = f"[ERROR] 상세 로드 실패: {ex}"
-                btn_img_dl.disabled = True
                 clear_image()
 
             page.update()
 
-        def refresh_list():
+        def refresh_detail():
             q = (tf_search.value or "").strip()
-            lv.controls.clear()
 
             if not q:
                 page.update()
                 return
 
             if conn_ui is None and not db_exists(tf_db.value):
-                append_log("[INFO] DB가 없어서 검색 불가. 'DB 생성/업데이트+정제'를 먼저 실행하세요.")
+                append_log("[INFO] DB가 없어서 검색 불가. 상단 버튼으로 DB를 생성하세요.")
                 page.update()
                 return
 
             try:
                 ensure_conn()
-                rows = query_suggest(conn_ui, q, limit=80)
-                for r in rows:
-                    title = f"{r.get('card_number','')} | {r.get('name_ja','')}"
-                    pid = r["print_id"]
-                    lv.controls.append(
-                        ft.ListTile(
-                            title=ft.Text(title),
-                            on_click=lambda e, _pid=pid: show_detail(_pid),
-                        )
-                    )
+                rows = query_suggest(conn_ui, q, limit=20)
+                if not rows:
+                    append_log(f"[INFO] 검색 결과 없음: {q}")
+                else:
+                    if len(rows) > 1:
+                        append_log(f"[INFO] {len(rows)}건 중 첫 항목 표시")
+                    show_detail(rows[0]["print_id"])
             except Exception as ex:
                 append_log(f"[ERROR] 검색 실패: {ex}")
 
             page.update()
 
-        def on_search_change(e):
-            refresh_list()
+        def on_search_click(e):
+            refresh_detail()
 
-        tf_search.on_change = on_search_change
+        btn_search = ft.ElevatedButton("검색", on_click=on_search_click, height=36)
+        tf_search.on_submit = on_search_click
 
-        # --- image download for selected card ---
-        def do_download_current_image():
-            try:
-                btn_img_dl.disabled = True
-                page.update()
+        def backup_db():
+            dbp = tf_db.value.strip()
+            if not db_exists(dbp):
+                append_log("[WARN] DB가 없어서 백업할 수 없습니다.")
+                return
+            backup_path = f"{dbp}.bak"
+            shutil.copy2(dbp, backup_path)
+            append_log(f"[OK] DB 백업 완료: {backup_path}")
 
-                cn = selected_card_number["no"]
-                url = selected_image_url["url"]
-                if not cn or not url:
-                    append_log("[WARN] 카드/이미지 URL이 없습니다.")
-                    return
+        def restore_db():
+            nonlocal conn_ui
+            dbp = tf_db.value.strip()
+            backup_path = f"{dbp}.bak"
+            if not os.path.exists(backup_path):
+                append_log(f"[WARN] 백업 파일이 없습니다: {backup_path}")
+                return
+            if conn_ui:
+                try:
+                    conn_ui.close()
+                except Exception:
+                    pass
+                conn_ui = None
+            shutil.copy2(backup_path, dbp)
+            append_log(f"[OK] DB 복원 완료: {backup_path} -> {dbp}")
+            append_log("[INFO] 자동검증: 스킵(미구현)")
 
-                dest = local_image_path(project_root, cn)
-                append_log(f"[IMG] downloading: {cn} -> {dest.name}")
-                download_image(url, dest)
-                append_log("[IMG] done")
+        def on_backup_click(e):
+            backup_db()
 
-                # 화면 갱신
-                set_image_for_card(cn)
+        def on_restore_click(e):
+            restore_db()
 
-            except Exception as ex:
-                append_log(f"[IMG][ERROR] {ex}")
-            finally:
-                # 선택 상태에 따라 다시 활성화
-                btn_img_dl.disabled = not (selected_card_number["no"] and selected_image_url["url"])
-                page.update()
+        btn_backup.on_click = on_backup_click
+        btn_restore.on_click = on_restore_click
 
-        def on_img_dl_click(e):
-            threading.Thread(target=do_download_current_image, daemon=True).start()
+        def download_images(missing_only: bool):
+            if conn_ui is None and not db_exists(tf_db.value):
+                append_log("[WARN] DB가 없어서 이미지 다운로드 불가.")
+                return
+            ensure_conn()
+            rows = conn_ui.execute(
+                "SELECT card_number, COALESCE(image_url,'') AS image_url FROM prints ORDER BY card_number"
+            ).fetchall()
+            total = len(rows)
+            if total == 0:
+                append_log("[INFO] 이미지 대상이 없습니다.")
+                return
 
-        btn_img_dl.on_click = on_img_dl_click
+            append_log(f"[IMG] 대상 {total}건 (누락분만={missing_only})")
+            done = 0
+            for row in rows:
+                card_no = (row["card_number"] or "").strip()
+                image_url = (row["image_url"] or "").strip()
+                if not card_no or not image_url:
+                    continue
+                dest = local_image_path(project_root, card_no)
+                if missing_only and dest.exists():
+                    continue
+                try:
+                    download_image(image_url, dest)
+                    done += 1
+                    if done % 10 == 0:
+                        append_log(f"[IMG] {done}건 다운로드 완료")
+                except Exception as ex:
+                    append_log(f"[IMG][WARN] {card_no}: {ex}")
+            append_log(f"[IMG] 완료: {done}건")
 
         # --- Update pipeline (background thread) ---
         def do_update():
@@ -210,7 +243,9 @@ def launch_app(db_path: str):
                 pb.visible = True
                 btn_update.disabled = True
                 tf_search.disabled = True
-                btn_img_dl.disabled = True
+                btn_backup.disabled = True
+                btn_restore.disabled = True
+                cb_missing_only.disabled = True
                 page.update()
 
                 dbp = tf_db.value.strip()
@@ -222,6 +257,9 @@ def launch_app(db_path: str):
 
                 append_log("[DONE] update + refine")
 
+                download_images(cb_missing_only.value)
+                append_log("[INFO] 자동검증: 스킵(미구현)")
+
                 # UI 스레드용 DB 재연결
                 try:
                     if conn_ui:
@@ -231,7 +269,7 @@ def launch_app(db_path: str):
                 conn_ui = open_db(dbp)
 
                 # 검색 결과 재갱신
-                refresh_list()
+                refresh_detail()
 
             except Exception as ex:
                 append_log(f"[ERROR] 업데이트/정제 실패: {ex}")
@@ -240,7 +278,9 @@ def launch_app(db_path: str):
                 pb.visible = False
                 btn_update.disabled = False
                 tf_search.disabled = False
-                btn_img_dl.disabled = not (selected_card_number["no"] and selected_image_url["url"])
+                btn_backup.disabled = False
+                btn_restore.disabled = False
+                cb_missing_only.disabled = False
                 page.update()
 
         def on_update_click(e):
@@ -251,7 +291,7 @@ def launch_app(db_path: str):
         # --- first-run: DB 없으면 안내 로그만 찍고 앱은 뜨게 ---
         if not db_exists(tf_db.value):
             append_log("[INFO] DB 파일이 없습니다.")
-            append_log("[INFO] 상단 'DB 생성/업데이트+정제'를 누르면 DB를 생성(크롤링+정제)합니다.")
+            append_log("[INFO] 상단 '자동 업데이트 + 이미지 + 자동검증'을 누르면 DB를 생성(크롤링+정제)합니다.")
         else:
             # DB 있으면 즉시 연결
             try:
@@ -260,23 +300,30 @@ def launch_app(db_path: str):
                 append_log(f"[ERROR] DB open failed: {ex}")
 
         # --- Layout ---
-        top = ft.Row([tf_db, btn_update, pb], vertical_alignment=ft.CrossAxisAlignment.CENTER)
-        search_row = ft.Row([tf_search], vertical_alignment=ft.CrossAxisAlignment.CENTER)
-
-        left = ft.Column(
+        top = ft.Row(
             [
-                ft.Container(ft.Text("결과"), padding=ft.padding.only(left=10, top=4)),
-                ft.Container(lv, expand=True, padding=10),
+                ft.Text("DB:"),
+                tf_db,
+                btn_backup,
+                btn_restore,
+                cb_missing_only,
+                btn_update,
+                pb,
             ],
-            expand=True,
-            spacing=0,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+        search_row = ft.Row(
+            [
+                ft.Text("카드번호:"),
+                tf_search,
+                btn_search,
+            ],
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
 
         middle = ft.Column(
             [
-                ft.Container(ft.Text("이미지"), padding=ft.padding.only(left=10, top=4)),
                 img_container,
-                ft.Container(btn_img_dl, padding=10),
             ],
             expand=True,
             spacing=0,
@@ -292,16 +339,14 @@ def launch_app(db_path: str):
 
         body = ft.Row(
             [
-                ft.Container(left, expand=3),
+                ft.Container(middle, expand=5),
                 ft.VerticalDivider(width=1),
-                ft.Container(middle, expand=4),
-                ft.VerticalDivider(width=1),
-                ft.Container(right, expand=5),
+                ft.Container(right, expand=6),
             ],
             expand=True,
         )
 
-        bottom = ft.Container(log_tf, padding=10, height=200)
+        bottom = ft.Container(log_tf, padding=10, height=180)
 
         page.add(
             ft.Column(
