@@ -445,6 +445,24 @@ def detect_pagination_param(html: bytes) -> str:
             return "page"
     return "page"
 
+def detect_total_count(html: bytes) -> int | None:
+    soup = BeautifulSoup(html, "html.parser")
+    num_el = soup.select_one(".cardlist-Result_Target_Num .num")
+    if num_el:
+        try:
+            return int(num_el.get_text(strip=True))
+        except ValueError:
+            pass
+
+    text = soup.get_text("\n", strip=True)
+    m = re.search(r"検索結果\s*(\d+)\s*件", text)
+    if m:
+        try:
+            return int(m.group(1))
+        except ValueError:
+            return None
+    return None
+
 
 def detect_max_page(html: bytes, page_param: str) -> int | None:
     soup = BeautifulSoup(html, "html.parser")
@@ -502,10 +520,10 @@ def process_list_page(expansion: str | None, page: int, html: bytes, args, sessi
                 f"[PROGRESS] exp={exp_label} page={page} ({idx}/{len(items)}) total={args._seen_total} rate={rate:.2f}/s",
                 True,
             )
-            if args._total_pages:
-                progress = (page - 1 + (idx / max(1, len(items)))) / args._total_pages
-                progress = min(1.0, max(0.0, progress))
-                eta = int(elapsed * (1 - progress) / progress) if progress > 0 else 0
+            if args._total_items:
+                total_seen = max(1, args._seen_total)
+                progress = min(1.0, max(0.0, total_seen / args._total_items))
+                eta = int((args._total_items - total_seen) / rate) if rate > 0 else 0
                 log(
                     f"[PROGRESS_PCT] stage=scrape exp={exp_label} pct={progress*100:.2f} eta={eta}",
                     True,
@@ -562,6 +580,10 @@ def scrape_expansion(conn: sqlite3.Connection, session: requests.Session, expans
     args._total_pages = total_pages
     if total_pages:
         log(f"[PAGES] exp={exp_label} total_pages={total_pages}", True)
+    total_items = detect_total_count(first_html)
+    args._total_items = total_items
+    if total_items:
+        log(f"[TOTAL] exp={exp_label} items={total_items}", True)
 
     for page in range(1, args.max_pages + 1):
         url = build_list_url(expansion, page, page_param)
