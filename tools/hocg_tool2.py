@@ -305,7 +305,7 @@ def _extract_field_by_label(text: str, label: str) -> str:
     return ""
 
 
-def normalize_raw_text(text: str) -> str:
+def normalize_raw_text(text: str, *, remove_private: bool = False) -> str:
     """Normalize raw page text for stable downstream parsing/UI.
 
     - Merge label/value pairs onto one line for: カードタイプ, レアリティ, 色, LIFE, HP
@@ -320,6 +320,7 @@ def normalize_raw_text(text: str) -> str:
     i = 0
 
     MERGE_LABELS = {"カードタイプ", "レアリティ", "色", "LIFE", "HP", "カードナンバー"}
+    REMOVE_LABELS = {"イラストレーター名", "カードナンバー"} if remove_private else set()
 
     # "다음 줄이 라벨이면 병합 금지"용 라벨 집합
     ALL_LABELS = set(MERGE_LABELS) | {
@@ -338,6 +339,12 @@ def normalize_raw_text(text: str) -> str:
     while i < len(lines):
         line = lines[i]
         label = _normalize_label(line)
+
+        if label in REMOVE_LABELS:
+            i += 1
+            if i < len(lines) and _normalize_label(lines[i]) not in ALL_LABELS:
+                i += 1
+            continue
 
         # merge label + next line value (next가 라벨이면 병합하지 않음)
         if label in MERGE_LABELS and i + 1 < len(lines):
@@ -389,17 +396,17 @@ def extract_detail_text(soup: BeautifulSoup) -> str:
 def parse_detail(detail_html: bytes, fallback_card_no: str, verbose: bool) -> Optional[dict]:
     soup = BeautifulSoup(detail_html, "html.parser")
 
-    raw = extract_detail_text(soup)
-    raw = normalize_raw_text(raw)
+    raw_full = extract_detail_text(soup)
+    raw = normalize_raw_text(raw_full)
 
     # 카드 번호
     card_no = ""
-    cn = _extract_field_by_label(raw, "カードナンバー")
+    cn = _extract_field_by_label(raw_full, "カードナンバー")
     m = CARDNO_RE.search(cn) if cn else None
     if m:
         card_no = m.group(0)
     else:
-        m2 = CARDNO_RE.search(raw)
+        m2 = CARDNO_RE.search(raw_full)
         if m2:
             card_no = m2.group(0)
 
@@ -409,7 +416,7 @@ def parse_detail(detail_html: bytes, fallback_card_no: str, verbose: bool) -> Op
         return None
 
     # 카드명(ja)
-    name = _extract_field_by_label(raw, "カード名")
+    name = _extract_field_by_label(raw_full, "カード名")
     if not name:
         title = (soup.title.get_text(" ", strip=True) if soup.title else "").strip()
         if title:
@@ -418,10 +425,10 @@ def parse_detail(detail_html: bytes, fallback_card_no: str, verbose: bool) -> Op
     if name and "CARDLIST" in name.upper():
         name = ""
 
-    rarity = _extract_field_by_label(raw, "レアリティ")
-    color = _extract_field_by_label(raw, "色")
-    card_type = _extract_field_by_label(raw, "カードタイプ")
-    product = _extract_field_by_label(raw, "収録商品")
+    rarity = _extract_field_by_label(raw_full, "レアリティ")
+    color = _extract_field_by_label(raw_full, "色")
+    card_type = _extract_field_by_label(raw_full, "カードタイプ")
+    product = _extract_field_by_label(raw_full, "収録商品")
 
     tags: List[str] = []
     for a in soup.select("a"):
@@ -445,7 +452,7 @@ def parse_detail(detail_html: bytes, fallback_card_no: str, verbose: bool) -> Op
         "color": color,
         "tags": tags,
         "image_url": image_url,
-        "raw_text": raw,
+        "raw_text": normalize_raw_text(raw_full, remove_private=True),
     }
 
 

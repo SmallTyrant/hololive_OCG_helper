@@ -1,8 +1,24 @@
 import sqlite3
 from app.constants import TAG_ALIAS
 from pathlib import Path
+from typing import Optional
+
+def ensure_db(path: str) -> bool:
+    p = Path(path)
+    if p.exists():
+        return False
+    p.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    try:
+        from tools.hocg_tool2 import init_db
+        init_db(conn)
+    finally:
+        conn.close()
+    return True
 
 def open_db(path):
+    if path:
+        ensure_db(path)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     return conn

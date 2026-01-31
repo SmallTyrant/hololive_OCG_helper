@@ -1,8 +1,8 @@
 # app/ui.py
 from __future__ import annotations
 
-import os
 import threading
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import flet as ft
@@ -13,9 +13,10 @@ from app.services.db import (
     load_card_detail,
     get_print_brief,
     db_exists,
+    ensure_db,
 )
 from app.services.pipeline import run_update_and_refine
-from app.services.images import local_image_path, download_image
+from app.services.images import local_image_path
 
 COLORS = ft.Colors if hasattr(ft, "Colors") else ft.colors
 
@@ -105,28 +106,20 @@ def launch_app(db_path: str):
             border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
         )
 
-        btn_img_dl = ft.ElevatedButton("현재 카드 이미지 다운로드")
-        btn_img_dl.disabled = True  # 카드 선택 후 활성화
-
         # --- Right: detail ---
         detail_tf = ft.TextField(
-            label="본문(raw_text)",
+            label="카드 본문",
             multiline=True,
             read_only=True,
             expand=True,
         )
 
-        # --- Bottom: log ---
-        log_tf = ft.TextField(label="로그", multiline=True, read_only=True, expand=True)
-
         # currently selected
         selected_print_id = {"id": None}
-        selected_image_url = {"url": ""}
         selected_card_number = {"no": ""}
 
         def append_log(s: str):
-            log_tf.value = (log_tf.value or "") + s + "\n"
-            page.update()
+            print(s, flush=True)
 
         def setup_window_icon():
             ico_path, png_path = icon_paths(project_root)
@@ -196,7 +189,6 @@ def launch_app(db_path: str):
             try:
                 conn = get_conn()
                 brief = get_print_brief(conn, pid) or {}
-                selected_image_url["url"] = (brief.get("image_url") or "").strip()
                 selected_card_number["no"] = (brief.get("card_number") or "").strip()
 
                 # 이미지 패널 갱신
@@ -212,12 +204,8 @@ def launch_app(db_path: str):
                 else:
                     detail_tf.value = card.get("raw_text", "") or "(본문 없음)"
 
-                # 이미지 다운로드 버튼 활성화 조건
-                btn_img_dl.disabled = not (selected_card_number["no"] and selected_image_url["url"])
-
             except Exception as ex:
                 detail_tf.value = f"[ERROR] 상세 로드 실패: {ex}"
-                btn_img_dl.disabled = True
                 clear_image()
 
             page.update()
@@ -257,38 +245,6 @@ def launch_app(db_path: str):
 
         tf_search.on_change = on_search_change
 
-        # --- image download for selected card ---
-        def do_download_current_image():
-            try:
-                btn_img_dl.disabled = True
-                page.update()
-
-                cn = selected_card_number["no"]
-                url = selected_image_url["url"]
-                if not cn or not url:
-                    append_log("[WARN] 카드/이미지 URL이 없습니다.")
-                    return
-
-                dest = local_image_path(project_root, cn)
-                append_log(f"[IMG] downloading: {cn} -> {dest.name}")
-                download_image(url, dest)
-                append_log("[IMG] done")
-
-                # 화면 갱신
-                set_image_for_card(cn)
-
-            except Exception as ex:
-                append_log(f"[IMG][ERROR] {ex}")
-            finally:
-                # 선택 상태에 따라 다시 활성화
-                btn_img_dl.disabled = not (selected_card_number["no"] and selected_image_url["url"])
-                page.update()
-
-        def on_img_dl_click(e):
-            threading.Thread(target=do_download_current_image, daemon=True).start()
-
-        btn_img_dl.on_click = on_img_dl_click
-
         # --- Update pipeline (background thread) ---
         def do_update():
             try:
@@ -298,19 +254,18 @@ def launch_app(db_path: str):
                 pb_stack.visible = True
                 btn_update.disabled = True
                 tf_search.disabled = True
-                btn_img_dl.disabled = True
                 page.update()
 
                 dbp = tf_db.value.strip()
                 append_log("[START] update + refine")
 
-                def format_eta(sec: int) -> str:
+                def format_eta_time(sec: int) -> str:
                     sec = max(0, int(sec))
-                    m, s = divmod(sec, 60)
-                    h, m = divmod(m, 60)
-                    if h > 0:
-                        return f"{h:02d}:{m:02d}:{s:02d}"
-                    return f"{m:02d}:{s:02d}"
+                    now = datetime.now()
+                    eta_time = now + timedelta(seconds=sec)
+                    if eta_time.date() != now.date():
+                        return eta_time.strftime("%m-%d %H:%M")
+                    return eta_time.strftime("%H:%M")
 
                 def handle_progress_line(line: str) -> bool:
                     if not line.startswith("[PROGRESS_PCT]"):
@@ -337,7 +292,7 @@ def launch_app(db_path: str):
                     eta = data.get("eta")
                     eta_txt = ""
                     if eta and eta.isdigit():
-                        eta_txt = f" ETA {format_eta(int(eta))}"
+                        eta_txt = f" 완료예정시각 {format_eta_time(int(eta))}"
 
                     stage_txt = f"{stage} " if stage else ""
                     pb_label.value = f"{stage_txt}{pct:.0f}%{eta_txt}"
@@ -367,7 +322,6 @@ def launch_app(db_path: str):
                 pb_stack.visible = False
                 btn_update.disabled = False
                 tf_search.disabled = False
-                btn_img_dl.disabled = not (selected_card_number["no"] and selected_image_url["url"])
                 page.update()
 
         def on_update_click(e):
@@ -377,7 +331,11 @@ def launch_app(db_path: str):
 
         # --- first-run: DB 없으면 안내 로그만 찍고 앱은 뜨게 ---
         if not db_exists(tf_db.value):
-            append_log("[INFO] DB 파일이 없습니다.")
+            created = ensure_db(tf_db.value)
+            if created:
+                append_log("[INFO] DB 파일이 없어 빈 DB를 생성했습니다.")
+            else:
+                append_log("[INFO] DB 파일이 없습니다.")
             append_log("[INFO] 상단 'DB 생성/업데이트+정제'를 누르면 DB를 생성(크롤링+정제)합니다.")
         else:
             # DB 있으면 즉시 연결
@@ -392,7 +350,7 @@ def launch_app(db_path: str):
 
         left = ft.Column(
             [
-                ft.Container(ft.Text("결과"), padding=ft.padding.only(left=10, top=4)),
+                ft.Container(ft.Text("목록"), padding=ft.padding.only(left=10, top=4)),
                 ft.Container(lv, expand=True, padding=10),
             ],
             expand=True,
@@ -403,7 +361,6 @@ def launch_app(db_path: str):
             [
                 ft.Container(ft.Text("이미지"), padding=ft.padding.only(left=10, top=4)),
                 img_container,
-                ft.Container(btn_img_dl, padding=10),
             ],
             expand=True,
             spacing=0,
@@ -421,14 +378,12 @@ def launch_app(db_path: str):
             [
                 ft.Container(left, expand=3),
                 ft.VerticalDivider(width=1),
-                ft.Container(middle, expand=4),
+                ft.Container(middle, expand=6),
                 ft.VerticalDivider(width=1),
-                ft.Container(right, expand=5),
+                ft.Container(right, expand=4),
             ],
             expand=True,
         )
-
-        bottom = ft.Container(log_tf, padding=10, height=200)
 
         page.add(
             ft.Column(
@@ -437,8 +392,6 @@ def launch_app(db_path: str):
                     search_row,
                     ft.Divider(height=1),
                     body,
-                    ft.Divider(height=1),
-                    bottom,
                 ],
                 expand=True,
                 spacing=8,

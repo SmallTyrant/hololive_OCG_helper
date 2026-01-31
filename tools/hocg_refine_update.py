@@ -40,6 +40,7 @@ def normalize_raw_text(text: str) -> str:
         return line.replace("：", "").replace(":", "").strip()
 
     MERGE_LABELS = {"カードタイプ", "レアリティ", "色", "LIFE", "HP", "カードナンバー"}
+    REMOVE_LABELS = {"イラストレーター名", "カードナンバー"}
     ALL_LABELS = set(MERGE_LABELS) | {
         "タグ", "推しスキル", "SP推しスキル", "Bloomレベル",
         "アーツ", "バトンタッチ", "エクストラ",
@@ -87,6 +88,12 @@ def normalize_raw_text(text: str) -> str:
     while i < len(cleaned):
         line = cleaned[i]
         label = _normalize_label(line)
+
+        if label in REMOVE_LABELS:
+            i += 1
+            if i < len(cleaned) and _normalize_label(cleaned[i]) not in ALL_LABELS:
+                i += 1
+            continue
 
         # merge label + next line value (next가 라벨이면 병합하지 않음)
         if label in MERGE_LABELS and i + 1 < len(cleaned):
