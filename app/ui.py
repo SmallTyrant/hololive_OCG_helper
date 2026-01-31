@@ -115,6 +115,16 @@ def launch_app(db_path: str):
 
         # --- Right: detail ---
         detail_lv = ft.ListView(expand=True, spacing=4, padding=0, auto_scroll=False)
+        color_order = ["赤", "青", "緑", "黄", "紫", "白", "黒"]
+        color_map = {
+            "赤": "#E53935",
+            "青": "#1E88E5",
+            "緑": "#43A047",
+            "黄": "#FDD835",
+            "紫": "#8E24AA",
+            "白": "#FFFFFF",
+            "黒": "#212121",
+        }
 
         # currently selected
         selected_print_id = {"id": None}
@@ -209,11 +219,45 @@ def launch_app(db_path: str):
 
             threading.Thread(target=worker, daemon=True).start()
 
+        def build_color_dots(text: str):
+            dots = []
+            for key in color_order:
+                if key in text:
+                    border = ft.border.all(1, COLORS.GREY_500) if key == "白" else None
+                    dots.append(
+                        ft.Container(
+                            width=10,
+                            height=10,
+                            bgcolor=color_map.get(key, COLORS.GREY_500),
+                            border_radius=10,
+                            border=border,
+                        )
+                    )
+            return dots
+
         def build_detail_line(line: str):
             bold_labels = ("カードタイプ", "タグ", "レアリティ")
+            if line in bold_labels:
+                return ft.Container(
+                    content=ft.Text(line, weight=ft.FontWeight.BOLD),
+                    padding=ft.padding.only(top=6, bottom=2),
+                )
+
+            if line.startswith("色 "):
+                rest = line[2:].strip()
+                dots = build_color_dots(rest)
+                if dots:
+                    return ft.Row(
+                        [
+                            ft.Text("色", weight=ft.FontWeight.BOLD),
+                            *dots,
+                            ft.Text(rest),
+                        ],
+                        spacing=6,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    )
+
             for label in bold_labels:
-                if line == label:
-                    return ft.Text(line, weight=ft.FontWeight.BOLD)
                 if line.startswith(label + " "):
                     rest = line[len(label):]
                     return ft.Text(
