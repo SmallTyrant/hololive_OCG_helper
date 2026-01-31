@@ -16,7 +16,7 @@ from app.services.db import (
     ensure_db,
 )
 from app.services.pipeline import run_update_and_refine
-from app.services.images import local_image_path, download_image
+from app.services.images import local_image_path, download_image, resolve_url
 
 COLORS = ft.Colors if hasattr(ft, "Colors") else ft.colors
 
@@ -82,11 +82,18 @@ def launch_app(db_path: str):
         lv = ft.ListView(expand=True, spacing=2, padding=0)
 
         # --- Image area (중요: ft.Image()를 빈 생성자로 만들지 않음) ---
-        def build_image_widget(image_path: Path | None):
+        def build_image_widget(image_path: Path | None, image_url: str | None = None):
             # 이미지 파일이 존재할 때만 ft.Image(src=...) 생성
             if image_path and image_path.exists():
                 return ft.Image(
                     src=str(image_path),
+                    fit=IMAGE_FIT_CONTAIN,
+                    expand=True,
+                )
+            # 로컬이 없으면 URL로 표시
+            if image_url:
+                return ft.Image(
+                    src=image_url,
                     fit=IMAGE_FIT_CONTAIN,
                     expand=True,
                 )
@@ -117,6 +124,7 @@ def launch_app(db_path: str):
         # currently selected
         selected_print_id = {"id": None}
         selected_card_number = {"no": ""}
+        downloading = set()
 
         def append_log(s: str):
             print(s, flush=True)
@@ -174,14 +182,37 @@ def launch_app(db_path: str):
             thread_local.epoch = -1
             thread_local.path = None
 
-        def set_image_for_card(card_number: str):
+        def set_image_for_card(card_number: str, image_url: str | None = None):
             p = local_image_path(project_root, card_number)
-            img_container.content = build_image_widget(p if p.exists() else None)
+            img_container.content = build_image_widget(p if p.exists() else None, image_url)
             page.update()
 
         def clear_image():
             img_container.content = build_image_widget(None)
             page.update()
+
+        def ensure_image_download(card_number: str, image_url: str):
+            if not card_number or not image_url:
+                return
+            dest = local_image_path(project_root, card_number)
+            if dest.exists():
+                return
+            if card_number in downloading:
+                return
+            downloading.add(card_number)
+
+            def worker():
+                try:
+                    append_log(f"[IMG] downloading: {card_number} -> {dest.name}")
+                    download_image(image_url, dest)
+                    append_log("[IMG] done")
+                    set_image_for_card(card_number, image_url)
+                except Exception as ex:
+                    append_log(f"[IMG][ERROR] {ex}")
+                finally:
+                    downloading.discard(card_number)
+
+            threading.Thread(target=worker, daemon=True).start()
 
         def show_detail(pid: int):
             selected_print_id["id"] = pid
@@ -190,11 +221,11 @@ def launch_app(db_path: str):
                 conn = get_conn()
                 brief = get_print_brief(conn, pid) or {}
                 selected_card_number["no"] = (brief.get("card_number") or "").strip()
-                image_url = (brief.get("image_url") or "").strip()
+                image_url = resolve_url((brief.get("image_url") or "").strip())
 
                 # 이미지 패널 갱신
                 if selected_card_number["no"]:
-                    set_image_for_card(selected_card_number["no"])
+                    set_image_for_card(selected_card_number["no"], image_url)
                 else:
                     clear_image()
 
@@ -403,20 +434,3 @@ def launch_app(db_path: str):
         )
 
     ft.app(target=main)
-        def ensure_image_download(card_number: str, image_url: str):
-            if not card_number or not image_url:
-                return
-            dest = local_image_path(project_root, card_number)
-            if dest.exists():
-                return
-
-            def worker():
-                try:
-                    append_log(f"[IMG] downloading: {card_number} -> {dest.name}")
-                    download_image(image_url, dest)
-                    append_log("[IMG] done")
-                    set_image_for_card(card_number)
-                except Exception as ex:
-                    append_log(f"[IMG][ERROR] {ex}")
-
-            threading.Thread(target=worker, daemon=True).start()
