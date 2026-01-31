@@ -1,12 +1,19 @@
 # app/ui.py
 from __future__ import annotations
 
+import os
 import threading
 from pathlib import Path
 
 import flet as ft
 
-from app.services.db import open_db, query_suggest, load_card_detail, get_print_brief, db_exists
+from app.services.db import (
+    open_db,
+    query_suggest,
+    load_card_detail,
+    get_print_brief,
+    db_exists,
+)
 from app.services.pipeline import run_update_and_refine
 from app.services.images import local_image_path, download_image
 
@@ -32,12 +39,28 @@ def launch_app(db_path: str):
         btn_update = ft.ElevatedButton("DB 생성/업데이트+정제")  # DB 없을 때도 이 버튼으로 생성
         pb = ft.ProgressBar(visible=False, width=180)
 
-        # --- Left: results + image ---
+        # --- Left: results ---
         lv = ft.ListView(expand=True, spacing=2, padding=0)
 
-        img = ft.Image()  # src를 동적으로 넣음
+        # --- Image area (중요: ft.Image()를 빈 생성자로 만들지 않음) ---
+        def build_image_widget(image_path: Path | None):
+            # 이미지 파일이 존재할 때만 ft.Image(src=...) 생성
+            if image_path and image_path.exists():
+                return ft.Image(
+                    src=str(image_path),
+                    fit=ft.ImageFit.CONTAIN,
+                    expand=True,
+                )
+            # 이미지 없을 때 플레이스홀더
+            return ft.Container(
+                content=ft.Text("이미지 없음", color=ft.colors.GREY_400),
+                alignment=ft.alignment.center,
+                expand=True,
+                border=ft.border.all(1, ft.colors.with_opacity(0.15, ft.colors.WHITE)),
+            )
+
         img_container = ft.Container(
-            content=img,
+            content=build_image_widget(None),
             expand=True,
             padding=10,
             bgcolor=None,
@@ -74,11 +97,11 @@ def launch_app(db_path: str):
 
         def set_image_for_card(card_number: str):
             p = local_image_path(project_root, card_number)
-            if p.exists():
-                # flet은 로컬 경로를 src에 넣을 수 있음(데스크톱)
-                img.src = str(p)
-            else:
-                img.src = ""  # 없음
+            img_container.content = build_image_widget(p if p.exists() else None)
+            page.update()
+
+        def clear_image():
+            img_container.content = build_image_widget(None)
             page.update()
 
         def show_detail(pid: int):
@@ -93,6 +116,8 @@ def launch_app(db_path: str):
                 # 이미지 패널 갱신
                 if selected_card_number["no"]:
                     set_image_for_card(selected_card_number["no"])
+                else:
+                    clear_image()
 
                 # 본문 갱신
                 card = load_card_detail(conn_ui, pid)
@@ -103,9 +128,11 @@ def launch_app(db_path: str):
 
                 # 이미지 다운로드 버튼 활성화 조건
                 btn_img_dl.disabled = not (selected_card_number["no"] and selected_image_url["url"])
+
             except Exception as ex:
                 detail_tf.value = f"[ERROR] 상세 로드 실패: {ex}"
                 btn_img_dl.disabled = True
+                clear_image()
 
             page.update()
 
@@ -213,7 +240,6 @@ def launch_app(db_path: str):
                 pb.visible = False
                 btn_update.disabled = False
                 tf_search.disabled = False
-                # 이미지 버튼은 선택 상태에 따라
                 btn_img_dl.disabled = not (selected_card_number["no"] and selected_image_url["url"])
                 page.update()
 
