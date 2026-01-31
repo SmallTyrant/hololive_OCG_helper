@@ -1,0 +1,8 @@
+[tool.flet]
+product = "hOCG_H"
+org = "com.smalltyrant"
+bundle_id = "com.smalltyrant.hocghelper"
+
+[tool.flet.ios]
+# iOS release testing build (for AltStore re-signing)
+export_method = "release-testing"
