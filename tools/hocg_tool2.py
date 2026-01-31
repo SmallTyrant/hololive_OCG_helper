@@ -20,6 +20,8 @@ import re
 import sqlite3
 import sys
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional, Set, Tuple
@@ -49,6 +51,17 @@ def sha256_text(s: str) -> str:
 def log(msg: str, verbose: bool) -> None:
     if verbose:
         print(msg, flush=True)
+
+
+_thread_local = threading.local()
+
+
+def _get_thread_session() -> requests.Session:
+    sess = getattr(_thread_local, "session", None)
+    if sess is None:
+        sess = requests.Session()
+        _thread_local.session = sess
+    return sess
 
 
 def init_db(conn: sqlite3.Connection) -> None:
@@ -501,69 +514,138 @@ def fetch(session: requests.Session, url: str, verbose: bool) -> bytes:
     return r.content
 
 
+def _fetch_detail_worker(detail_url: str, card_number: str, card_id: str, delay: float, verbose: bool):
+    if delay:
+        time.sleep(delay)
+    sess = _get_thread_session()
+    detail_html = fetch(sess, detail_url, verbose)
+    detail = parse_detail(detail_html, fallback_card_no=card_number, verbose=verbose)
+    return {
+        "detail": detail,
+        "detail_url": detail_url,
+        "card_number": card_number,
+        "card_id": card_id,
+    }
+
+
 def process_list_page(expansion: str | None, page: int, html: bytes, args, session: requests.Session, conn: sqlite3.Connection) -> Tuple[int, int]:
     items = parse_list_page(html)
     exp_label = expansion if expansion else "ALL"
     log(f"[PAGE] exp={exp_label} page={page} items={len(items)} seen_total={args._seen_total}", True)
 
     new_items = 0
-    for idx, it in enumerate(items, 1):
-        if it.card_id in args._seen_ids:
-            continue
-        args._seen_ids.add(it.card_id)
-        new_items += 1
-
-        if idx == 1 or idx % 20 == 0 or idx == len(items):
-            elapsed = max(1e-6, time.time() - args._t0)
-            rate = args._seen_total / elapsed
+    def _log_progress(idx: int, total_in_page: int):
+        elapsed = max(1e-6, time.time() - args._t0)
+        rate = args._seen_total / elapsed
+        log(
+            f"[PROGRESS] exp={exp_label} page={page} ({idx}/{total_in_page}) total={args._seen_total} rate={rate:.2f}/s",
+            True,
+        )
+        if args._total_items:
+            total_seen = max(1, args._seen_total)
+            progress = min(1.0, max(0.0, total_seen / args._total_items))
+            eta = int((args._total_items - total_seen) / rate) if rate > 0 else 0
             log(
-                f"[PROGRESS] exp={exp_label} page={page} ({idx}/{len(items)}) total={args._seen_total} rate={rate:.2f}/s",
+                f"[PROGRESS_PCT] stage=scrape exp={exp_label} pct={progress*100:.2f} eta={eta}",
                 True,
             )
-            if args._total_items:
-                total_seen = max(1, args._seen_total)
-                progress = min(1.0, max(0.0, total_seen / args._total_items))
-                eta = int((args._total_items - total_seen) / rate) if rate > 0 else 0
-                log(
-                    f"[PROGRESS_PCT] stage=scrape exp={exp_label} pct={progress*100:.2f} eta={eta}",
-                    True,
-                )
 
-        detail_url = f"{BASE}/cardlist/?id={it.card_id}&view=text"
-        time.sleep(args.delay)
-
-        try:
-            detail_html = fetch(session, detail_url, args.verbose)
-        except Exception as e:
-            log(f"[ERROR] fetch detail failed: exp={exp_label} {it.card_number} id={it.card_id} err={e}", True)
-            continue
-
-        detail = parse_detail(detail_html, fallback_card_no=it.card_number, verbose=args.verbose)
+    def _handle_detail(detail, it_card_number: str, it_card_id: str, detail_url: str):
+        nonlocal new_items
         if not detail:
-            log(f"[SKIP] exp={exp_label} id={it.card_id} (no valid card detail)", True)
-            continue
+            log(f"[SKIP] exp={exp_label} id={it_card_id} (no valid card detail)", True)
+            return 0
 
-        detail["detail_id"] = int(it.card_id)
+        detail["detail_id"] = int(it_card_id)
         detail["detail_url"] = detail_url
         if expansion:
             detail["set_code"] = expansion
         else:
-            card_no = (detail.get("card_number") or it.card_number or "").strip()
+            card_no = (detail.get("card_number") or it_card_number or "").strip()
             detail["set_code"] = card_no.split("-", 1)[0] if "-" in card_no else ""
 
-        print_id = upsert_print(conn, detail.get("card_number") or it.card_number, detail)
+        print_id = upsert_print(conn, detail.get("card_number") or it_card_number, detail)
         upsert_text_ja(conn, print_id, detail.get("name") or "", detail.get("raw_text") or "")
         replace_print_tags(conn, print_id, detail.get("tags") or [])
 
-        args._seen_total += 1
-        if args.max_cards and args._seen_total >= args.max_cards:
-            return new_items, 1  # stop signal
+        return 1
 
-        if args._seen_total % 50 == 0:
-            elapsed = max(1e-6, time.time() - args._t0)
-            rate = args._seen_total / elapsed
-            log(f"[PROGRESS] total={args._seen_total} rate={rate:.2f}/s", True)
-            conn.commit()
+    if args.workers > 1:
+        futures = []
+        with ThreadPoolExecutor(max_workers=args.workers) as ex:
+            for idx, it in enumerate(items, 1):
+                if it.card_id in args._seen_ids:
+                    continue
+                args._seen_ids.add(it.card_id)
+                new_items += 1
+
+                if idx == 1 or idx % 20 == 0 or idx == len(items):
+                    _log_progress(idx, len(items))
+
+                detail_url = f"{BASE}/cardlist/?id={it.card_id}&view=text"
+                futures.append(
+                    ex.submit(
+                        _fetch_detail_worker,
+                        detail_url,
+                        it.card_number,
+                        it.card_id,
+                        args.delay,
+                        args.verbose,
+                    )
+                )
+
+            for f in as_completed(futures):
+                try:
+                    result = f.result()
+                except Exception as e:
+                    log(f"[ERROR] fetch detail failed: exp={exp_label} err={e}", True)
+                    continue
+
+                detail = result["detail"]
+                detail_url = result["detail_url"]
+                card_number = result["card_number"]
+                card_id = result["card_id"]
+                added = _handle_detail(detail, card_number, card_id, detail_url)
+                if added:
+                    args._seen_total += 1
+                    if args.max_cards and args._seen_total >= args.max_cards:
+                        return new_items, 1
+                    if args._seen_total % 50 == 0:
+                        elapsed = max(1e-6, time.time() - args._t0)
+                        rate = args._seen_total / elapsed
+                        log(f"[PROGRESS] total={args._seen_total} rate={rate:.2f}/s", True)
+                        conn.commit()
+    else:
+        for idx, it in enumerate(items, 1):
+            if it.card_id in args._seen_ids:
+                continue
+            args._seen_ids.add(it.card_id)
+            new_items += 1
+
+            if idx == 1 or idx % 20 == 0 or idx == len(items):
+                _log_progress(idx, len(items))
+
+            detail_url = f"{BASE}/cardlist/?id={it.card_id}&view=text"
+            time.sleep(args.delay)
+
+            try:
+                detail_html = fetch(session, detail_url, args.verbose)
+            except Exception as e:
+                log(f"[ERROR] fetch detail failed: exp={exp_label} {it.card_number} id={it.card_id} err={e}", True)
+                continue
+
+            detail = parse_detail(detail_html, fallback_card_no=it.card_number, verbose=args.verbose)
+            added = _handle_detail(detail, it.card_number, it.card_id, detail_url)
+            if added:
+                args._seen_total += 1
+                if args.max_cards and args._seen_total >= args.max_cards:
+                    return new_items, 1
+
+                if args._seen_total % 50 == 0:
+                    elapsed = max(1e-6, time.time() - args._t0)
+                    rate = args._seen_total / elapsed
+                    log(f"[PROGRESS] total={args._seen_total} rate={rate:.2f}/s", True)
+                    conn.commit()
 
     conn.commit()
     return new_items, 0
@@ -653,6 +735,7 @@ def main() -> int:
     s.set_defaults(func=cmd_scrape)
     s.add_argument("--expansion", default="all", help="Expansion code (or 'all' if your build supports it)")
     s.add_argument("--delay", type=float, default=0.6, help="Delay seconds between detail fetches")
+    s.add_argument("--workers", type=int, default=1, help="Parallel fetch workers (default: 1)")
     s.add_argument("--max-pages", type=int, default=999)
     s.add_argument("--max-cards", type=int, default=0)
     s.add_argument("--verbose", action="store_true")
