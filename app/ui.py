@@ -67,6 +67,8 @@ def launch_app(db_path: str):
         tf_search = ft.TextField(label="카드번호 / 이름 / 태그 검색", expand=True)
 
         btn_update = ft.ElevatedButton("DB 생성/업데이트+정제")  # DB 없을 때도 이 버튼으로 생성
+        tf_delay = ft.TextField(label="Delay(s)", value="0.2", width=110)
+        tf_workers = ft.TextField(label="Workers", value="6", width=110)
         pb = ft.ProgressBar(visible=False, width=220, value=0)
         pb_label = ft.Text("", size=12, text_align=ft.TextAlign.CENTER)
         pb_stack = ft.Stack(
@@ -448,8 +450,25 @@ def launch_app(db_path: str):
                     page.update()
                     return True
 
+                def parse_delay() -> float:
+                    try:
+                        d = float((tf_delay.value or "").strip())
+                    except ValueError:
+                        return 0.2
+                    return max(0.0, min(5.0, d))
+
+                def parse_workers() -> int:
+                    try:
+                        w = int((tf_workers.value or "").strip())
+                    except ValueError:
+                        return 6
+                    return max(1, min(32, w))
+
+                delay = parse_delay()
+                workers = parse_workers()
+
                 # subprocess로 크롤링/정제
-                for line in run_update_and_refine(dbp, delay=0.6):
+                for line in run_update_and_refine(dbp, delay=delay, workers=workers):
                     if handle_progress_line(line):
                         continue
                     append_log(line)
@@ -494,7 +513,7 @@ def launch_app(db_path: str):
                 append_log(f"[ERROR] DB open failed: {ex}")
 
         # --- Layout ---
-        top = ft.Row([tf_db, btn_update, pb_stack], vertical_alignment=ft.CrossAxisAlignment.CENTER)
+        top = ft.Row([tf_db, btn_update, tf_delay, tf_workers, pb_stack], vertical_alignment=ft.CrossAxisAlignment.CENTER)
         search_row = ft.Row([tf_search], vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
         left = ft.Column(

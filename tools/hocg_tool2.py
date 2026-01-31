@@ -533,20 +533,55 @@ def build_list_url(expansion: str | None, page: int, page_param: str) -> str:
     return f"{base}&{page_param}={page}"
 
 
-def fetch(session: requests.Session, url: str, verbose: bool) -> bytes:
+def fetch(
+    session: requests.Session,
+    url: str,
+    verbose: bool,
+    *,
+    connect_timeout: float,
+    read_timeout: float,
+    retries: int,
+) -> bytes:
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
-    r = session.get(url, headers=headers, timeout=30)
-    r.raise_for_status()
-    return r.content
+    last_err = None
+    for attempt in range(retries + 1):
+        try:
+            r = session.get(url, headers=headers, timeout=(connect_timeout, read_timeout))
+            r.raise_for_status()
+            return r.content
+        except Exception as ex:
+            last_err = ex
+            if attempt < retries:
+                time.sleep(0.5 * (attempt + 1))
+                continue
+            raise last_err
 
 
-def _fetch_detail_worker(detail_url: str, card_number: str, card_id: str, delay: float, verbose: bool):
+def _fetch_detail_worker(
+    detail_url: str,
+    card_number: str,
+    card_id: str,
+    delay: float,
+    verbose: bool,
+    connect_timeout: float,
+    read_timeout: float,
+    retries: int,
+):
     if delay:
         time.sleep(delay)
     sess = _get_thread_session()
-    detail_html = fetch(sess, detail_url, verbose)
+    if verbose:
+        print(f"[FETCH] detail id={card_id} card={card_number}", flush=True)
+    detail_html = fetch(
+        sess,
+        detail_url,
+        verbose,
+        connect_timeout=connect_timeout,
+        read_timeout=read_timeout,
+        retries=retries,
+    )
     detail = parse_detail(detail_html, fallback_card_no=card_number, verbose=verbose)
     return {
         "detail": detail,
@@ -619,6 +654,9 @@ def process_list_page(expansion: str | None, page: int, html: bytes, args, sessi
                         it.card_id,
                         args.delay,
                         args.verbose,
+                        args.connect_timeout,
+                        args.read_timeout,
+                        args.retries,
                     )
                 )
 
@@ -657,7 +695,14 @@ def process_list_page(expansion: str | None, page: int, html: bytes, args, sessi
             time.sleep(args.delay)
 
             try:
-                detail_html = fetch(session, detail_url, args.verbose)
+                detail_html = fetch(
+                    session,
+                    detail_url,
+                    args.verbose,
+                    connect_timeout=args.connect_timeout,
+                    read_timeout=args.read_timeout,
+                    retries=args.retries,
+                )
             except Exception as e:
                 log(f"[ERROR] fetch detail failed: exp={exp_label} {it.card_number} id={it.card_id} err={e}", True)
                 continue
@@ -681,7 +726,14 @@ def process_list_page(expansion: str | None, page: int, html: bytes, args, sessi
 
 def scrape_expansion(conn: sqlite3.Connection, session: requests.Session, expansion: str | None, args) -> int:
     first_url = build_list_url(expansion, 1, "page")
-    first_html = fetch(session, first_url, args.verbose)
+    first_html = fetch(
+        session,
+        first_url,
+        args.verbose,
+        connect_timeout=args.connect_timeout,
+        read_timeout=args.read_timeout,
+        retries=args.retries,
+    )
 
     page_param = detect_pagination_param(first_html)
     exp_label = expansion if expansion else "ALL"
@@ -697,7 +749,14 @@ def scrape_expansion(conn: sqlite3.Connection, session: requests.Session, expans
 
     for page in range(1, args.max_pages + 1):
         url = build_list_url(expansion, page, page_param)
-        html = first_html if page == 1 else fetch(session, url, args.verbose)
+        html = first_html if page == 1 else fetch(
+            session,
+            url,
+            args.verbose,
+            connect_timeout=args.connect_timeout,
+            read_timeout=args.read_timeout,
+            retries=args.retries,
+        )
         new_items, stop = process_list_page(expansion, page, html, args, session, conn)
         if stop:
             return 1
@@ -719,7 +778,18 @@ def cmd_scrape(args) -> int:
     session = requests.Session()
 
     if args.expansion == "all":
-        exps = sorted(parse_expansion_codes(fetch(session, f"{CARDSEARCH_BASE}?view=text", args.verbose)))
+        exps = sorted(
+            parse_expansion_codes(
+                fetch(
+                    session,
+                    f"{CARDSEARCH_BASE}?view=text",
+                    args.verbose,
+                    connect_timeout=args.connect_timeout,
+                    read_timeout=args.read_timeout,
+                    retries=args.retries,
+                )
+            )
+        )
         if exps:
             log(f"[INFO] expansions={len(exps)}", True)
             for exp in exps:
@@ -743,7 +813,14 @@ def cmd_scrape(args) -> int:
 
 def cmd_list_exps(args) -> int:
     session = requests.Session()
-    html = fetch(session, f"{CARDSEARCH_BASE}?view=text", args.verbose)
+    html = fetch(
+        session,
+        f"{CARDSEARCH_BASE}?view=text",
+        args.verbose,
+        connect_timeout=args.connect_timeout,
+        read_timeout=args.read_timeout,
+        retries=args.retries,
+    )
     exps = sorted(parse_expansion_codes(html))
     for e in exps:
         print(e)
@@ -758,6 +835,9 @@ def main() -> int:
     p = sub.add_parser("list-exps", help="List expansion codes")
     p.set_defaults(func=cmd_list_exps)
     p.add_argument("--verbose", action="store_true")
+    p.add_argument("--connect-timeout", type=float, default=5.0, help="Connect timeout seconds")
+    p.add_argument("--read-timeout", type=float, default=20.0, help="Read timeout seconds")
+    p.add_argument("--retries", type=int, default=1, help="Retry count for network errors")
 
     s = sub.add_parser("scrape", help="Scrape one expansion")
     s.set_defaults(func=cmd_scrape)
@@ -766,6 +846,9 @@ def main() -> int:
     s.add_argument("--workers", type=int, default=1, help="Parallel fetch workers (default: 1)")
     s.add_argument("--max-pages", type=int, default=999)
     s.add_argument("--max-cards", type=int, default=0)
+    s.add_argument("--connect-timeout", type=float, default=5.0, help="Connect timeout seconds")
+    s.add_argument("--read-timeout", type=float, default=20.0, help="Read timeout seconds")
+    s.add_argument("--retries", type=int, default=1, help="Retry count for network errors")
     s.add_argument("--verbose", action="store_true")
 
     args = ap.parse_args()

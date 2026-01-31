@@ -6,7 +6,7 @@ from pathlib import Path
 def _py():
     return sys.executable
 
-def run_update_and_refine(db_path: str, delay: float = 0.6):
+def run_update_and_refine(db_path: str, delay: float = 0.6, workers: int = 1):
     """
     tools/hocg_tool2.py scrape -> tools/hocg_refine_update.py
     stdout 라인 단위로 yield
@@ -21,7 +21,17 @@ def run_update_and_refine(db_path: str, delay: float = 0.6):
         raise FileNotFoundError(f"missing: {tool_refine}")
 
     # 1) scrape
-    cmd1 = [_py(), str(tool_scrape), "--db", db_path, "scrape", "--delay", str(delay)]
+    cmd1 = [
+        _py(),
+        str(tool_scrape),
+        "--db",
+        db_path,
+        "scrape",
+        "--delay",
+        str(delay),
+        "--workers",
+        str(workers),
+    ]
     p1 = subprocess.Popen(cmd1, cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8")
     for line in p1.stdout:
         yield line.rstrip("\n")
