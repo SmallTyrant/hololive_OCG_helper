@@ -67,19 +67,7 @@ def launch_app(db_path: str):
         tf_search = ft.TextField(label="카드번호 / 이름 / 태그 검색", expand=True)
 
         btn_update = ft.ElevatedButton("DB 생성/업데이트+정제")  # DB 없을 때도 이 버튼으로 생성
-        tf_delay = ft.TextField(label="Delay(s)", value="0.1", width=110)
-        tf_workers = ft.TextField(label="Workers", value="8", width=110)
-        pb = ft.ProgressBar(visible=False, width=220, value=0)
-        pb_label = ft.Text("", size=12, text_align=ft.TextAlign.CENTER)
-        pb_stack = ft.Stack(
-            [
-                pb,
-                ft.Container(content=pb_label, alignment=ALIGN_CENTER, expand=True),
-            ],
-            width=220,
-            height=16,
-        )
-        pb_stack.visible = False
+        # Progress bar removed (user requested no ETA/loader in UI)
 
         # --- Left: results ---
         lv = ft.ListView(expand=True, spacing=2, padding=0)
@@ -118,17 +106,6 @@ def launch_app(db_path: str):
 
         # --- Right: detail ---
         detail_lv = ft.ListView(expand=True, spacing=4, padding=0, auto_scroll=False)
-        color_order = ["赤", "青", "緑", "黄", "紫", "白", "黒"]
-        color_map = {
-            "赤": "#E53935",
-            "青": "#1E88E5",
-            "緑": "#43A047",
-            "黄": "#FDD835",
-            "紫": "#8E24AA",
-            "白": "#FFFFFF",
-            "黒": "#212121",
-        }
-
         # currently selected
         selected_print_id = {"id": None}
         selected_card_number = {"no": ""}
@@ -231,42 +208,12 @@ def launch_app(db_path: str):
 
             threading.Thread(target=worker, daemon=True).start()
 
-        def build_color_dots(text: str):
-            dots = []
-            for key in color_order:
-                if key in text:
-                    border = ft.border.all(1, COLORS.GREY_500) if key == "白" else None
-                    dots.append(
-                        ft.Container(
-                            width=10,
-                            height=10,
-                            bgcolor=color_map.get(key, COLORS.GREY_500),
-                            border_radius=10,
-                            border=border,
-                        )
-                    )
-            return dots
-
         def build_section_chip(text: str):
             return ft.Container(
                 content=ft.Text(text, weight=ft.FontWeight.BOLD, size=12),
                 bgcolor=with_opacity(0.18, COLORS.BLUE_GREY_700),
                 padding=ft.padding.symmetric(horizontal=8, vertical=3),
                 border_radius=12,
-            )
-
-        def build_color_row(rest: str):
-            dots = build_color_dots(rest)
-            if not dots:
-                return None
-            return ft.Row(
-                [
-                    build_section_chip("色"),
-                    *dots,
-                    ft.Text(rest),
-                ],
-                spacing=6,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
             )
 
         def build_detail_line(line: str):
@@ -277,30 +224,18 @@ def launch_app(db_path: str):
                 "推しスキル",
                 "SP推しスキル",
                 "アーツ",
-                "バトンタッチ",
                 "エクストラ",
                 "Bloomレベル",
                 "キーワード",
-                "色",
                 "LIFE",
                 "HP",
             )
             if line in section_labels:
                 return build_section_chip(line)
 
-            if line.startswith("色 "):
-                rest = line[2:].strip()
-                row = build_color_row(rest)
-                if row:
-                    return row
-
             for label in section_labels:
                 if line.startswith(label + " "):
                     rest = line[len(label):]
-                    if label == "色":
-                        row = build_color_row(rest.strip())
-                        if row:
-                            return row
                     return ft.Text(
                         spans=[
                             ft.TextSpan(label, style=ft.TextStyle(weight=ft.FontWeight.BOLD)),
@@ -318,15 +253,17 @@ def launch_app(db_path: str):
                 i = 0
                 while i < len(lines):
                     line = lines[i]
-                    if line == "色" and i + 1 < len(lines):
-                        next_line = lines[i + 1]
-                        row = build_color_row(next_line)
-                        if row:
-                            detail_lv.controls.append(row)
-                            i += 2
-                            continue
+                    if line == "色":
+                        i += 1
+                        continue
+                    if line.startswith("色 "):
+                        i += 1
+                        continue
                     line = line.strip()
                     if not line:
+                        i += 1
+                        continue
+                    if line == "バトンタッチ" or line.startswith("バトンタッチ "):
                         i += 1
                         continue
                     detail_lv.controls.append(build_detail_line(line))
@@ -399,10 +336,6 @@ def launch_app(db_path: str):
         # --- Update pipeline (background thread) ---
         def do_update():
             try:
-                pb.visible = True
-                pb.value = 0
-                pb_label.value = ""
-                pb_stack.visible = True
                 btn_update.disabled = True
                 tf_search.disabled = True
                 page.update()
@@ -410,67 +343,8 @@ def launch_app(db_path: str):
                 dbp = tf_db.value.strip()
                 append_log("[START] update + refine")
 
-                def format_eta_time(sec: int) -> str:
-                    sec = max(0, int(sec))
-                    now = datetime.now()
-                    eta_time = now + timedelta(seconds=sec)
-                    if eta_time.date() != now.date():
-                        return eta_time.strftime("%m-%d %H:%M")
-                    return eta_time.strftime("%H:%M")
-
-                def handle_progress_line(line: str) -> bool:
-                    if not line.startswith("[PROGRESS_PCT]"):
-                        return False
-                    parts = line.replace("[PROGRESS_PCT]", "").strip().split()
-                    data = {}
-                    for p in parts:
-                        if "=" in p:
-                            k, v = p.split("=", 1)
-                            data[k.strip()] = v.strip()
-
-                    pct_str = data.get("pct")
-                    if not pct_str:
-                        return True
-                    try:
-                        pct = float(pct_str)
-                    except ValueError:
-                        return True
-
-                    pct = max(0.0, min(100.0, pct))
-                    pb.value = pct / 100.0
-
-                    stage = data.get("stage", "")
-                    eta = data.get("eta")
-                    eta_txt = ""
-                    if eta and eta.isdigit():
-                        eta_txt = f" 완료예정시각 {format_eta_time(int(eta))}"
-
-                    stage_txt = f"{stage} " if stage else ""
-                    pb_label.value = f"{stage_txt}{pct:.0f}%{eta_txt}"
-                    page.update()
-                    return True
-
-                def parse_delay() -> float:
-                    try:
-                        d = float((tf_delay.value or "").strip())
-                    except ValueError:
-                        return 0.1
-                    return max(0.0, min(5.0, d))
-
-                def parse_workers() -> int:
-                    try:
-                        w = int((tf_workers.value or "").strip())
-                    except ValueError:
-                        return 8
-                    return max(1, min(32, w))
-
-                delay = parse_delay()
-                workers = parse_workers()
-
                 # subprocess로 크롤링/정제
-                for line in run_update_and_refine(dbp, delay=delay, workers=workers):
-                    if handle_progress_line(line):
-                        continue
+                for line in run_update_and_refine(dbp):
                     append_log(line)
 
                 append_log("[DONE] update + refine")
@@ -486,8 +360,6 @@ def launch_app(db_path: str):
                 append_log(f"[ERROR] 업데이트/정제 실패: {ex}")
 
             finally:
-                pb.visible = False
-                pb_stack.visible = False
                 btn_update.disabled = False
                 tf_search.disabled = False
                 page.update()
@@ -513,7 +385,7 @@ def launch_app(db_path: str):
                 append_log(f"[ERROR] DB open failed: {ex}")
 
         # --- Layout ---
-        top = ft.Row([tf_db, btn_update, tf_delay, tf_workers, pb_stack], vertical_alignment=ft.CrossAxisAlignment.CENTER)
+        top = ft.Row([tf_db, btn_update], vertical_alignment=ft.CrossAxisAlignment.CENTER)
         search_row = ft.Row([tf_search], vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
         left = ft.Column(
