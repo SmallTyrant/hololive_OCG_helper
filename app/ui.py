@@ -34,7 +34,11 @@ def launch_app(db_path: str):
 
         # --- Controls ---
         tf_db = ft.TextField(label="DB", value=db_path, expand=True)
-        tf_search = ft.TextField(label="카드번호 / 이름 / 태그 검색", expand=True)
+        tf_search = ft.TextField(
+            label="카드번호 / 이름 / 태그 검색",
+            hint_text="예: 카드번호 / 이름 / 태그",
+            expand=True,
+        )
 
         btn_update = ft.ElevatedButton("DB 생성/업데이트+정제")  # DB 없을 때도 이 버튼으로 생성
         pb = ft.ProgressBar(visible=False, width=180)
@@ -260,6 +264,22 @@ def launch_app(db_path: str):
                 append_log(f"[ERROR] DB open failed: {ex}")
 
         # --- Layout ---
+        example_card = ft.Container(
+            content=ft.Column(
+                [
+                    ft.Text("UI 예시", weight=ft.FontWeight.BOLD),
+                    ft.Text("1) 검색창에 카드번호/이름/태그를 입력하면"),
+                    ft.Text("2) 좌측에서 결과를 선택하고"),
+                    ft.Text("3) 가운데에서 이미지, 우측에서 본문을 확인합니다."),
+                    ft.Text("4) 하단 로그에서 처리 상태를 볼 수 있습니다."),
+                ],
+                spacing=2,
+            ),
+            padding=10,
+            border=ft.border.all(1, ft.colors.with_opacity(0.15, ft.colors.WHITE)),
+            bgcolor=ft.colors.with_opacity(0.03, ft.colors.WHITE),
+        )
+
         top = ft.Row([tf_db, btn_update, pb], vertical_alignment=ft.CrossAxisAlignment.CENTER)
         search_row = ft.Row([tf_search], vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
@@ -306,6 +326,7 @@ def launch_app(db_path: str):
         page.add(
             ft.Column(
                 [
+                    example_card,
                     top,
                     search_row,
                     ft.Divider(height=1),
