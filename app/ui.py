@@ -136,12 +136,27 @@ def launch_app(db_path: str):
 
         def setup_window_icon():
             ico_path, png_path = icon_paths(project_root)
+            platform = __import__("sys").platform
 
-            if ico_path.exists():
+            # Prefer PNG on macOS (Flet supports PNG for window icons there).
+            if platform == "darwin" and png_path.exists():
+                page.window.icon = str(png_path)
+                return
+
+            # Prefer ICO on Windows if available.
+            if platform.startswith("win") and ico_path.exists():
                 page.window.icon = str(ico_path)
                 return
 
+            # Fallbacks: use existing PNG directly, or generate ICO if only PNG exists.
             if png_path.exists():
+                try:
+                    # Some platforms accept PNG directly; try that first.
+                    page.window.icon = str(png_path)
+                    return
+                except Exception:
+                    pass
+
                 try:
                     from PIL import Image
 

@@ -3,3 +3,4 @@ __pycache__/
 .venv/
 data/images/
 app/app_icon.*
+.DS_Store
