@@ -31,6 +31,15 @@ def _center_alignment():
 
 ALIGN_CENTER = _center_alignment()
 
+def _image_fit_contain():
+    if hasattr(ft, "ImageFit"):
+        return ft.ImageFit.CONTAIN
+    if hasattr(ft, "BoxFit"):
+        return ft.BoxFit.CONTAIN
+    return None
+
+IMAGE_FIT_CONTAIN = _image_fit_contain()
+
 def icon_dir(project_root: Path) -> Path:
     return project_root / "app"
 
@@ -40,14 +49,12 @@ def icon_paths(project_root: Path) -> tuple[Path, Path]:
 
 
 def launch_app(db_path: str):
-    # UI 스레드용 DB 연결: DB 없으면 일단 None으로 시작
-    conn_ui = None
-
     project_root = Path(__file__).resolve().parents[1]  # .../app
     project_root = project_root.parent                  # project root
 
     def main(page: ft.Page):
-        nonlocal conn_ui
+        thread_local = threading.local()
+        conn_epoch = {"value": 0}
 
         page.title = "hololive OCG helper"
         page.window_width = 1280
@@ -69,7 +76,7 @@ def launch_app(db_path: str):
             if image_path and image_path.exists():
                 return ft.Image(
                     src=str(image_path),
-                    fit=ft.ImageFit.CONTAIN,
+                    fit=IMAGE_FIT_CONTAIN,
                     expand=True,
                 )
             # 이미지 없을 때 플레이스홀더
@@ -134,10 +141,35 @@ def launch_app(db_path: str):
 
         setup_window_icon()
 
-        def ensure_conn():
-            nonlocal conn_ui
-            if conn_ui is None:
-                conn_ui = open_db(tf_db.value)
+        def get_conn():
+            path = tf_db.value
+            conn = getattr(thread_local, "conn", None)
+            if (
+                conn is None
+                or getattr(thread_local, "epoch", -1) != conn_epoch["value"]
+                or getattr(thread_local, "path", None) != path
+            ):
+                try:
+                    if conn is not None:
+                        conn.close()
+                except Exception:
+                    pass
+                conn = open_db(path)
+                thread_local.conn = conn
+                thread_local.epoch = conn_epoch["value"]
+                thread_local.path = path
+            return conn
+
+        def close_thread_conn():
+            conn = getattr(thread_local, "conn", None)
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            thread_local.conn = None
+            thread_local.epoch = -1
+            thread_local.path = None
 
         def set_image_for_card(card_number: str):
             p = local_image_path(project_root, card_number)
@@ -152,8 +184,8 @@ def launch_app(db_path: str):
             selected_print_id["id"] = pid
 
             try:
-                ensure_conn()
-                brief = get_print_brief(conn_ui, pid) or {}
+                conn = get_conn()
+                brief = get_print_brief(conn, pid) or {}
                 selected_image_url["url"] = (brief.get("image_url") or "").strip()
                 selected_card_number["no"] = (brief.get("card_number") or "").strip()
 
@@ -164,7 +196,7 @@ def launch_app(db_path: str):
                     clear_image()
 
                 # 본문 갱신
-                card = load_card_detail(conn_ui, pid)
+                card = load_card_detail(conn, pid)
                 if not card:
                     detail_tf.value = "(본문 없음)"
                 else:
@@ -188,14 +220,14 @@ def launch_app(db_path: str):
                 page.update()
                 return
 
-            if conn_ui is None and not db_exists(tf_db.value):
+            if not db_exists(tf_db.value):
                 append_log("[INFO] DB가 없어서 검색 불가. 'DB 생성/업데이트+정제'를 먼저 실행하세요.")
                 page.update()
                 return
 
             try:
-                ensure_conn()
-                rows = query_suggest(conn_ui, q, limit=80)
+                conn = get_conn()
+                rows = query_suggest(conn, q, limit=80)
                 for r in rows:
                     title = f"{r.get('card_number','')} | {r.get('name_ja','')}"
                     pid = r["print_id"]
@@ -249,7 +281,6 @@ def launch_app(db_path: str):
 
         # --- Update pipeline (background thread) ---
         def do_update():
-            nonlocal conn_ui
             try:
                 pb.visible = True
                 btn_update.disabled = True
@@ -266,13 +297,9 @@ def launch_app(db_path: str):
 
                 append_log("[DONE] update + refine")
 
-                # UI 스레드용 DB 재연결
-                try:
-                    if conn_ui:
-                        conn_ui.close()
-                except Exception:
-                    pass
-                conn_ui = open_db(dbp)
+                # 모든 스레드의 DB 연결 갱신 유도
+                conn_epoch["value"] += 1
+                close_thread_conn()
 
                 # 검색 결과 재갱신
                 refresh_list()
@@ -299,7 +326,7 @@ def launch_app(db_path: str):
         else:
             # DB 있으면 즉시 연결
             try:
-                ensure_conn()
+                get_conn()
             except Exception as ex:
                 append_log(f"[ERROR] DB open failed: {ex}")
 

@@ -306,7 +306,7 @@ def normalize_raw_text(text: str) -> str:
     out: list[str] = []
     i = 0
 
-    MERGE_LABELS = {"カードタイプ", "レアリティ", "色", "LIFE", "HP"}
+    MERGE_LABELS = {"カードタイプ", "レアリティ", "色", "LIFE", "HP", "カードナンバー"}
 
     # "다음 줄이 라벨이면 병합 금지"용 라벨 집합
     ALL_LABELS = set(MERGE_LABELS) | {
@@ -319,22 +319,26 @@ def normalize_raw_text(text: str) -> str:
         r"^(カードタイプ|レアリティ|色|LIFE|HP|推しスキル|SP推しスキル|アーツ|バトンタッチ|エクストラ|イラストレーター名|カードナンバー|キーワード)"
     )
 
+    def _normalize_label(line: str) -> str:
+        return line.replace("：", "").replace(":", "").strip()
+
     while i < len(lines):
         line = lines[i]
+        label = _normalize_label(line)
 
         # merge label + next line value (next가 라벨이면 병합하지 않음)
-        if line in MERGE_LABELS and i + 1 < len(lines):
+        if label in MERGE_LABELS and i + 1 < len(lines):
             nxt = lines[i + 1]
             if nxt in ALL_LABELS:
-                out.append(line)
+                out.append(label)
                 i += 1
                 continue
-            out.append(f"{line} {nxt}")
+            out.append(f"{label} {nxt}")
             i += 2
             continue
 
         # remove 収録商品 section (only if it looks like real "product" section)
-        if line == "収録商品":
+        if label == "収録商品":
             look = " ".join(lines[i + 1:i + 7])
             is_real_section = any(k in look for k in [
                 "Accessories", "Boosters", "発売日", "【使用可能カード】",
@@ -343,7 +347,7 @@ def normalize_raw_text(text: str) -> str:
 
             if not is_real_section:
                 # nav/footer "収録商品" -> keep it
-                out.append(line)
+                out.append(label)
                 i += 1
                 continue
 
@@ -353,16 +357,26 @@ def normalize_raw_text(text: str) -> str:
                 i += 1
             continue
 
-        out.append(line)
+        out.append(label if label != line and label in ALL_LABELS else line)
         i += 1
 
     return "\n".join(out)
 
 
+def extract_detail_text(soup: BeautifulSoup) -> str:
+    """
+    Prefer the card detail container to avoid navigation/menu noise.
+    """
+    detail_root = soup.select_one(".cardlist-Detail")
+    if detail_root is None:
+        return soup.get_text("\n", strip=True)
+    return detail_root.get_text("\n", strip=True)
+
+
 def parse_detail(detail_html: bytes, fallback_card_no: str, verbose: bool) -> Optional[dict]:
     soup = BeautifulSoup(detail_html, "html.parser")
 
-    raw = soup.get_text("\n", strip=True)
+    raw = extract_detail_text(soup)
     raw = normalize_raw_text(raw)
 
     # 카드 번호
@@ -495,6 +509,25 @@ def process_list_page(expansion: str, page: int, html: bytes, args, session: req
     return new_items, 0
 
 
+def scrape_expansion(conn: sqlite3.Connection, session: requests.Session, expansion: str, args) -> int:
+    first_url = build_list_url(expansion, 1, "page")
+    first_html = fetch(session, first_url, args.verbose)
+
+    page_param = detect_pagination_param(first_html)
+    log(f"[PAGINATION] exp={expansion} param='{page_param}'", True)
+
+    for page in range(1, args.max_pages + 1):
+        url = build_list_url(expansion, page, page_param)
+        html = first_html if page == 1 else fetch(session, url, args.verbose)
+        new_items, stop = process_list_page(expansion, page, html, args, session, conn)
+        if stop:
+            return 1
+        if new_items == 0:
+            log(f"[DONE] exp={expansion} no new items on page {page}", args.verbose)
+            break
+    return 0
+
+
 def cmd_scrape(args) -> int:
     conn = sqlite3.connect(args.db)
     conn.row_factory = sqlite3.Row
@@ -505,22 +538,20 @@ def cmd_scrape(args) -> int:
 
     session = requests.Session()
 
-    first_url = build_list_url(args.expansion, 1, "page")
-    first_html = fetch(session, first_url, args.verbose)
-
-    page_param = detect_pagination_param(first_html)
-    log(f"[PAGINATION] detected param '{page_param}'", True)
-
-    stop = 0
-    for page in range(1, args.max_pages + 1):
-        url = build_list_url(args.expansion, page, page_param)
-        html = first_html if page == 1 else fetch(session, url, args.verbose)
-        new_items, stop = process_list_page(args.expansion, page, html, args, session, conn)
-        if stop:
-            break
-        if new_items == 0:
-            log(f"[DONE] no new items on page {page} -> stop", args.verbose)
-            break
+    if args.expansion == "all":
+        exps = sorted(parse_expansion_codes(fetch(session, f"{CARDSEARCH_BASE}?view=text", args.verbose)))
+        if not exps:
+            raise RuntimeError("no expansion codes detected")
+        log(f"[INFO] expansions={len(exps)}", True)
+        for exp in exps:
+            if args.max_cards and args._seen_total >= args.max_cards:
+                break
+            log(f"[EXP] {exp}", True)
+            stop = scrape_expansion(conn, session, exp, args)
+            if stop:
+                break
+    else:
+        scrape_expansion(conn, session, args.expansion, args)
 
     conn.commit()
     conn.close()
