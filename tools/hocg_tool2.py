@@ -446,6 +446,23 @@ def detect_pagination_param(html: bytes) -> str:
     return "page"
 
 
+def detect_max_page(html: bytes, page_param: str) -> int | None:
+    soup = BeautifulSoup(html, "html.parser")
+    max_page = 0
+    for a in soup.select(f"a[href*='{page_param}=']"):
+        href = a.get("href") or ""
+        m = re.search(rf"[?&]{re.escape(page_param)}=(\d+)", href)
+        if not m:
+            continue
+        try:
+            n = int(m.group(1))
+        except ValueError:
+            continue
+        if n > max_page:
+            max_page = n
+    return max_page or None
+
+
 def build_list_url(expansion: str | None, page: int, page_param: str) -> str:
     # always use view=text so card numbers appear in anchor text reliably
     if expansion:
@@ -485,6 +502,14 @@ def process_list_page(expansion: str | None, page: int, html: bytes, args, sessi
                 f"[PROGRESS] exp={exp_label} page={page} ({idx}/{len(items)}) total={args._seen_total} rate={rate:.2f}/s",
                 True,
             )
+            if args._total_pages:
+                progress = (page - 1 + (idx / max(1, len(items)))) / args._total_pages
+                progress = min(1.0, max(0.0, progress))
+                eta = int(elapsed * (1 - progress) / progress) if progress > 0 else 0
+                log(
+                    f"[PROGRESS_PCT] stage=scrape exp={exp_label} pct={progress*100:.2f} eta={eta}",
+                    True,
+                )
 
         detail_url = f"{BASE}/cardlist/?id={it.card_id}&view=text"
         time.sleep(args.delay)
@@ -533,6 +558,10 @@ def scrape_expansion(conn: sqlite3.Connection, session: requests.Session, expans
     page_param = detect_pagination_param(first_html)
     exp_label = expansion if expansion else "ALL"
     log(f"[PAGINATION] exp={exp_label} param='{page_param}'", True)
+    total_pages = detect_max_page(first_html, page_param)
+    args._total_pages = total_pages
+    if total_pages:
+        log(f"[PAGES] exp={exp_label} total_pages={total_pages}", True)
 
     for page in range(1, args.max_pages + 1):
         url = build_list_url(expansion, page, page_param)

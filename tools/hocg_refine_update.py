@@ -133,6 +133,7 @@ def refine_db(db_path: str) -> None:
 
     updated = 0
     total = len(rows)
+    t0 = datetime.now().timestamp()
     for i, r in enumerate(rows, 1):
         raw = r["raw_text"] or ""
         cleaned = normalize_raw_text(raw)
@@ -147,7 +148,11 @@ def refine_db(db_path: str) -> None:
             )
             updated += 1
         if i % 500 == 0 or i == total:
+            elapsed = max(1e-6, datetime.now().timestamp() - t0)
+            pct = (i / total) * 100 if total else 100.0
+            eta = int(elapsed * (total - i) / i) if i > 0 else 0
             print(f"[REFINE] {i}/{total} updated={updated}", flush=True)
+            print(f"[PROGRESS_PCT] stage=refine pct={pct:.2f} eta={eta}", flush=True)
 
     conn.commit()
     conn.close()

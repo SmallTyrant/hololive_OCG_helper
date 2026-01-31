@@ -65,7 +65,17 @@ def launch_app(db_path: str):
         tf_search = ft.TextField(label="카드번호 / 이름 / 태그 검색", expand=True)
 
         btn_update = ft.ElevatedButton("DB 생성/업데이트+정제")  # DB 없을 때도 이 버튼으로 생성
-        pb = ft.ProgressBar(visible=False, width=180)
+        pb = ft.ProgressBar(visible=False, width=220, value=0)
+        pb_label = ft.Text("", size=12, text_align=ft.TextAlign.CENTER)
+        pb_stack = ft.Stack(
+            [
+                pb,
+                ft.Container(content=pb_label, alignment=ALIGN_CENTER, expand=True),
+            ],
+            width=220,
+            height=16,
+        )
+        pb_stack.visible = False
 
         # --- Left: results ---
         lv = ft.ListView(expand=True, spacing=2, padding=0)
@@ -283,6 +293,9 @@ def launch_app(db_path: str):
         def do_update():
             try:
                 pb.visible = True
+                pb.value = 0
+                pb_label.value = ""
+                pb_stack.visible = True
                 btn_update.disabled = True
                 tf_search.disabled = True
                 btn_img_dl.disabled = True
@@ -291,8 +304,50 @@ def launch_app(db_path: str):
                 dbp = tf_db.value.strip()
                 append_log("[START] update + refine")
 
+                def format_eta(sec: int) -> str:
+                    sec = max(0, int(sec))
+                    m, s = divmod(sec, 60)
+                    h, m = divmod(m, 60)
+                    if h > 0:
+                        return f"{h:02d}:{m:02d}:{s:02d}"
+                    return f"{m:02d}:{s:02d}"
+
+                def handle_progress_line(line: str) -> bool:
+                    if not line.startswith("[PROGRESS_PCT]"):
+                        return False
+                    parts = line.replace("[PROGRESS_PCT]", "").strip().split()
+                    data = {}
+                    for p in parts:
+                        if "=" in p:
+                            k, v = p.split("=", 1)
+                            data[k.strip()] = v.strip()
+
+                    pct_str = data.get("pct")
+                    if not pct_str:
+                        return True
+                    try:
+                        pct = float(pct_str)
+                    except ValueError:
+                        return True
+
+                    pct = max(0.0, min(100.0, pct))
+                    pb.value = pct / 100.0
+
+                    stage = data.get("stage", "")
+                    eta = data.get("eta")
+                    eta_txt = ""
+                    if eta and eta.isdigit():
+                        eta_txt = f" ETA {format_eta(int(eta))}"
+
+                    stage_txt = f"{stage} " if stage else ""
+                    pb_label.value = f"{stage_txt}{pct:.0f}%{eta_txt}"
+                    page.update()
+                    return True
+
                 # subprocess로 크롤링/정제
                 for line in run_update_and_refine(dbp, delay=0.6):
+                    if handle_progress_line(line):
+                        continue
                     append_log(line)
 
                 append_log("[DONE] update + refine")
@@ -309,6 +364,7 @@ def launch_app(db_path: str):
 
             finally:
                 pb.visible = False
+                pb_stack.visible = False
                 btn_update.disabled = False
                 tf_search.disabled = False
                 btn_img_dl.disabled = not (selected_card_number["no"] and selected_image_url["url"])
@@ -331,7 +387,7 @@ def launch_app(db_path: str):
                 append_log(f"[ERROR] DB open failed: {ex}")
 
         # --- Layout ---
-        top = ft.Row([tf_db, btn_update, pb], vertical_alignment=ft.CrossAxisAlignment.CENTER)
+        top = ft.Row([tf_db, btn_update, pb_stack], vertical_alignment=ft.CrossAxisAlignment.CENTER)
         search_row = ft.Row([tf_search], vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
         left = ft.Column(
