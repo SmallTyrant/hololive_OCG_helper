@@ -11,6 +11,7 @@ from app.services.db import (
     open_db,
     query_suggest,
     load_card_detail,
+    load_card_detail_ko,
     get_print_brief,
     db_exists,
     ensure_db,
@@ -244,30 +245,44 @@ def launch_app(db_path: str):
                     )
             return ft.Text(line)
 
-        def set_detail_text(text: str | None):
+        def _append_plain_lines(lines: list[str]):
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                detail_lv.controls.append(ft.Text(line))
+
+        def set_detail_text(text_ja: str | None, text_ko: str | None):
             detail_lv.controls.clear()
-            if not text:
+            if not text_ja and not text_ko:
                 detail_lv.controls.append(ft.Text("(본문 없음)"))
             else:
-                lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-                i = 0
-                while i < len(lines):
-                    line = lines[i]
-                    if line == "色":
+                if text_ja:
+                    detail_lv.controls.append(build_section_chip("日本語"))
+                    lines = [ln.strip() for ln in text_ja.splitlines() if ln.strip()]
+                    i = 0
+                    while i < len(lines):
+                        line = lines[i]
+                        if line == "色":
+                            i += 1
+                            continue
+                        if line.startswith("色 "):
+                            i += 1
+                            continue
+                        line = line.strip()
+                        if not line:
+                            i += 1
+                            continue
+                        if line == "バトンタッチ" or line.startswith("バトンタッチ "):
+                            i += 1
+                            continue
+                        detail_lv.controls.append(build_detail_line(line))
                         i += 1
-                        continue
-                    if line.startswith("色 "):
-                        i += 1
-                        continue
-                    line = line.strip()
-                    if not line:
-                        i += 1
-                        continue
-                    if line == "バトンタッチ" or line.startswith("バトンタッチ "):
-                        i += 1
-                        continue
-                    detail_lv.controls.append(build_detail_line(line))
-                    i += 1
+
+                if text_ko:
+                    detail_lv.controls.append(build_section_chip("한국어"))
+                    ko_lines = [ln.strip() for ln in text_ko.splitlines() if ln.strip()]
+                    _append_plain_lines(ko_lines)
             page.update()
 
         def show_detail(pid: int):
@@ -290,10 +305,14 @@ def launch_app(db_path: str):
 
                 # 본문 갱신
                 card = load_card_detail(conn, pid)
-                set_detail_text(card.get("raw_text", "") if card else None)
+                ko = load_card_detail_ko(conn, pid)
+                ko_text = None
+                if ko:
+                    ko_text = (ko.get("memo") or ko.get("effect_text") or "").strip()
+                set_detail_text(card.get("raw_text", "") if card else None, ko_text)
 
             except Exception as ex:
-                set_detail_text(f"[ERROR] 상세 로드 실패: {ex}")
+                set_detail_text(None, f"[ERROR] 상세 로드 실패: {ex}")
                 clear_image()
 
             page.update()

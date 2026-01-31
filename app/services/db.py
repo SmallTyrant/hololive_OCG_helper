@@ -115,6 +115,13 @@ def load_card_detail(conn, pid):
     ).fetchone()
     return dict(r) if r else None
 
+def load_card_detail_ko(conn, pid):
+    r = conn.execute(
+        "SELECT name, effect_text, memo, source FROM card_texts_ko WHERE print_id=?",
+        (pid,),
+    ).fetchone()
+    return dict(r) if r else None
+
 def get_print_brief(conn, print_id: int) -> dict | None:
     row = conn.execute(
         """
