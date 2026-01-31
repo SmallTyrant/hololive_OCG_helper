@@ -21,12 +21,13 @@ import sqlite3
 import sys
 import time
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional, Set, Tuple
 
 import requests
+from requests.adapters import HTTPAdapter
 from bs4 import BeautifulSoup
 
 
@@ -60,6 +61,10 @@ def _get_thread_session() -> requests.Session:
     sess = getattr(_thread_local, "session", None)
     if sess is None:
         sess = requests.Session()
+        # Increase connection pool size for parallel fetches.
+        adapter = HTTPAdapter(pool_connections=32, pool_maxsize=32, max_retries=0)
+        sess.mount("https://", adapter)
+        sess.mount("http://", adapter)
         _thread_local.session = sess
     return sess
 
@@ -635,6 +640,8 @@ def process_list_page(expansion: str | None, page: int, html: bytes, args, sessi
 
     if args.workers > 1:
         futures = []
+        future_meta = {}
+        future_started = {}
         with ThreadPoolExecutor(max_workers=args.workers) as ex:
             for idx, it in enumerate(items, 1):
                 if it.card_id in args._seen_ids:
@@ -646,41 +653,63 @@ def process_list_page(expansion: str | None, page: int, html: bytes, args, sessi
                     _log_progress(idx, len(items))
 
                 detail_url = f"{BASE}/cardlist/?id={it.card_id}&view=text"
-                futures.append(
-                    ex.submit(
-                        _fetch_detail_worker,
-                        detail_url,
-                        it.card_number,
-                        it.card_id,
-                        args.delay,
-                        args.verbose,
-                        args.connect_timeout,
-                        args.read_timeout,
-                        args.retries,
-                    )
+                f = ex.submit(
+                    _fetch_detail_worker,
+                    detail_url,
+                    it.card_number,
+                    it.card_id,
+                    args.delay,
+                    args.verbose,
+                    args.connect_timeout,
+                    args.read_timeout,
+                    args.retries,
                 )
+                futures.append(f)
+                future_meta[f] = (it.card_id, it.card_number, detail_url)
+                future_started[f] = time.monotonic()
 
-            for f in as_completed(futures):
-                try:
-                    result = f.result()
-                except Exception as e:
-                    log(f"[ERROR] fetch detail failed: exp={exp_label} err={e}", True)
-                    continue
+            pending = set(futures)
+            while pending:
+                done, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+                for f in done:
+                    try:
+                        result = f.result()
+                    except Exception as e:
+                        log(f"[ERROR] fetch detail failed: exp={exp_label} err={e}", True)
+                        continue
 
-                detail = result["detail"]
-                detail_url = result["detail_url"]
-                card_number = result["card_number"]
-                card_id = result["card_id"]
-                added = _handle_detail(detail, card_number, card_id, detail_url)
-                if added:
-                    args._seen_total += 1
+                    detail = result["detail"]
+                    detail_url = result["detail_url"]
+                    card_number = result["card_number"]
+                    card_id = result["card_id"]
+                    added = _handle_detail(detail, card_number, card_id, detail_url)
+                    if added:
+                        args._seen_total += 1
                     if args.max_cards and args._seen_total >= args.max_cards:
+                        log(f"[DONE] reached max_cards={args.max_cards}", True)
                         return new_items, 1
-                    if args._seen_total % 50 == 0:
-                        elapsed = max(1e-6, time.time() - args._t0)
-                        rate = args._seen_total / elapsed
-                        log(f"[PROGRESS] total={args._seen_total} rate={rate:.2f}/s", True)
-                        conn.commit()
+                        if args._seen_total % 50 == 0:
+                            elapsed = max(1e-6, time.time() - args._t0)
+                            rate = args._seen_total / elapsed
+                            log(f"[PROGRESS] total={args._seen_total} rate={rate:.2f}/s", True)
+                            conn.commit()
+
+                if args.detail_timeout > 0 and pending:
+                    now = time.monotonic()
+                    timed_out = []
+                    for f in pending:
+                        if now - future_started.get(f, now) > args.detail_timeout:
+                            timed_out.append(f)
+                    for f in timed_out:
+                        card_id, card_number, detail_url = future_meta.get(f, ("?", "?", "?"))
+                        log(
+                            f"[TIMEOUT] detail fetch skipped: exp={exp_label} id={card_id} card={card_number}",
+                            True,
+                        )
+                        f.cancel()
+                        pending.discard(f)
+
+            # all pending handled
     else:
         for idx, it in enumerate(items, 1):
             if it.card_id in args._seen_ids:
@@ -695,6 +724,8 @@ def process_list_page(expansion: str | None, page: int, html: bytes, args, sessi
             time.sleep(args.delay)
 
             try:
+                if args.verbose:
+                    print(f"[FETCH] detail id={it.card_id} card={it.card_number}", flush=True)
                 detail_html = fetch(
                     session,
                     detail_url,
@@ -712,6 +743,7 @@ def process_list_page(expansion: str | None, page: int, html: bytes, args, sessi
             if added:
                 args._seen_total += 1
                 if args.max_cards and args._seen_total >= args.max_cards:
+                    log(f"[DONE] reached max_cards={args.max_cards}", True)
                     return new_items, 1
 
                 if args._seen_total % 50 == 0:
@@ -842,13 +874,14 @@ def main() -> int:
     s = sub.add_parser("scrape", help="Scrape one expansion")
     s.set_defaults(func=cmd_scrape)
     s.add_argument("--expansion", default="all", help="Expansion code (or 'all' if your build supports it)")
-    s.add_argument("--delay", type=float, default=0.6, help="Delay seconds between detail fetches")
-    s.add_argument("--workers", type=int, default=1, help="Parallel fetch workers (default: 1)")
+    s.add_argument("--delay", type=float, default=0.1, help="Delay seconds between detail fetches")
+    s.add_argument("--workers", type=int, default=8, help="Parallel fetch workers (default: 8)")
     s.add_argument("--max-pages", type=int, default=999)
     s.add_argument("--max-cards", type=int, default=0)
     s.add_argument("--connect-timeout", type=float, default=5.0, help="Connect timeout seconds")
-    s.add_argument("--read-timeout", type=float, default=20.0, help="Read timeout seconds")
-    s.add_argument("--retries", type=int, default=1, help="Retry count for network errors")
+    s.add_argument("--read-timeout", type=float, default=10.0, help="Read timeout seconds")
+    s.add_argument("--retries", type=int, default=0, help="Retry count for network errors")
+    s.add_argument("--detail-timeout", type=float, default=15.0, help="Max seconds to wait per detail page")
     s.add_argument("--verbose", action="store_true")
 
     args = ap.parse_args()

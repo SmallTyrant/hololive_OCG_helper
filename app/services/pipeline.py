@@ -6,7 +6,7 @@ from pathlib import Path
 def _py():
     return sys.executable
 
-def run_update_and_refine(db_path: str, delay: float = 0.6, workers: int = 1):
+def run_update_and_refine(db_path: str, delay: float = 0.1, workers: int = 8):
     """
     tools/hocg_tool2.py scrape -> tools/hocg_refine_update.py
     stdout 라인 단위로 yield
