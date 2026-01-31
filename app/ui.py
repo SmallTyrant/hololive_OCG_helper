@@ -16,6 +16,7 @@ from app.services.db import (
     ensure_db,
 )
 from app.services.pipeline import run_update_and_refine
+from app.paths import get_default_data_root, get_project_root
 from app.services.images import local_image_path, download_image, resolve_url
 
 COLORS = ft.Colors if hasattr(ft, "Colors") else ft.colors
@@ -50,14 +51,14 @@ def icon_paths(project_root: Path) -> tuple[Path, Path]:
 
 
 def launch_app(db_path: str):
-    project_root = Path(__file__).resolve().parents[1]  # .../app
-    project_root = project_root.parent                  # project root
+    project_root = get_project_root()
+    data_root = get_default_data_root("hOCG_helper")
 
     def main(page: ft.Page):
         thread_local = threading.local()
         conn_epoch = {"value": 0}
 
-        page.title = "hololive OCG helper"
+        page.title = "hOCG_helper"
         page.window_width = 1280
         page.window_height = 820
 
@@ -136,27 +137,21 @@ def launch_app(db_path: str):
 
         def setup_window_icon():
             ico_path, png_path = icon_paths(project_root)
-            platform = __import__("sys").platform
-
-            # Prefer PNG on macOS (Flet supports PNG for window icons there).
-            if platform == "darwin" and png_path.exists():
-                page.window.icon = str(png_path)
-                return
-
-            # Prefer ICO on Windows if available.
-            if platform.startswith("win") and ico_path.exists():
-                page.window.icon = str(ico_path)
-                return
-
-            # Fallbacks: use existing PNG directly, or generate ICO if only PNG exists.
+            # Always try to use PNG from /app/app_icon.png first.
             if png_path.exists():
                 try:
-                    # Some platforms accept PNG directly; try that first.
                     page.window.icon = str(png_path)
                     return
                 except Exception:
                     pass
 
+            # If PNG doesn't work on the current platform, fall back to ICO.
+            if ico_path.exists():
+                page.window.icon = str(ico_path)
+                return
+
+            # Last resort: generate ICO from PNG if PNG exists.
+            if png_path.exists():
                 try:
                     from PIL import Image
 
@@ -203,7 +198,7 @@ def launch_app(db_path: str):
             thread_local.path = None
 
         def set_image_for_card(card_number: str, image_url: str | None = None):
-            p = local_image_path(project_root, card_number)
+            p = local_image_path(data_root, card_number)
             img_container.content = build_image_widget(p if p.exists() else None, image_url)
             page.update()
 
@@ -214,7 +209,7 @@ def launch_app(db_path: str):
         def ensure_image_download(card_number: str, image_url: str):
             if not card_number or not image_url:
                 return
-            dest = local_image_path(project_root, card_number)
+            dest = local_image_path(data_root, card_number)
             if dest.exists():
                 return
             if card_number in downloading:

@@ -9,15 +9,15 @@ import requests
 
 BASE = "https://hololive-official-cardgame.com"
 
-def images_dir(project_root: Path) -> Path:
-    d = project_root / "data" / "images"
+def images_dir(data_root: Path) -> Path:
+    d = data_root / "images"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
-def local_image_path(project_root: Path, card_number: str) -> Path:
+def local_image_path(data_root: Path, card_number: str) -> Path:
     # 파일명은 card_number 그대로. 확장자 png 통일
     safe = card_number.strip()
-    return images_dir(project_root) / f"{safe}.png"
+    return images_dir(data_root) / f"{safe}.png"
 
 def resolve_url(image_url: str) -> str:
     if not image_url:
