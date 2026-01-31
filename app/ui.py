@@ -114,12 +114,7 @@ def launch_app(db_path: str):
         )
 
         # --- Right: detail ---
-        detail_tf = ft.TextField(
-            label="카드 본문",
-            multiline=True,
-            read_only=True,
-            expand=True,
-        )
+        detail_lv = ft.ListView(expand=True, spacing=4, padding=0, auto_scroll=False)
 
         # currently selected
         selected_print_id = {"id": None}
@@ -214,6 +209,33 @@ def launch_app(db_path: str):
 
             threading.Thread(target=worker, daemon=True).start()
 
+        def build_detail_line(line: str):
+            bold_labels = ("カードタイプ", "タグ", "レアリティ")
+            for label in bold_labels:
+                if line == label:
+                    return ft.Text(line, weight=ft.FontWeight.BOLD)
+                if line.startswith(label + " "):
+                    rest = line[len(label):]
+                    return ft.Text(
+                        spans=[
+                            ft.TextSpan(label, style=ft.TextStyle(weight=ft.FontWeight.BOLD)),
+                            ft.TextSpan(rest),
+                        ]
+                    )
+            return ft.Text(line)
+
+        def set_detail_text(text: str | None):
+            detail_lv.controls.clear()
+            if not text:
+                detail_lv.controls.append(ft.Text("(본문 없음)"))
+            else:
+                for line in text.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    detail_lv.controls.append(build_detail_line(line))
+            page.update()
+
         def show_detail(pid: int):
             selected_print_id["id"] = pid
 
@@ -234,13 +256,10 @@ def launch_app(db_path: str):
 
                 # 본문 갱신
                 card = load_card_detail(conn, pid)
-                if not card:
-                    detail_tf.value = "(본문 없음)"
-                else:
-                    detail_tf.value = card.get("raw_text", "") or "(본문 없음)"
+                set_detail_text(card.get("raw_text", "") if card else None)
 
             except Exception as ex:
-                detail_tf.value = f"[ERROR] 상세 로드 실패: {ex}"
+                set_detail_text(f"[ERROR] 상세 로드 실패: {ex}")
                 clear_image()
 
             page.update()
@@ -403,7 +422,7 @@ def launch_app(db_path: str):
 
         right = ft.Column(
             [
-                ft.Container(detail_tf, expand=True, padding=10),
+                ft.Container(detail_lv, expand=True, padding=10),
             ],
             expand=True,
             spacing=0,

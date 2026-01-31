@@ -346,6 +346,18 @@ def normalize_raw_text(text: str, *, remove_private: bool = False) -> str:
                 i += 1
             continue
 
+        if label == "タグ":
+            tags = []
+            j = i + 1
+            while j < len(lines) and lines[j].strip().startswith("#"):
+                tags.append(lines[j].strip())
+                j += 1
+            if tags:
+                out.append("タグ")
+                out.append(" ".join(tags))
+                i = j
+                continue
+
         # merge label + next line value (next가 라벨이면 병합하지 않음)
         if label in MERGE_LABELS and i + 1 < len(lines):
             nxt = lines[i + 1]
