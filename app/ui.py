@@ -15,7 +15,12 @@ from app.services.db import (
     db_exists,
 )
 from app.services.pipeline import run_update_and_refine
-from app.services.images import local_image_path, download_image
+from app.services.images import images_dir, local_image_path, download_image
+
+COLORS = ft.Colors if hasattr(ft, "Colors") else ft.colors
+
+def with_opacity(opacity: float, color: str) -> str:
+    return COLORS.with_opacity(opacity, color)
 
 
 def launch_app(db_path: str):
@@ -53,10 +58,10 @@ def launch_app(db_path: str):
                 )
             # 이미지 없을 때 플레이스홀더
             return ft.Container(
-                content=ft.Text("이미지 없음", color=ft.colors.GREY_400),
+                content=ft.Text("이미지 없음", color=COLORS.GREY_400),
                 alignment=ft.alignment.center,
                 expand=True,
-                border=ft.border.all(1, ft.colors.with_opacity(0.15, ft.colors.WHITE)),
+                border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
             )
 
         img_container = ft.Container(
@@ -64,7 +69,7 @@ def launch_app(db_path: str):
             expand=True,
             padding=10,
             bgcolor=None,
-            border=ft.border.all(1, ft.colors.with_opacity(0.15, ft.colors.WHITE)),
+            border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
         )
 
         btn_img_dl = ft.ElevatedButton("현재 카드 이미지 다운로드")
@@ -89,6 +94,30 @@ def launch_app(db_path: str):
         def append_log(s: str):
             log_tf.value = (log_tf.value or "") + s + "\n"
             page.update()
+
+        def setup_window_icon():
+            icon_dir = images_dir(project_root)
+            ico_path = icon_dir / "app_icon.ico"
+            png_path = icon_dir / "app_icon.png"
+
+            if ico_path.exists():
+                page.window.icon = str(ico_path)
+                return
+
+            if png_path.exists():
+                try:
+                    from PIL import Image
+
+                    img = Image.open(png_path)
+                    if img.mode not in ("RGBA", "RGB"):
+                        img = img.convert("RGBA")
+                    sizes = [(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16)]
+                    img.save(ico_path, format="ICO", sizes=sizes)
+                    page.window.icon = str(ico_path)
+                except Exception as ex:
+                    append_log(f"[WARN] 앱 아이콘 설정 실패: {ex}")
+
+        setup_window_icon()
 
         def ensure_conn():
             nonlocal conn_ui
