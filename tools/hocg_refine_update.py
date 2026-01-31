@@ -40,7 +40,7 @@ def normalize_raw_text(text: str) -> str:
         return line.replace("：", "").replace(":", "").strip()
 
     MERGE_LABELS = {"カードタイプ", "レアリティ", "色", "LIFE", "HP", "カードナンバー"}
-    REMOVE_LABELS = {"イラストレーター名", "カードナンバー"}
+    REMOVE_LABELS = {"イラストレーター名", "カードナンバー", "収録商品"}
     ALL_LABELS = set(MERGE_LABELS) | {
         "タグ", "推しスキル", "SP推しスキル", "Bloomレベル",
         "アーツ", "バトンタッチ", "エクストラ",

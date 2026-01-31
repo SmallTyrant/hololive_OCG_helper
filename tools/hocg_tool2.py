@@ -320,7 +320,7 @@ def normalize_raw_text(text: str, *, remove_private: bool = False) -> str:
     i = 0
 
     MERGE_LABELS = {"カードタイプ", "レアリティ", "色", "LIFE", "HP", "カードナンバー"}
-    REMOVE_LABELS = {"イラストレーター名", "カードナンバー"} if remove_private else set()
+    REMOVE_LABELS = {"イラストレーター名", "カードナンバー", "収録商品"} if remove_private else set()
 
     # "다음 줄이 라벨이면 병합 금지"용 라벨 집합
     ALL_LABELS = set(MERGE_LABELS) | {
