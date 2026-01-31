@@ -16,7 +16,7 @@ from app.services.db import (
     ensure_db,
 )
 from app.services.pipeline import run_update_and_refine
-from app.services.images import local_image_path
+from app.services.images import local_image_path, download_image
 
 COLORS = ft.Colors if hasattr(ft, "Colors") else ft.colors
 
@@ -190,12 +190,16 @@ def launch_app(db_path: str):
                 conn = get_conn()
                 brief = get_print_brief(conn, pid) or {}
                 selected_card_number["no"] = (brief.get("card_number") or "").strip()
+                image_url = (brief.get("image_url") or "").strip()
 
                 # 이미지 패널 갱신
                 if selected_card_number["no"]:
                     set_image_for_card(selected_card_number["no"])
                 else:
                     clear_image()
+
+                # 이미지 자동 다운로드 (없으면)
+                ensure_image_download(selected_card_number["no"], image_url)
 
                 # 본문 갱신
                 card = load_card_detail(conn, pid)
@@ -399,3 +403,20 @@ def launch_app(db_path: str):
         )
 
     ft.app(target=main)
+        def ensure_image_download(card_number: str, image_url: str):
+            if not card_number or not image_url:
+                return
+            dest = local_image_path(project_root, card_number)
+            if dest.exists():
+                return
+
+            def worker():
+                try:
+                    append_log(f"[IMG] downloading: {card_number} -> {dest.name}")
+                    download_image(image_url, dest)
+                    append_log("[IMG] done")
+                    set_image_for_card(card_number)
+                except Exception as ex:
+                    append_log(f"[IMG][ERROR] {ex}")
+
+            threading.Thread(target=worker, daemon=True).start()
