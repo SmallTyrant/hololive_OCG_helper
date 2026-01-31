@@ -468,7 +468,8 @@ def fetch(session: requests.Session, url: str, verbose: bool) -> bytes:
 
 def process_list_page(expansion: str | None, page: int, html: bytes, args, session: requests.Session, conn: sqlite3.Connection) -> Tuple[int, int]:
     items = parse_list_page(html)
-    log(f"[PAGE {page}] items={len(items)} (seen_total={args._seen_total})", args.verbose)
+    exp_label = expansion if expansion else "ALL"
+    log(f"[PAGE] exp={exp_label} page={page} items={len(items)} seen_total={args._seen_total}", True)
 
     new_items = 0
     for idx, it in enumerate(items, 1):
@@ -477,7 +478,13 @@ def process_list_page(expansion: str | None, page: int, html: bytes, args, sessi
         args._seen_ids.add(it.card_id)
         new_items += 1
 
-        log(f"  -> ({idx}/{len(items)}) {it.card_number} id={it.card_id}", args.verbose)
+        if idx == 1 or idx % 20 == 0 or idx == len(items):
+            elapsed = max(1e-6, time.time() - args._t0)
+            rate = args._seen_total / elapsed
+            log(
+                f"[PROGRESS] exp={exp_label} page={page} ({idx}/{len(items)}) total={args._seen_total} rate={rate:.2f}/s",
+                True,
+            )
 
         detail_url = f"{BASE}/cardlist/?id={it.card_id}&view=text"
         time.sleep(args.delay)
@@ -485,12 +492,12 @@ def process_list_page(expansion: str | None, page: int, html: bytes, args, sessi
         try:
             detail_html = fetch(session, detail_url, args.verbose)
         except Exception as e:
-            log(f"[ERROR] fetch detail failed: {it.card_number} id={it.card_id} err={e}", True)
+            log(f"[ERROR] fetch detail failed: exp={exp_label} {it.card_number} id={it.card_id} err={e}", True)
             continue
 
         detail = parse_detail(detail_html, fallback_card_no=it.card_number, verbose=args.verbose)
         if not detail:
-            log(f"[SKIP] exp={expansion} id={it.card_id} (no valid card detail)", args.verbose)
+            log(f"[SKIP] exp={exp_label} id={it.card_id} (no valid card detail)", True)
             continue
 
         detail["detail_id"] = int(it.card_id)
@@ -510,7 +517,9 @@ def process_list_page(expansion: str | None, page: int, html: bytes, args, sessi
             return new_items, 1  # stop signal
 
         if args._seen_total % 50 == 0:
-            log(f"[PROGRESS] seen_total={args._seen_total}", args.verbose)
+            elapsed = max(1e-6, time.time() - args._t0)
+            rate = args._seen_total / elapsed
+            log(f"[PROGRESS] total={args._seen_total} rate={rate:.2f}/s", True)
             conn.commit()
 
     conn.commit()
@@ -544,6 +553,7 @@ def cmd_scrape(args) -> int:
 
     args._seen_ids = set()
     args._seen_total = 0
+    args._t0 = time.time()
 
     session = requests.Session()
 

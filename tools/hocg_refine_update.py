@@ -132,7 +132,8 @@ def refine_db(db_path: str) -> None:
     ).fetchall()
 
     updated = 0
-    for r in rows:
+    total = len(rows)
+    for i, r in enumerate(rows, 1):
         raw = r["raw_text"] or ""
         cleaned = normalize_raw_text(raw)
         if cleaned != raw:
@@ -145,10 +146,12 @@ def refine_db(db_path: str) -> None:
                 (cleaned, cleaned, now_iso(), r["print_id"]),
             )
             updated += 1
+        if i % 500 == 0 or i == total:
+            print(f"[REFINE] {i}/{total} updated={updated}", flush=True)
 
     conn.commit()
     conn.close()
-    print(f"[REFINE] updated={updated}")
+    print(f"[REFINE] done updated={updated}")
 
 
 def main() -> int:
