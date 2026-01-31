@@ -15,12 +15,28 @@ from app.services.db import (
     db_exists,
 )
 from app.services.pipeline import run_update_and_refine
-from app.services.images import images_dir, local_image_path, download_image
+from app.services.images import local_image_path, download_image
 
 COLORS = ft.Colors if hasattr(ft, "Colors") else ft.colors
 
 def with_opacity(opacity: float, color: str) -> str:
     return COLORS.with_opacity(opacity, color)
+
+def _center_alignment():
+    if hasattr(ft, "Alignment"):
+        return ft.Alignment.CENTER if hasattr(ft.Alignment, "CENTER") else ft.Alignment(0.0, 0.0)
+    if hasattr(ft, "alignment") and hasattr(ft.alignment, "center"):
+        return ft.alignment.center
+    return None
+
+ALIGN_CENTER = _center_alignment()
+
+def icon_dir(project_root: Path) -> Path:
+    return project_root / "assets"
+
+def icon_paths(project_root: Path) -> tuple[Path, Path]:
+    d = icon_dir(project_root)
+    return d / "app_icon.ico", d / "app_icon.png"
 
 
 def launch_app(db_path: str):
@@ -59,7 +75,7 @@ def launch_app(db_path: str):
             # 이미지 없을 때 플레이스홀더
             return ft.Container(
                 content=ft.Text("이미지 없음", color=COLORS.GREY_400),
-                alignment=ft.alignment.center,
+                alignment=ALIGN_CENTER,
                 expand=True,
                 border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
             )
@@ -96,9 +112,7 @@ def launch_app(db_path: str):
             page.update()
 
         def setup_window_icon():
-            icon_dir = images_dir(project_root)
-            ico_path = icon_dir / "app_icon.ico"
-            png_path = icon_dir / "app_icon.png"
+            ico_path, png_path = icon_paths(project_root)
 
             if ico_path.exists():
                 page.window.icon = str(ico_path)
@@ -108,6 +122,7 @@ def launch_app(db_path: str):
                 try:
                     from PIL import Image
 
+                    ico_path.parent.mkdir(parents=True, exist_ok=True)
                     img = Image.open(png_path)
                     if img.mode not in ("RGBA", "RGB"):
                         img = img.convert("RGBA")
