@@ -22,11 +22,17 @@ def export_csv(db_path: str, out_path: str) -> None:
     ).fetchall()
 
     # prefetch tags
+    # Prefer tags_ja if present, fallback to legacy tags
+    has_tags_ja = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='tags_ja'"
+    ).fetchone() is not None
+    tag_table = "tags_ja" if has_tags_ja else "tags"
+
     tag_rows = conn.execute(
-        """
+        f"""
         SELECT pt.print_id, t.tag
         FROM print_tags pt
-        JOIN tags t ON t.tag_id = pt.tag_id
+        JOIN {tag_table} t ON t.tag_id = pt.tag_id
         ORDER BY pt.print_id, t.tag
         """
     ).fetchall()

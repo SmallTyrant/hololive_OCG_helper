@@ -36,15 +36,34 @@ def _cols(conn, table: str):
     rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
     return {r[1] for r in rows}  # r[1] = column name
 
+def _has_table(conn, table: str) -> bool:
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        (table,),
+    ).fetchone()
+    return row is not None
+
 def _build_tag_joins(conn):
     """
     DB마다 스키마가 달라서 print_tags/tags 컬럼을 보고 JOIN을 결정.
     지원 케이스:
+      0) print_tags(print_id, tag_id) + tags_ja(tag_id, tag, normalized) + tags_ko(tag_id, tag, normalized)
       1) print_tags(print_id, tag) + tags(tag, normalized)
-      2) print_tags(print_id, tag_id) + tags(tag_id, tag, normalized)
+      2) print_tags(print_id, tag_id) + tags(tag_id, tag, normalized)  [legacy]
     """
     pt_cols = _cols(conn, "print_tags")
-    t_cols  = _cols(conn, "tags")
+    tags_ja_cols = _cols(conn, "tags_ja") if _has_table(conn, "tags_ja") else set()
+    tags_ko_cols = _cols(conn, "tags_ko") if _has_table(conn, "tags_ko") else set()
+    t_cols  = _cols(conn, "tags") if _has_table(conn, "tags") else set()
+
+    # Case 0: ja/ko split tables
+    if "tag_id" in pt_cols and "tag_id" in tags_ja_cols:
+        joins = """
+        LEFT JOIN print_tags pt ON pt.print_id = p.print_id
+        LEFT JOIN tags_ja tja ON tja.tag_id = pt.tag_id
+        LEFT JOIN tags_ko tko ON tko.tag_id = pt.tag_id
+        """
+        return joins, "split"
 
     # Case 1
     if "tag" in pt_cols and "tag" in t_cols:
@@ -52,7 +71,7 @@ def _build_tag_joins(conn):
         LEFT JOIN print_tags pt ON pt.print_id = p.print_id
         LEFT JOIN tags t ON t.tag = pt.tag
         """
-        return joins
+        return joins, "legacy_text"
 
     # Case 2
     if "tag_id" in pt_cols and "tag_id" in t_cols:
@@ -60,10 +79,10 @@ def _build_tag_joins(conn):
         LEFT JOIN print_tags pt ON pt.print_id = p.print_id
         LEFT JOIN tags t ON t.tag_id = pt.tag_id
         """
-        return joins
+        return joins, "legacy_id"
 
     # Fallback: tags JOIN 불가 → 태그 검색 없이 카드번호/이름만
-    return None
+    return None, None
 
 def query_suggest(conn, q, limit=40):
     q = (q or "").strip()
@@ -73,7 +92,7 @@ def query_suggest(conn, q, limit=40):
     like = f"%{q}%"
     aliases = _expand_alias(q)
 
-    joins = _build_tag_joins(conn)
+    joins, tag_mode = _build_tag_joins(conn)
 
     # 태그 JOIN 가능하면 tag까지 검색
     if joins:
@@ -84,13 +103,30 @@ def query_suggest(conn, q, limit=40):
         WHERE
             UPPER(p.card_number) LIKE UPPER(?)
             OR COALESCE(p.name_ja,'') LIKE ?
-            OR (t.tag IS NOT NULL AND (t.tag LIKE ? OR COALESCE(t.normalized,'') LIKE ?))
         """
-        params = [like, like, like, like]
+        params = [like, like]
+
+        if tag_mode == "split":
+            sql += """
+            OR (tja.tag IS NOT NULL AND (tja.tag LIKE ? OR COALESCE(tja.normalized,'') LIKE ?))
+            OR (tko.tag IS NOT NULL AND (tko.tag LIKE ? OR COALESCE(tko.normalized,'') LIKE ?))
+            """
+            params += [like, like, like, like]
+        else:
+            sql += """
+            OR (t.tag IS NOT NULL AND (t.tag LIKE ? OR COALESCE(t.normalized,'') LIKE ?))
+            """
+            params += [like, like]
 
         for a in aliases:
-            sql += " OR t.tag LIKE ? OR COALESCE(t.normalized,'') LIKE ?"
-            params += [f"%{a}%", f"%{a}%"]
+            if tag_mode == "split":
+                sql += " OR tja.tag LIKE ? OR COALESCE(tja.normalized,'') LIKE ?"
+                params += [f"%{a}%", f"%{a}%"]
+                sql += " OR tko.tag LIKE ? OR COALESCE(tko.normalized,'') LIKE ?"
+                params += [f"%{a}%", f"%{a}%"]
+            else:
+                sql += " OR t.tag LIKE ? OR COALESCE(t.normalized,'') LIKE ?"
+                params += [f"%{a}%", f"%{a}%"]
 
         sql += " ORDER BY p.card_number LIMIT ?"
         params.append(limit)

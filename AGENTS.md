@@ -1,1 +1,1 @@
-DB/Images not committed. No schema change.
+DB/Images not committed. Schema change allowed.
