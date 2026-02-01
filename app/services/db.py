@@ -1,7 +1,8 @@
-import sqlite3
-from app.constants import TAG_ALIAS
 from pathlib import Path
-from typing import Optional
+import sqlite3
+
+from app.constants import TAG_ALIAS
+
 
 def ensure_db(path: str) -> bool:
     p = Path(path)
@@ -16,27 +17,28 @@ def ensure_db(path: str) -> bool:
         conn.close()
     return True
 
-def open_db(path):
+
+def open_db(path: str) -> sqlite3.Connection:
     if path:
         ensure_db(path)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     return conn
 
-def _expand_alias(q):
+def _expand_alias(q: str) -> set[str]:
     out = {q}
-    for k, vs in TAG_ALIAS.items():
-        if q == k:
-            out.update(vs)
-        elif q in vs:
-            out.add(k)
+    for key, values in TAG_ALIAS.items():
+        if q == key:
+            out.update(values)
+        elif q in values:
+            out.add(key)
     return out
 
-def _cols(conn, table: str):
+def _cols(conn: sqlite3.Connection, table: str) -> set[str]:
     rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
     return {r[1] for r in rows}  # r[1] = column name
 
-def _build_tag_joins(conn):
+def _build_tag_joins(conn: sqlite3.Connection) -> str | None:
     """
     DB마다 스키마가 달라서 print_tags/tags 컬럼을 보고 JOIN을 결정.
     지원 케이스:
@@ -44,7 +46,7 @@ def _build_tag_joins(conn):
       2) print_tags(print_id, tag_id) + tags(tag_id, tag, normalized)
     """
     pt_cols = _cols(conn, "print_tags")
-    t_cols  = _cols(conn, "tags")
+    t_cols = _cols(conn, "tags")
 
     # Case 1
     if "tag" in pt_cols and "tag" in t_cols:
@@ -65,7 +67,7 @@ def _build_tag_joins(conn):
     # Fallback: tags JOIN 불가 → 태그 검색 없이 카드번호/이름만
     return None
 
-def query_suggest(conn, q, limit=40):
+def query_suggest(conn: sqlite3.Connection, q: str, limit: int = 40) -> list[dict]:
     q = (q or "").strip()
     if not q:
         return []
@@ -88,9 +90,9 @@ def query_suggest(conn, q, limit=40):
         """
         params = [like, like, like, like]
 
-        for a in aliases:
+        for alias in aliases:
             sql += " OR t.tag LIKE ? OR COALESCE(t.normalized,'') LIKE ?"
-            params += [f"%{a}%", f"%{a}%"]
+            params += [f"%{alias}%", f"%{alias}%"]
 
         sql += " ORDER BY p.card_number LIMIT ?"
         params.append(limit)
@@ -108,14 +110,14 @@ def query_suggest(conn, q, limit=40):
     """
     return [dict(r) for r in conn.execute(sql, (like, like, limit))]
 
-def load_card_detail(conn, pid):
+def load_card_detail(conn: sqlite3.Connection, pid: int) -> dict | None:
     r = conn.execute(
         "SELECT raw_text FROM card_texts_ja WHERE print_id=?",
         (pid,),
     ).fetchone()
     return dict(r) if r else None
 
-def get_print_brief(conn, print_id: int) -> dict | None:
+def get_print_brief(conn: sqlite3.Connection, print_id: int) -> dict | None:
     row = conn.execute(
         """
         SELECT print_id, card_number, COALESCE(name_ja,'') AS name_ja, COALESCE(image_url,'') AS image_url

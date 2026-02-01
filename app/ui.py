@@ -1,8 +1,8 @@
 # app/ui.py
 from __future__ import annotations
 
+import sqlite3
 import threading
-from datetime import datetime, timedelta
 from pathlib import Path
 
 import flet as ft
@@ -20,6 +20,19 @@ from app.paths import get_default_data_root, get_project_root
 from app.services.images import local_image_path, download_image, resolve_url
 
 COLORS = ft.Colors if hasattr(ft, "Colors") else ft.colors
+SECTION_LABELS = (
+    "カードタイプ",
+    "タグ",
+    "レアリティ",
+    "推しスキル",
+    "SP推しスキル",
+    "アーツ",
+    "エクストラ",
+    "Bloomレベル",
+    "キーワード",
+    "LIFE",
+    "HP",
+)
 
 def with_opacity(opacity: float, color: str) -> str:
     return COLORS.with_opacity(opacity, color)
@@ -50,11 +63,11 @@ def icon_paths(project_root: Path) -> tuple[Path, Path]:
     return d / "app_icon.ico", d / "app_icon.png"
 
 
-def launch_app(db_path: str):
+def launch_app(db_path: str) -> None:
     project_root = get_project_root()
     data_root = get_default_data_root("hOCG_helper")
 
-    def main(page: ft.Page):
+    def main(page: ft.Page) -> None:
         thread_local = threading.local()
         conn_epoch = {"value": 0}
 
@@ -73,7 +86,7 @@ def launch_app(db_path: str):
         lv = ft.ListView(expand=True, spacing=2, padding=0)
 
         # --- Image area (중요: ft.Image()를 빈 생성자로 만들지 않음) ---
-        def build_image_widget(image_path: Path | None, image_url: str | None = None):
+        def build_image_widget(image_path: Path | None, image_url: str | None = None) -> ft.Control:
             # 이미지 파일이 존재할 때만 ft.Image(src=...) 생성
             if image_path and image_path.exists():
                 return ft.Image(
@@ -111,10 +124,10 @@ def launch_app(db_path: str):
         selected_card_number = {"no": ""}
         downloading = set()
 
-        def append_log(s: str):
+        def append_log(s: str) -> None:
             print(s, flush=True)
 
-        def setup_window_icon():
+        def setup_window_icon() -> None:
             ico_path, png_path = icon_paths(project_root)
             # Always try to use PNG from /app/app_icon.png first.
             if png_path.exists():
@@ -146,7 +159,7 @@ def launch_app(db_path: str):
 
         setup_window_icon()
 
-        def get_conn():
+        def get_conn() -> sqlite3.Connection:
             path = tf_db.value
             conn = getattr(thread_local, "conn", None)
             if (
@@ -165,7 +178,7 @@ def launch_app(db_path: str):
                 thread_local.path = path
             return conn
 
-        def close_thread_conn():
+        def close_thread_conn() -> None:
             conn = getattr(thread_local, "conn", None)
             if conn is not None:
                 try:
@@ -176,16 +189,16 @@ def launch_app(db_path: str):
             thread_local.epoch = -1
             thread_local.path = None
 
-        def set_image_for_card(card_number: str, image_url: str | None = None):
+        def set_image_for_card(card_number: str, image_url: str | None = None) -> None:
             p = local_image_path(data_root, card_number)
             img_container.content = build_image_widget(p if p.exists() else None, image_url)
             page.update()
 
-        def clear_image():
+        def clear_image() -> None:
             img_container.content = build_image_widget(None)
             page.update()
 
-        def ensure_image_download(card_number: str, image_url: str):
+        def ensure_image_download(card_number: str, image_url: str) -> None:
             if not card_number or not image_url:
                 return
             dest = local_image_path(data_root, card_number)
@@ -195,7 +208,7 @@ def launch_app(db_path: str):
                 return
             downloading.add(card_number)
 
-            def worker():
+            def worker() -> None:
                 try:
                     append_log(f"[IMG] downloading: {card_number} -> {dest.name}")
                     download_image(image_url, dest)
@@ -208,7 +221,7 @@ def launch_app(db_path: str):
 
             threading.Thread(target=worker, daemon=True).start()
 
-        def build_section_chip(text: str):
+        def build_section_chip(text: str) -> ft.Control:
             return ft.Container(
                 content=ft.Text(text, weight=ft.FontWeight.BOLD, size=12),
                 bgcolor=with_opacity(0.18, COLORS.BLUE_GREY_700),
@@ -216,24 +229,11 @@ def launch_app(db_path: str):
                 border_radius=12,
             )
 
-        def build_detail_line(line: str):
-            section_labels = (
-                "カードタイプ",
-                "タグ",
-                "レアリティ",
-                "推しスキル",
-                "SP推しスキル",
-                "アーツ",
-                "エクストラ",
-                "Bloomレベル",
-                "キーワード",
-                "LIFE",
-                "HP",
-            )
-            if line in section_labels:
+        def build_detail_line(line: str) -> ft.Control:
+            if line in SECTION_LABELS:
                 return build_section_chip(line)
 
-            for label in section_labels:
+            for label in SECTION_LABELS:
                 if line.startswith(label + " "):
                     rest = line[len(label):]
                     return ft.Text(
@@ -244,7 +244,7 @@ def launch_app(db_path: str):
                     )
             return ft.Text(line)
 
-        def set_detail_text(text: str | None):
+        def set_detail_text(text: str | None) -> None:
             detail_lv.controls.clear()
             if not text:
                 detail_lv.controls.append(ft.Text("(본문 없음)"))
@@ -270,7 +270,7 @@ def launch_app(db_path: str):
                     i += 1
             page.update()
 
-        def show_detail(pid: int):
+        def show_detail(pid: int) -> None:
             selected_print_id["id"] = pid
 
             try:
@@ -298,7 +298,7 @@ def launch_app(db_path: str):
 
             page.update()
 
-        def refresh_list():
+        def refresh_list() -> None:
             q = (tf_search.value or "").strip()
             lv.controls.clear()
 
@@ -328,13 +328,13 @@ def launch_app(db_path: str):
 
             page.update()
 
-        def on_search_change(e):
+        def on_search_change(e) -> None:
             refresh_list()
 
         tf_search.on_change = on_search_change
 
         # --- Update pipeline (background thread) ---
-        def do_update():
+        def do_update() -> None:
             try:
                 btn_update.disabled = True
                 tf_search.disabled = True
@@ -364,7 +364,7 @@ def launch_app(db_path: str):
                 tf_search.disabled = False
                 page.update()
 
-        def on_update_click(e):
+        def on_update_click(e) -> None:
             threading.Thread(target=do_update, daemon=True).start()
 
         btn_update.on_click = on_update_click
