@@ -11,6 +11,8 @@
 - tools/export_ko_tags_template.py
 - tools/import_ko_tags.py
 - tools/migrate_tags_split.py
+- tools/export_ko_all_template.py
+- tools/import_ko_all_from_csv.py
 - data/ko_input.csv
 
 ## 추가된 기능
@@ -18,6 +20,7 @@
 - 나무위키 검색/수집을 통해 한국어 내용 DB 적재 스크립트 추가
 - 카드 번호 기반 CSV 템플릿 export 및 CSV 기반 한국어 입력 반영 스크립트 추가
 - 태그 한/일 분리를 위한 마이그레이션 및 ko 태그 CSV export/import 스크립트 추가
+- 카드 번역 + 태그 번역을 하나의 CSV로 통합 export/import 지원
 - 정제(refine) 병렬 처리 옵션(--jobs) 추가 및 배치 업데이트로 성능 개선
 
 ## 변경된 기능
