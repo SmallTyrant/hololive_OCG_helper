@@ -2,9 +2,17 @@
 import subprocess
 import sys
 from pathlib import Path
+from typing import Iterator
 
-def _py():
+def _py() -> str:
     return sys.executable
+
+def _stream_output(process: subprocess.Popen[str]) -> Iterator[str]:
+    if process.stdout is None:
+        raise RuntimeError("process stdout not available")
+    for line in process.stdout:
+        yield line.rstrip("\n")
+
 
 def run_update_and_refine(db_path: str, delay: float = 0.1, workers: int = 8):
     """
@@ -32,18 +40,32 @@ def run_update_and_refine(db_path: str, delay: float = 0.1, workers: int = 8):
         "--workers",
         str(workers),
     ]
-    p1 = subprocess.Popen(cmd1, cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8")
-    for line in p1.stdout:
-        yield line.rstrip("\n")
+    p1 = subprocess.Popen(
+        cmd1,
+        cwd=str(root),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+    )
+    for line in _stream_output(p1):
+        yield line
     rc1 = p1.wait()
     if rc1 != 0:
         raise RuntimeError(f"scrape failed rc={rc1}")
 
     # 2) refine
     cmd2 = [_py(), str(tool_refine), "--db", db_path]
-    p2 = subprocess.Popen(cmd2, cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8")
-    for line in p2.stdout:
-        yield line.rstrip("\n")
+    p2 = subprocess.Popen(
+        cmd2,
+        cwd=str(root),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+    )
+    for line in _stream_output(p2):
+        yield line
     rc2 = p2.wait()
     if rc2 != 0:
         raise RuntimeError(f"refine failed rc={rc2}")
