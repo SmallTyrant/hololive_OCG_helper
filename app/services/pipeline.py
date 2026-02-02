@@ -21,7 +21,15 @@ def _stream_output(process: subprocess.Popen[str]) -> Iterator[str]:
         yield _mask_card_numbers(line.rstrip("\n"))
 
 
-def run_update_and_refine(db_path: str, delay: float = 0.1, workers: int = 8):
+def run_update_and_refine(
+    db_path: str,
+    delay: float = 0.1,
+    workers: int = 8,
+    *,
+    ko_page: str | None = None,
+    ko_page_file: str | None = None,
+    ko_overwrite: bool = False,
+):
     """
     tools/hocg_tool2.py scrape -> tools/hocg_refine_update.py
     stdout 라인 단위로 yield
@@ -29,11 +37,14 @@ def run_update_and_refine(db_path: str, delay: float = 0.1, workers: int = 8):
     root = Path(__file__).resolve().parents[2]  # project root
     tool_scrape = root / "tools" / "hocg_tool2.py"
     tool_refine = root / "tools" / "hocg_refine_update.py"
+    tool_ko = root / "tools" / "namuwiki_ko_import.py"
 
     if not tool_scrape.exists():
         raise FileNotFoundError(f"missing: {tool_scrape}")
     if not tool_refine.exists():
         raise FileNotFoundError(f"missing: {tool_refine}")
+    if not tool_ko.exists():
+        raise FileNotFoundError(f"missing: {tool_ko}")
 
     env = dict(**os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
 
@@ -82,3 +93,27 @@ def run_update_and_refine(db_path: str, delay: float = 0.1, workers: int = 8):
     rc2 = p2.wait()
     if rc2 != 0:
         raise RuntimeError(f"refine failed rc={rc2}")
+
+    if ko_page or ko_page_file:
+        cmd3 = [_py(), str(tool_ko), "--db", db_path]
+        if ko_page:
+            cmd3.extend(["--page", ko_page])
+        if ko_page_file:
+            cmd3.extend(["--page-file", ko_page_file])
+        if ko_overwrite:
+            cmd3.append("--overwrite")
+        p3 = subprocess.Popen(
+            cmd3,
+            cwd=str(root),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+        )
+        for line in _stream_output(p3):
+            yield line
+        rc3 = p3.wait()
+        if rc3 != 0:
+            raise RuntimeError(f"namuwiki import failed rc={rc3}")
