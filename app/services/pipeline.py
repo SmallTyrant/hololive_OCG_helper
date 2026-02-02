@@ -1,17 +1,23 @@
 # app/services/pipeline.py
+import re
 import subprocess
 import sys
 from pathlib import Path
 from typing import Iterator
 
+CARD_NUMBER_RE = re.compile(r"\b[hH][A-Za-z]{1,5}\d{2}-\d{3}\b")
+
 def _py() -> str:
     return sys.executable
+
+def _mask_card_numbers(text: str) -> str:
+    return CARD_NUMBER_RE.sub("[REDACTED]", text)
 
 def _stream_output(process: subprocess.Popen[str]) -> Iterator[str]:
     if process.stdout is None:
         raise RuntimeError("process stdout not available")
     for line in process.stdout:
-        yield line.rstrip("\n")
+        yield _mask_card_numbers(line.rstrip("\n"))
 
 
 def run_update_and_refine(db_path: str, delay: float = 0.1, workers: int = 8):

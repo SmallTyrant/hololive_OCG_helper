@@ -79,7 +79,7 @@ def launch_app(db_path: str) -> None:
         tf_db = ft.TextField(label="DB", value=db_path, expand=True)
         tf_search = ft.TextField(label="카드번호 / 이름 / 태그 검색", expand=True)
 
-        btn_update = ft.ElevatedButton("DB 생성/업데이트+정제")  # DB 없을 때도 이 버튼으로 생성
+        btn_update = ft.ElevatedButton("DB갱신")  # DB 없을 때도 이 버튼으로 생성
         # Progress bar removed (user requested no ETA/loader in UI)
 
         # --- Left: results ---
@@ -307,7 +307,7 @@ def launch_app(db_path: str) -> None:
                 return
 
             if not db_exists(tf_db.value):
-                append_log("[INFO] DB가 없어서 검색 불가. 'DB 생성/업데이트+정제'를 먼저 실행하세요.")
+                append_log("[INFO] DB가 없어서 검색 불가. 'DB갱신'을 먼저 실행하세요.")
                 page.update()
                 return
 
@@ -341,13 +341,13 @@ def launch_app(db_path: str) -> None:
                 page.update()
 
                 dbp = tf_db.value.strip()
-                append_log("[START] update + refine")
+                append_log("[START] DB 갱신")
 
                 # subprocess로 크롤링/정제
                 for line in run_update_and_refine(dbp):
                     append_log(line)
 
-                append_log("[DONE] update + refine")
+                append_log("[DONE] DB 갱신")
 
                 # 모든 스레드의 DB 연결 갱신 유도
                 conn_epoch["value"] += 1
@@ -357,7 +357,7 @@ def launch_app(db_path: str) -> None:
                 refresh_list()
 
             except Exception as ex:
-                append_log(f"[ERROR] 업데이트/정제 실패: {ex}")
+                append_log(f"[ERROR] DB 갱신 실패: {ex}")
 
             finally:
                 btn_update.disabled = False
@@ -376,7 +376,7 @@ def launch_app(db_path: str) -> None:
                 append_log("[INFO] DB 파일이 없어 빈 DB를 생성했습니다.")
             else:
                 append_log("[INFO] DB 파일이 없습니다.")
-            append_log("[INFO] 상단 'DB 생성/업데이트+정제'를 누르면 DB를 생성(크롤링+정제)합니다.")
+            append_log("[INFO] 상단 'DB갱신'을 누르면 DB를 생성(크롤링+정제)합니다.")
         else:
             # DB 있으면 즉시 연결
             try:
