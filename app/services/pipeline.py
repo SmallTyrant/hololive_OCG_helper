@@ -1,4 +1,5 @@
 # app/services/pipeline.py
+import os
 import re
 import subprocess
 import sys
@@ -34,6 +35,8 @@ def run_update_and_refine(db_path: str, delay: float = 0.1, workers: int = 8):
     if not tool_refine.exists():
         raise FileNotFoundError(f"missing: {tool_refine}")
 
+    env = dict(**os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+
     # 1) scrape
     cmd1 = [
         _py(),
@@ -53,6 +56,8 @@ def run_update_and_refine(db_path: str, delay: float = 0.1, workers: int = 8):
         stderr=subprocess.STDOUT,
         text=True,
         encoding="utf-8",
+        errors="replace",
+        env=env,
     )
     for line in _stream_output(p1):
         yield line
@@ -69,6 +74,8 @@ def run_update_and_refine(db_path: str, delay: float = 0.1, workers: int = 8):
         stderr=subprocess.STDOUT,
         text=True,
         encoding="utf-8",
+        errors="replace",
+        env=env,
     )
     for line in _stream_output(p2):
         yield line
