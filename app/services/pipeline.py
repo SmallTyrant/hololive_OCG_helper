@@ -53,6 +53,7 @@ def run_update_and_refine(db_path: str, delay: float = 0.1, workers: int = 8):
         stderr=subprocess.STDOUT,
         text=True,
         encoding="utf-8",
+        errors="replace",
     )
     for line in _stream_output(p1):
         yield line
@@ -69,6 +70,7 @@ def run_update_and_refine(db_path: str, delay: float = 0.1, workers: int = 8):
         stderr=subprocess.STDOUT,
         text=True,
         encoding="utf-8",
+        errors="replace",
     )
     for line in _stream_output(p2):
         yield line
