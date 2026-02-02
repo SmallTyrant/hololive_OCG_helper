@@ -48,10 +48,13 @@ def now_iso() -> str:
 def sha256_text(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
+def mask_card_numbers(text: str) -> str:
+    return CARDNO_RE.sub("[REDACTED]", text)
+
 
 def log(msg: str, verbose: bool) -> None:
     if verbose:
-        print(msg, flush=True)
+        print(mask_card_numbers(msg), flush=True)
 
 
 _thread_local = threading.local()
@@ -578,7 +581,7 @@ def _fetch_detail_worker(
         time.sleep(delay)
     sess = _get_thread_session()
     if verbose:
-        print(f"[FETCH] detail id={card_id} card={card_number}", flush=True)
+        log(f"[FETCH] detail id={card_id} card={card_number}", True)
     detail_html = fetch(
         sess,
         detail_url,
@@ -725,7 +728,7 @@ def process_list_page(expansion: str | None, page: int, html: bytes, args, sessi
 
             try:
                 if args.verbose:
-                    print(f"[FETCH] detail id={it.card_id} card={it.card_number}", flush=True)
+                    log(f"[FETCH] detail id={it.card_id} card={it.card_number}", True)
                 detail_html = fetch(
                     session,
                     detail_url,
