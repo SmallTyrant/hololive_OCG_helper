@@ -1,10 +1,12 @@
 # 변경 사항 요약 (KR)
 
 ## 변경된 파일
+- AGENTS.md
 - app/ui.py
 - app/services/db.py
 - app/services/pipeline.py
 - tools/hocg_refine_update.py
+- tools/hocg_tool2.py
 - tools/namu_sync.py
 - tools/export_ko_template.py
 - tools/import_ko_from_csv.py
@@ -14,6 +16,7 @@
 - tools/export_ko_all_template.py
 - tools/import_ko_all_from_csv.py
 - data/ko_input.csv
+- docs/changes_kr.md
 
 ## 추가된 기능
 - 카드 상세 화면에서 일본어/한국어 본문을 함께 표시
@@ -27,6 +30,7 @@
 - 크롤링/정제 파이프라인 호출 방식 단순화 (기본값 사용)
 - 상세 화면에서 색(色) 섹션 및 バトンタッチ 섹션 표시 제거
 - 상세 본문 표시 개선 (カードタイプ의 홀로멤 제거, Bloomレベル 한 줄 표시, HP 200 강조)
+- Bloomレベル/HP를 태그(칩) 스타일로 강조 표시
 - 태그 검색이 ja/ko 태그 모두를 대상으로 동작하도록 개선
 
 ## 제거된 기능

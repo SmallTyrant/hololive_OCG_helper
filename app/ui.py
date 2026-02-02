@@ -363,10 +363,8 @@ def launch_app(db_path: str) -> None:
                     if label == "HP":
                         rest_txt = rest.strip()
                         if "200" in rest_txt:
-                            return ft.Text(
+                            hp_text = ft.Text(
                                 spans=[
-                                    ft.TextSpan(label, style=ft.TextStyle(weight=ft.FontWeight.BOLD)),
-                                    ft.TextSpan(" "),
                                     ft.TextSpan(rest_txt.replace("200", "")),
                                     ft.TextSpan(
                                         "200",
@@ -377,6 +375,17 @@ def launch_app(db_path: str) -> None:
                                     ),
                                 ]
                             )
+                            return ft.Row(
+                                [build_section_chip(label), hp_text],
+                                spacing=6,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            )
+                    if label in ("Bloomレベル", "HP"):
+                        return ft.Row(
+                            [build_section_chip(label), ft.Text(rest.strip())],
+                            spacing=6,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        )
                     return ft.Text(
                         spans=[
                             ft.TextSpan(label, style=ft.TextStyle(weight=ft.FontWeight.BOLD)),
