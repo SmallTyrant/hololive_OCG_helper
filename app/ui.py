@@ -366,30 +366,47 @@ def launch_app(db_path: str) -> None:
                     )
             return ft.Text(line)
 
-        def set_detail_text(text: str | None) -> None:
-            detail_lv.controls.clear()
-            if not text:
-                detail_lv.controls.append(ft.Text("(본문 없음)"))
-            else:
-                lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-                i = 0
-                while i < len(lines):
-                    line = lines[i]
-                    if line == "色":
-                        i += 1
-                        continue
-                    if line.startswith("色 "):
-                        i += 1
-                        continue
-                    line = line.strip()
-                    if not line:
+        def append_detail_lines(text: str, apply_jp_filters: bool) -> None:
+            lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+            i = 0
+            while i < len(lines):
+                line = lines[i].strip()
+                if not line:
+                    i += 1
+                    continue
+                if apply_jp_filters:
+                    if line == "色" or line.startswith("色 "):
                         i += 1
                         continue
                     if line == "バトンタッチ" or line.startswith("バトンタッチ "):
                         i += 1
                         continue
                     detail_lv.controls.append(build_detail_line(line))
-                    i += 1
+                else:
+                    detail_lv.controls.append(ft.Text(line))
+                i += 1
+
+        def set_detail_text(ja_text: str | None, ko_text: str | None) -> None:
+            detail_lv.controls.clear()
+            ja = (ja_text or "").strip()
+            ko = (ko_text or "").strip()
+            has_any = False
+
+            if ko:
+                detail_lv.controls.append(build_section_chip("한국어"))
+                append_detail_lines(ko, apply_jp_filters=False)
+                has_any = True
+
+            if ja:
+                if ko:
+                    detail_lv.controls.append(ft.Divider(height=8))
+                    detail_lv.controls.append(build_section_chip("日本語"))
+                append_detail_lines(ja, apply_jp_filters=True)
+                has_any = True
+
+            if not has_any:
+                detail_lv.controls.append(ft.Text("(본문 없음)"))
+
             page.update()
 
         def show_detail(pid: int) -> None:
@@ -412,10 +429,13 @@ def launch_app(db_path: str) -> None:
 
                 # 본문 갱신
                 card = load_card_detail(conn, pid)
-                set_detail_text(card.get("raw_text", "") if card else None)
+                set_detail_text(
+                    card.get("raw_text", "") if card else None,
+                    card.get("ko_text", "") if card else None,
+                )
 
             except Exception as ex:
-                set_detail_text(f"[ERROR] 상세 로드 실패: {ex}")
+                set_detail_text(f"[ERROR] 상세 로드 실패: {ex}", None)
                 clear_image()
 
             page.update()

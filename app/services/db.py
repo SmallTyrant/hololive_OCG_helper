@@ -112,7 +112,16 @@ def query_suggest(conn: sqlite3.Connection, q: str, limit: int = 40) -> list[dic
 
 def load_card_detail(conn: sqlite3.Connection, pid: int) -> dict | None:
     r = conn.execute(
-        "SELECT raw_text FROM card_texts_ja WHERE print_id=?",
+        """
+        SELECT
+            ja.raw_text AS raw_text,
+            ko.effect_text AS ko_text,
+            ko.name AS ko_name
+        FROM prints p
+        LEFT JOIN card_texts_ja ja ON ja.print_id = p.print_id
+        LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
+        WHERE p.print_id=?
+        """,
         (pid,),
     ).fetchone()
     return dict(r) if r else None
