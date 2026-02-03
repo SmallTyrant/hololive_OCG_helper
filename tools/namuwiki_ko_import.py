@@ -81,6 +81,18 @@ LABEL_CELL_KEYWORDS = tuple(
 BULLET_MARKERS = ("■", "●", "◆", "◇", "•", "·")
 
 
+def is_effect_like(raw: str, normalized: str) -> bool:
+    if any(marker in raw for marker in BULLET_MARKERS):
+        return True
+    if "\n" in raw:
+        return True
+    if "[" in raw or "]" in raw:
+        return True
+    if "턴" in normalized or "자신" in normalized or "상대" in normalized:
+        return True
+    return len(normalized) >= 30
+
+
 def cell_has_keyword(cell: str, keywords: Iterable[str]) -> bool:
     normalized = normalize_header(cell)
     for key in keywords:
@@ -163,14 +175,15 @@ def find_header_map(header_cells: list[str], *, min_matches: int = 2) -> dict[st
     return mapping
 
 
-def pick_effect(cells: list[str], header_map: dict[str, int]) -> str:
+def pick_effect(cells: list[str], header_map: dict[str, int], *, allow_simple: bool = True) -> str:
     if "effect" in header_map:
         idx = header_map["effect"]
         if 0 <= idx < len(cells):
             return normalize_ws(cells[idx])
-    # fallback: pick the longest non-empty cell
+    # fallback: pick the most effect-like cell
     candidates = []
     for cell in cells:
+        raw = cell
         normalized = normalize_ws(cell)
         if not normalized:
             continue
@@ -178,10 +191,21 @@ def pick_effect(cells: list[str], header_map: dict[str, int]) -> str:
             continue
         if is_label_cell(normalized):
             continue
-        candidates.append(normalized)
+        effect_like = is_effect_like(raw, normalized)
+        if not allow_simple and not effect_like:
+            continue
+        score = len(normalized)
+        if effect_like:
+            score += 40
+        if "\n" in raw:
+            score += 20
+        if any(marker in raw for marker in BULLET_MARKERS):
+            score += 30
+        candidates.append((score, normalized))
     if not candidates:
         return ""
-    return max(candidates, key=len)
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return candidates[0][1]
 
 
 def pick_name(cells: list[str], header_map: dict[str, int]) -> str:
@@ -265,6 +289,8 @@ def parse_vertical_table(table, source_url: str) -> KoRow | None:
                     continue
                 if name and normalize_ws(text) == name:
                     continue
+                if not is_effect_like(raw, text):
+                    continue
                 score = len(text)
                 if "\n" in raw:
                     score += 20
@@ -315,7 +341,8 @@ def parse_tables(html: str, source_url: str) -> list[KoRow]:
             card_no = pick_card_number(cells, header_map)
             if not card_no:
                 continue
-            effect = pick_effect(cells, header_map)
+            allow_simple = "effect" in header_map
+            effect = pick_effect(cells, header_map, allow_simple=allow_simple)
             name = pick_name(cells, header_map)
             if not effect:
                 continue
