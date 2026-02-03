@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import argparse
+import html as html_lib
 import re
 import sqlite3
 import time
@@ -142,6 +143,91 @@ def _extract_descendants(html: str, parent_title: str) -> list[str]:
     return titles
 
 
+def _extract_category_items(html: str) -> list[str]:
+    links = re.findall(r'href=\"(/w/[^\"]+)\"', html)
+    items: list[str] = []
+    for link in links:
+        if not link.startswith("/w/"):
+            continue
+        title = unquote(link[3:])
+        if title.startswith("분류:"):
+            continue
+        if title.startswith("틀:"):
+            continue
+        if title.startswith("파일:"):
+            continue
+        if title.startswith("나무위키:"):
+            continue
+        items.append(title)
+    # de-dupe preserve order
+    seen = set()
+    out: list[str] = []
+    for t in items:
+        if t in seen:
+            continue
+        seen.add(t)
+        out.append(t)
+    return out
+
+
+def _extract_category_next_urls(html: str) -> list[str]:
+    html = html_lib.unescape(html)
+    links = re.findall(r'href=\"(/w/분류:[^\"]+?[&?]cfrom=[^\"]+)\"', html)
+    if not links:
+        links = re.findall(r'href=\"(/w/분류:[^\"]+?[&?]from=[^\"]+)\"', html)
+    out: list[str] = []
+    seen = set()
+    for link in links:
+        full = link if link.startswith("http") else f"{NAMU_BASE}{link}"
+        if full in seen:
+            continue
+        seen.add(full)
+        out.append(full)
+    return out
+
+
+def _crawl_category(
+    session: requests.Session,
+    *,
+    category: str,
+    timeout: float,
+    max_pages: int | None,
+) -> list[str]:
+    items: list[str] = []
+    if category.startswith("http"):
+        start_url = category
+    else:
+        start_url = f"{NAMU_BASE}/w/{quote(category)}"
+    queue = [start_url]
+    seen_urls = set()
+    pages = 0
+    while queue:
+        url = queue.pop(0)
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+        try:
+            html = fetch_html(session, url, timeout)
+        except Exception:
+            continue
+        items.extend(_extract_category_items(html))
+        for next_url in _extract_category_next_urls(html):
+            if next_url not in seen_urls:
+                queue.append(next_url)
+        pages += 1
+        if max_pages and pages >= max_pages:
+            break
+    # de-dupe preserve order
+    seen = set()
+    out: list[str] = []
+    for t in items:
+        if t in seen:
+            continue
+        seen.add(t)
+        out.append(t)
+    return out
+
+
 def discover_pages(
     session: requests.Session,
     *,
@@ -154,10 +240,24 @@ def discover_pages(
     max_search_pages: int | None,
     include_descendants: bool,
     max_depth: int | None,
+    category_pages: Iterable[str],
+    max_category_pages: int | None,
 ) -> list[str]:
     candidates: list[str] = []
     if include_base:
         candidates.append(base_title)
+
+    for category in category_pages:
+        if not category:
+            continue
+        candidates.extend(
+            _crawl_category(
+                session,
+                category=category,
+                timeout=timeout,
+                max_pages=max_category_pages,
+            )
+        )
 
     base_url = f"{NAMU_BASE}/w/{quote(base_title)}"
     try:
@@ -245,6 +345,9 @@ def main() -> int:
     ap.add_argument("--no-descendants", action="store_true", help="Do not scan subpages of matched pages")
     ap.add_argument("--max-depth", type=int, default=None, help="Max descendant depth (default: unlimited)")
     ap.add_argument("--max-search-pages", type=int, default=None, help="Max search result pages to scan (default: auto-until-empty)")
+    ap.add_argument("--no-category", action="store_true", help="Do not scan category pages")
+    ap.add_argument("--category", action="append", default=[], help="Extra category page title or URL")
+    ap.add_argument("--max-category-pages", type=int, default=30, help="Max category pages to scan")
     ap.add_argument("--page", action="append", default=[], help="Extra page title or URL to include")
     ap.add_argument("--page-file", help="Text file containing page titles/URLs")
     ap.add_argument("--timeout", type=float, default=15.0, help="HTTP timeout seconds")
@@ -257,6 +360,9 @@ def main() -> int:
 
     session = build_session()
     extra = list(iter_pages(args.page, args.page_file))
+    categories = list(args.category)
+    if not args.no_category:
+        categories.append(f"분류:{args.base}")
     titles = discover_pages(
         session,
         base_title=args.base,
@@ -268,6 +374,8 @@ def main() -> int:
         max_search_pages=args.max_search_pages,
         include_descendants=not args.no_descendants,
         max_depth=args.max_depth,
+        category_pages=categories,
+        max_category_pages=args.max_category_pages,
     )
 
     if not titles:
