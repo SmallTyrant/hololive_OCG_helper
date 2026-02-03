@@ -1,11 +1,21 @@
 # app/services/images.py
 import os
+import re
 from pathlib import Path
 from urllib.parse import urljoin
 
 import requests
 
 BASE = "https://hololive-official-cardgame.com"
+SAFE_CARD_NUMBER_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+def _sanitize_card_number(card_number: str) -> str:
+    safe = card_number.strip()
+    if not safe:
+        return "unknown"
+    safe = safe.replace(os.sep, "_").replace("/", "_")
+    safe = SAFE_CARD_NUMBER_RE.sub("_", safe)
+    return safe or "unknown"
 
 def images_dir(data_root: Path) -> Path:
     d = data_root / "images"
@@ -14,7 +24,7 @@ def images_dir(data_root: Path) -> Path:
 
 def local_image_path(data_root: Path, card_number: str) -> Path:
     # 파일명은 card_number 그대로. 확장자 png 통일
-    safe = card_number.strip()
+    safe = _sanitize_card_number(card_number)
     return images_dir(data_root) / f"{safe}.png"
 
 def resolve_url(image_url: str) -> str:
@@ -31,11 +41,19 @@ def download_image(url: str, dest: Path, timeout: int = 30) -> None:
     if not u:
         raise ValueError("empty image url")
 
-    r = requests.get(u, timeout=timeout)
-    r.raise_for_status()
-
-    # 원자적 저장(임시→교체)
     tmp = dest.with_suffix(dest.suffix + ".tmp")
-    with open(tmp, "wb") as f:
-        f.write(r.content)
-    os.replace(tmp, dest)
+    try:
+        r = requests.get(u, timeout=timeout, stream=True)
+        r.raise_for_status()
+        # 원자적 저장(임시→교체)
+        with open(tmp, "wb") as f:
+            for chunk in r.iter_content(chunk_size=1024 * 256):
+                if chunk:
+                    f.write(chunk)
+        os.replace(tmp, dest)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except Exception:
+                pass
