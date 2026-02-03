@@ -33,6 +33,11 @@ from tools.namuwiki_ko_common import (
 )
 from tools.namuwiki_ko_scrape import NAMU_BASE, parse_tables
 
+DEFAULT_EXTRA_PAGES = [
+    "블루밍 레디언스",
+    "블루밍 레디언스/카드",
+]
+
 
 def _is_relevant_title(title: str, base_title: str, *, match_substring: bool) -> bool:
     if title == base_title:
@@ -360,6 +365,9 @@ def main() -> int:
 
     session = build_session()
     extra = list(iter_pages(args.page, args.page_file))
+    for title in DEFAULT_EXTRA_PAGES:
+        if title not in extra:
+            extra.append(title)
     categories = list(args.category)
     if not args.no_category:
         categories.append(f"분류:{args.base}")
