@@ -562,57 +562,122 @@ def launch_app(db_path: str) -> None:
             show_toast(DB_MISSING_TOAST, persist=True)
 
         # --- Layout ---
-        top = ft.Row([tf_db, btn_update], vertical_alignment=ft.CrossAxisAlignment.CENTER)
-        search_row = ft.Row([tf_search], vertical_alignment=ft.CrossAxisAlignment.CENTER)
+        layout_state = {"mobile": None}
 
-        left = ft.Column(
-            [
-                ft.Container(ft.Text("목록"), padding=ft.padding.only(left=10, top=4)),
-                ft.Container(lv, expand=True, padding=10),
-            ],
-            expand=True,
-            spacing=0,
-        )
+        def is_mobile_layout() -> bool:
+            width = page.window_width or page.width or 0
+            return bool(width) and width < 900
 
-        middle = ft.Column(
-            [
-                ft.Container(ft.Text("이미지"), padding=ft.padding.only(left=10, top=4)),
-                img_container,
-            ],
-            expand=True,
-            spacing=0,
-        )
+        def build_layout() -> None:
+            mobile = is_mobile_layout()
+            if layout_state["mobile"] == mobile:
+                return
+            layout_state["mobile"] = mobile
 
-        right = ft.Column(
-            [
-                ft.Container(detail_lv, expand=True, padding=10),
-            ],
-            expand=True,
-            spacing=0,
-        )
+            page.controls.clear()
 
-        body = ft.Row(
-            [
-                ft.Container(left, expand=3),
-                ft.VerticalDivider(width=1),
-                ft.Container(middle, expand=6),
-                ft.VerticalDivider(width=1),
-                ft.Container(right, expand=4),
-            ],
-            expand=True,
-        )
+            if mobile:
+                top_row = ft.Row(
+                    [tf_search, btn_update],
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    spacing=8,
+                )
+                db_row = ft.Row([tf_db], vertical_alignment=ft.CrossAxisAlignment.CENTER)
+                list_section = ft.Column(
+                    [
+                        ft.Container(ft.Text("목록"), padding=ft.padding.only(left=10, top=4)),
+                        ft.Container(lv, height=240, padding=10),
+                    ],
+                    spacing=0,
+                )
+                image_section = ft.Column(
+                    [
+                        ft.Container(ft.Text("이미지"), padding=ft.padding.only(left=10, top=4)),
+                        ft.Container(img_container, height=320),
+                    ],
+                    spacing=0,
+                )
+                effect_section = ft.Column(
+                    [
+                        ft.Container(ft.Text("효과"), padding=ft.padding.only(left=10, top=4)),
+                        ft.Container(detail_lv, height=320, padding=10),
+                    ],
+                    spacing=0,
+                )
+                page.add(
+                    ft.Column(
+                        [
+                            top_row,
+                            db_row,
+                            ft.Divider(height=1),
+                            list_section,
+                            image_section,
+                            effect_section,
+                        ],
+                        expand=True,
+                        spacing=8,
+                        scroll=ft.ScrollMode.AUTO,
+                    )
+                )
+                return
 
-        page.add(
-            ft.Column(
+            top = ft.Row([tf_db, btn_update], vertical_alignment=ft.CrossAxisAlignment.CENTER)
+            search_row = ft.Row([tf_search], vertical_alignment=ft.CrossAxisAlignment.CENTER)
+
+            left = ft.Column(
                 [
-                    top,
-                    search_row,
-                    ft.Divider(height=1),
-                    body,
+                    ft.Container(ft.Text("목록"), padding=ft.padding.only(left=10, top=4)),
+                    ft.Container(lv, expand=True, padding=10),
                 ],
                 expand=True,
-                spacing=8,
+                spacing=0,
             )
-        )
+
+            middle = ft.Column(
+                [
+                    ft.Container(ft.Text("이미지"), padding=ft.padding.only(left=10, top=4)),
+                    img_container,
+                ],
+                expand=True,
+                spacing=0,
+            )
+
+            right = ft.Column(
+                [
+                    ft.Container(detail_lv, expand=True, padding=10),
+                ],
+                expand=True,
+                spacing=0,
+            )
+
+            body = ft.Row(
+                [
+                    ft.Container(left, expand=3),
+                    ft.VerticalDivider(width=1),
+                    ft.Container(middle, expand=6),
+                    ft.VerticalDivider(width=1),
+                    ft.Container(right, expand=4),
+                ],
+                expand=True,
+            )
+
+            page.add(
+                ft.Column(
+                    [
+                        top,
+                        search_row,
+                        ft.Divider(height=1),
+                        body,
+                    ],
+                    expand=True,
+                    spacing=8,
+                )
+            )
+
+        def on_resize(e) -> None:
+            build_layout()
+
+        page.on_resize = on_resize
+        build_layout()
 
     ft.app(target=main)
