@@ -4,6 +4,7 @@ from __future__ import annotations
 import sqlite3
 import threading
 import sys
+import time
 from pathlib import Path
 
 import flet as ft
@@ -78,6 +79,8 @@ def launch_app(db_path: str) -> None:
     def main(page: ft.Page) -> None:
         thread_local = threading.local()
         conn_epoch = {"value": 0}
+        db_health_cache = {"path": None, "value": None, "checked_at": 0.0}
+        DB_HEALTH_CACHE_TTL = 2.0
 
         page.title = "hOCG_helper"
         page.window_width = 1280
@@ -167,15 +170,30 @@ def launch_app(db_path: str) -> None:
 
         toast_state = {"seq": 0, "message": None}
 
+        def invalidate_db_health_cache() -> None:
+            db_health_cache["path"] = None
+            db_health_cache["value"] = None
+            db_health_cache["checked_at"] = 0.0
+
         def needs_db_update() -> bool:
             path = (tf_db.value or "").strip()
+            now = time.monotonic()
+            if (
+                db_health_cache["path"] == path
+                and db_health_cache["value"] is not None
+                and now - db_health_cache["checked_at"] < DB_HEALTH_CACHE_TTL
+            ):
+                return bool(db_health_cache["value"])
             if not path:
+                db_health_cache.update({"path": path, "value": True, "checked_at": now})
                 return True
             try:
                 p = Path(path)
                 if not p.exists() or not p.is_file() or p.stat().st_size == 0:
+                    db_health_cache.update({"path": path, "value": True, "checked_at": now})
                     return True
             except Exception:
+                db_health_cache.update({"path": path, "value": True, "checked_at": now})
                 return True
             try:
                 conn = sqlite3.connect(path)
@@ -184,12 +202,18 @@ def launch_app(db_path: str) -> None:
                         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='prints'"
                     ).fetchone()
                     if not row:
+                        db_health_cache.update({"path": path, "value": True, "checked_at": now})
                         return True
                     count = conn.execute("SELECT COUNT(1) FROM prints").fetchone()
-                    return (count[0] if count else 0) == 0
+                    value = (count[0] if count else 0) == 0
+                    db_health_cache.update(
+                        {"path": path, "value": value, "checked_at": now}
+                    )
+                    return value
                 finally:
                     conn.close()
             except Exception:
+                db_health_cache.update({"path": path, "value": True, "checked_at": now})
                 return True
 
         def show_toast(
@@ -486,6 +510,11 @@ def launch_app(db_path: str) -> None:
 
         tf_search.on_change = on_search_change
 
+        def on_db_change(e) -> None:
+            invalidate_db_health_cache()
+
+        tf_db.on_change = on_db_change
+
         # --- Update pipeline (background thread) ---
         def do_update() -> None:
             try:
@@ -521,6 +550,7 @@ def launch_app(db_path: str) -> None:
                 # 모든 스레드의 DB 연결 갱신 유도
                 conn_epoch["value"] += 1
                 close_thread_conn()
+                invalidate_db_health_cache()
 
                 # 검색 결과 재갱신
                 refresh_list()
