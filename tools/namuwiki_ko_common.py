@@ -15,6 +15,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 CARDNO_RE = re.compile(r"\b[hH][A-Za-z]{1,5}\d{2}-\d{3}\b")
+HANGUL_RE = re.compile(r"[가-힣]")
 
 EFFECT_HEADER_KEYWORDS = ("효과", "텍스트", "능력", "카드 효과", "효과 텍스트")
 NAME_HEADER_KEYWORDS = ("카드명", "카드 이름", "이름", "카드명(한)")
@@ -102,6 +103,27 @@ def is_label_cell(cell: str) -> bool:
     if not normalized:
         return False
     return any(key in normalized for key in LABEL_CELL_KEYWORDS)
+
+
+def extract_korean_name(text: str) -> str:
+    lines = [normalize_ws(l) for l in text.splitlines() if normalize_ws(l)]
+    for line in lines:
+        if line.startswith("#"):
+            continue
+        if not HANGUL_RE.search(line):
+            continue
+        cleaned = re.split(r"\b(?:LIFE|HP)\b", line)[0].strip()
+        cleaned = re.split(
+            r"(레벨|속성|오시 스킬|SP 오시 스킬|SP오시스킬|아츠|배턴 터치|레어도|코스트|에너지|카드 넘버|카드번호|카드 번호|카드넘버)",
+            cleaned,
+        )[0].strip()
+        cleaned = re.sub(r"\s+\d+.*$", "", cleaned).strip()
+        if not cleaned:
+            cleaned = line.strip()
+        if CARDNO_RE.search(cleaned):
+            continue
+        return cleaned
+    return ""
 
 
 @dataclass

@@ -22,6 +22,7 @@ from tools.namuwiki_ko_common import (
     NAME_HEADER_KEYWORDS,
     KoRow,
     cell_has_keyword,
+    extract_korean_name,
     find_header_map,
     is_effect_like,
     is_label_cell,
@@ -83,6 +84,14 @@ def parse_vertical_table(table, source_url: str) -> KoRow | None:
         if len(cells) >= 2 and cell_has_keyword(cells[0], NAME_HEADER_KEYWORDS):
             name = normalize_ws(cells[1])
             break
+    if not name:
+        for cells in rows:
+            for cell in cells:
+                name = extract_korean_name(cell)
+                if name:
+                    break
+            if name:
+                break
 
     def _build_effect_lines(rows: list[list[str]]) -> list[str]:
         lines: list[str] = []
