@@ -24,6 +24,7 @@ from typing import Iterable
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 import requests
+from bs4 import BeautifulSoup, FeatureNotFound
 
 from tools.namuwiki_ko_common import (
     build_session,
@@ -229,6 +230,44 @@ def _extract_category_next_urls(html: str) -> list[str]:
     return out
 
 
+def _extract_member_links(html: str, tags: Iterable[str]) -> list[str]:
+    if "등장 홀로멤" not in html:
+        return []
+    try:
+        soup = BeautifulSoup(html, "lxml")
+    except FeatureNotFound:
+        soup = BeautifulSoup(html, "html.parser")
+    tag_set = {t.strip() for t in tags if t and t.strip()}
+    if not tag_set:
+        return []
+    links: list[str] = []
+    for folding in soup.select("dl.wiki-folding"):
+        dt = folding.find("dt")
+        dd = folding.find("dd")
+        if not dt or not dd:
+            continue
+        label = dt.get_text(" ", strip=True)
+        if not any(tag in label for tag in tag_set):
+            continue
+        for a in dd.select("a[href^='/w/']"):
+            href = a.get("href")
+            if not href:
+                continue
+            title = unquote(href[3:])
+            if title.startswith("분류:") or title.startswith("틀:") or title.startswith("파일:"):
+                continue
+            links.append(title)
+    # de-dupe preserve order
+    seen = set()
+    out: list[str] = []
+    for t in links:
+        if t in seen:
+            continue
+        seen.add(t)
+        out.append(t)
+    return out
+
+
 def _crawl_category(
     session: requests.Session,
     *,
@@ -390,6 +429,8 @@ def main() -> int:
     ap.add_argument("--max-search-pages", type=int, default=None, help="Max search result pages to scan (default: auto-until-empty)")
     ap.add_argument("--no-category", action="store_true", help="Do not scan category pages")
     ap.add_argument("--no-card-subpages", action="store_true", help="Do not add '/카드' subpages")
+    ap.add_argument("--no-expand-members", action="store_true", help="Do not expand 등장 홀로멤 member lists")
+    ap.add_argument("--member-tag", action="append", default=["#JP"], help="Tag label to expand (e.g. #JP)")
     ap.add_argument("--category", action="append", default=[], help="Extra category page title or URL")
     ap.add_argument("--max-category-pages", type=int, default=30, help="Max category pages to scan")
     ap.add_argument("--page", action="append", default=[], help="Extra page title or URL to include")
@@ -430,8 +471,13 @@ def main() -> int:
         print("[ERROR] no candidate pages found")
         return 1
 
+    member_tags = [t for t in args.member_tag if t]
+
     selected: list[tuple[str, str]] = []
-    for title in titles:
+    pending = list(titles)
+    seen_titles = set(titles)
+    while pending:
+        title = pending.pop(0)
         url = title if title.startswith("http") else f"{NAMU_BASE}/w/{quote(title)}"
         try:
             html = fetch_html(session, url, args.timeout)
@@ -439,6 +485,12 @@ def main() -> int:
             if args.verbose:
                 print(f"[SKIP] {title} fetch failed: {exc}")
             continue
+        if not args.no_expand_members:
+            for member in _extract_member_links(html, member_tags):
+                if member in seen_titles:
+                    continue
+                seen_titles.add(member)
+                pending.append(member)
         rows = parse_tables(html, url)
         if rows:
             selected.append((title, html))

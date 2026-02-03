@@ -24,6 +24,8 @@ python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-desce
 python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-category
 python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --category "분류:홀로라이브 오피셜 카드 게임" --max-category-pages 50
 python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-card-subpages
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --member-tag "#JP"
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-expand-members
 ```
 
 Google Sheets 예시(공개 시트):
