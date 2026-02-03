@@ -88,6 +88,41 @@ def _extract_search_pages(html: str, query: str) -> list[str]:
     return pages
 
 
+def _search_for_query(
+    session: requests.Session,
+    *,
+    query: str,
+    timeout: float,
+    base_title: str,
+    match_substring: bool,
+    max_search_pages: int | None,
+    parent_title: str | None = None,
+) -> list[str]:
+    candidates: list[str] = []
+    search_urls = [f"{NAMU_BASE}/Search?q={quote(query)}"]
+    seen_search = set(search_urls)
+    idx = 0
+    while idx < len(search_urls):
+        if max_search_pages and idx >= max_search_pages:
+            break
+        url = search_urls[idx]
+        idx += 1
+        try:
+            html = fetch_html(session, url, timeout)
+        except Exception:
+            continue
+        if parent_title:
+            candidates.extend(_extract_descendants(html, parent_title))
+        else:
+            candidates.extend(extract_titles(html, base_title, match_substring=match_substring))
+        for link in _extract_search_pages(html, query):
+            full = link if link.startswith("http") else f"{NAMU_BASE}{link}"
+            if full not in seen_search:
+                seen_search.add(full)
+                search_urls.append(full)
+    return candidates
+
+
 def _extract_descendants(html: str, parent_title: str) -> list[str]:
     links = re.findall(r'href=\"(/w/[^\"]+)\"', html)
     titles: list[str] = []
@@ -125,25 +160,17 @@ def discover_pages(
     except Exception:
         pass
 
-    search_query = base_title
-    search_urls = [f"{NAMU_BASE}/Search?q={quote(search_query)}"]
-    seen_search = set(search_urls)
-    idx = 0
-    while idx < len(search_urls):
-        if max_search_pages and idx >= max_search_pages:
-            break
-        url = search_urls[idx]
-        idx += 1
-        try:
-            html = fetch_html(session, url, timeout)
-        except Exception:
-            continue
-        candidates.extend(extract_titles(html, base_title, match_substring=match_substring))
-        for link in _extract_search_pages(html, search_query):
-            full = link if link.startswith("http") else f"{NAMU_BASE}{link}"
-            if full not in seen_search:
-                seen_search.add(full)
-                search_urls.append(full)
+    for query in [base_title, base_title + "/"]:
+        candidates.extend(
+            _search_for_query(
+                session,
+                query=query,
+                timeout=timeout,
+                base_title=base_title,
+                match_substring=match_substring,
+                max_search_pages=max_search_pages,
+            )
+        )
 
     for page in extra_pages:
         if page:
@@ -183,6 +210,23 @@ def discover_pages(
             queue.append((child, depth + 1))
             if max_pages and len(out) >= max_pages:
                 return out
+        # Also search for deeper descendants via search results
+        for child in _search_for_query(
+            session,
+            query=title + "/",
+            timeout=timeout,
+            base_title=base_title,
+            match_substring=True,
+            max_search_pages=max_search_pages,
+            parent_title=title,
+        ):
+            if child in seen:
+                continue
+            seen.add(child)
+            out.append(child)
+            queue.append((child, depth + 1))
+            if max_pages and len(out) >= max_pages:
+                return out
     return out
 
 
@@ -194,7 +238,7 @@ def main() -> int:
     ap.add_argument("--no-match-substring", action="store_true", help="Only include titles starting/ending with base title")
     ap.add_argument("--no-descendants", action="store_true", help="Do not scan subpages of matched pages")
     ap.add_argument("--max-depth", type=int, default=None, help="Max descendant depth (default: unlimited)")
-    ap.add_argument("--max-search-pages", type=int, default=50, help="Max search result pages to scan")
+    ap.add_argument("--max-search-pages", type=int, default=None, help="Max search result pages to scan (default: unlimited)")
     ap.add_argument("--page", action="append", default=[], help="Extra page title or URL to include")
     ap.add_argument("--page-file", help="Text file containing page titles/URLs")
     ap.add_argument("--timeout", type=float, default=15.0, help="HTTP timeout seconds")
