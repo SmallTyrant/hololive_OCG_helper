@@ -88,6 +88,19 @@ def _extract_search_pages(html: str, query: str) -> list[str]:
     return pages
 
 
+def _extract_descendants(html: str, parent_title: str) -> list[str]:
+    links = re.findall(r'href=\"(/w/[^\"]+)\"', html)
+    titles: list[str] = []
+    prefix = parent_title + "/"
+    for link in links:
+        if not link.startswith("/w/"):
+            continue
+        title = unquote(link[3:])
+        if title.startswith(prefix):
+            titles.append(title)
+    return titles
+
+
 def discover_pages(
     session: requests.Session,
     *,
@@ -98,6 +111,8 @@ def discover_pages(
     max_pages: int | None,
     match_substring: bool,
     max_search_pages: int | None,
+    include_descendants: bool,
+    max_depth: int | None,
 ) -> list[str]:
     candidates: list[str] = []
     if include_base:
@@ -144,6 +159,30 @@ def discover_pages(
         out.append(title)
         if max_pages and len(out) >= max_pages:
             break
+
+    if not include_descendants:
+        return out
+
+    queue: list[tuple[str, int]] = [(t, 0) for t in out]
+    while queue:
+        title, depth = queue.pop(0)
+        if max_depth is not None and depth >= max_depth:
+            continue
+        if not (title.startswith(base_title + "/") or title.endswith("/" + base_title)):
+            continue
+        url = title if title.startswith("http") else f"{NAMU_BASE}/w/{quote(title)}"
+        try:
+            html = fetch_html(session, url, timeout)
+        except Exception:
+            continue
+        for child in _extract_descendants(html, title):
+            if child in seen:
+                continue
+            seen.add(child)
+            out.append(child)
+            queue.append((child, depth + 1))
+            if max_pages and len(out) >= max_pages:
+                return out
     return out
 
 
@@ -153,6 +192,8 @@ def main() -> int:
     ap.add_argument("--base", default="홀로라이브 오피셜 카드 게임", help="Base NamuWiki page title")
     ap.add_argument("--include-base", action="store_true", help="Include the base page itself")
     ap.add_argument("--no-match-substring", action="store_true", help="Only include titles starting/ending with base title")
+    ap.add_argument("--no-descendants", action="store_true", help="Do not scan subpages of matched pages")
+    ap.add_argument("--max-depth", type=int, default=None, help="Max descendant depth (default: unlimited)")
     ap.add_argument("--max-search-pages", type=int, default=50, help="Max search result pages to scan")
     ap.add_argument("--page", action="append", default=[], help="Extra page title or URL to include")
     ap.add_argument("--page-file", help="Text file containing page titles/URLs")
@@ -175,6 +216,8 @@ def main() -> int:
         max_pages=args.max_pages,
         match_substring=not args.no_match_substring,
         max_search_pages=args.max_search_pages,
+        include_descendants=not args.no_descendants,
+        max_depth=args.max_depth,
     )
 
     if not titles:
