@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Import Korean card texts from NamuWiki into card_texts_ko.
+"""Import Korean card texts from NamuWiki or Google Sheets into card_texts_ko.
 
 Usage example:
   python tools/namuwiki_ko_import.py --db data/hololive_ocg.sqlite --page "hololive OCG/카드 목록"
+  python tools/namuwiki_ko_import.py --db data/hololive_ocg.sqlite --sheet-url "https://docs.google.com/spreadsheets/d/<id>/edit#gid=0"
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import re
 import sqlite3
 import sys
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -26,6 +28,7 @@ CARDNO_RE = re.compile(r"\b[hH][A-Za-z]{1,5}\d{2}-\d{3}\b")
 
 EFFECT_HEADER_KEYWORDS = ("효과", "텍스트", "능력", "카드 효과", "효과 텍스트")
 NAME_HEADER_KEYWORDS = ("카드명", "카드 이름", "이름", "카드명(한)")
+CARDNO_HEADER_KEYWORDS = ("카드번호", "카드 번호", "card number", "card no", "card_no", "print", "카드넘버")
 
 
 def now_iso() -> str:
@@ -45,7 +48,7 @@ def normalize_header(text: str) -> str:
 
 
 @dataclass
-class NamuRow:
+class KoRow:
     card_number: str
     name: str
     effect: str
@@ -77,6 +80,10 @@ def find_header_map(header_cells: list[str]) -> dict[str, int]:
     mapping: dict[str, int] = {}
     normalized = [normalize_header(c) for c in header_cells]
     for idx, cell in enumerate(normalized):
+        for key in CARDNO_HEADER_KEYWORDS:
+            if key in cell:
+                mapping["card_number"] = idx
+                break
         for key in EFFECT_HEADER_KEYWORDS:
             if key in cell:
                 mapping["effect"] = idx
@@ -107,9 +114,23 @@ def pick_name(cells: list[str], header_map: dict[str, int]) -> str:
     return ""
 
 
-def parse_tables(html: str, source_url: str) -> list[NamuRow]:
+def pick_card_number(cells: list[str], header_map: dict[str, int]) -> str:
+    if "card_number" in header_map:
+        idx = header_map["card_number"]
+        if 0 <= idx < len(cells):
+            value = normalize_ws(cells[idx])
+            if value:
+                return value
+    for cell in cells:
+        match = CARDNO_RE.search(cell)
+        if match:
+            return normalize_card_number(match.group(0))
+    return ""
+
+
+def parse_tables(html: str, source_url: str) -> list[KoRow]:
     soup = BeautifulSoup(html, "html.parser")
-    rows: list[NamuRow] = []
+    rows: list[KoRow] = []
     for table in soup.select("table"):
         header_map: dict[str, int] = {}
         header_cells: list[str] = []
@@ -131,16 +152,14 @@ def parse_tables(html: str, source_url: str) -> list[NamuRow]:
             body_rows = body_rows[1:]
 
         for cells in body_rows:
-            joined = " ".join(cells)
-            m = CARDNO_RE.search(joined)
-            if not m:
+            card_no = pick_card_number(cells, header_map)
+            if not card_no:
                 continue
-            card_no = normalize_card_number(m.group(0))
             effect = pick_effect(cells, header_map)
             name = pick_name(cells, header_map)
             if not effect:
                 continue
-            rows.append(NamuRow(card_number=card_no, name=name, effect=effect, source_url=source_url))
+            rows.append(KoRow(card_number=card_no, name=name, effect=effect, source_url=source_url))
     return rows
 
 
@@ -155,6 +174,50 @@ def iter_pages(pages: list[str], page_file: str | None) -> Iterable[str]:
                 if not line or line.startswith("#"):
                     continue
                 yield line
+
+
+def build_sheet_csv_url(sheet_url: str, gid: str | None) -> str:
+    if "export?format=csv" in sheet_url:
+        return sheet_url
+    parsed = urlparse(sheet_url)
+    if "docs.google.com" not in parsed.netloc:
+        return sheet_url
+    path_parts = parsed.path.strip("/").split("/")
+    if "d" in path_parts:
+        idx = path_parts.index("d")
+        if idx + 1 < len(path_parts):
+            sheet_id = path_parts[idx + 1]
+            query_gid = gid
+            if not query_gid:
+                query = parse_qs(parsed.query)
+                query_gid = query.get("gid", [None])[0]
+            if not query_gid and parsed.fragment.startswith("gid="):
+                query_gid = parsed.fragment.split("gid=", 1)[-1] or None
+            if not query_gid:
+                query_gid = "0"
+            return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={query_gid}"
+    return sheet_url
+
+
+def parse_sheet_csv(csv_text: str, source_url: str) -> list[KoRow]:
+    rows: list[KoRow] = []
+    reader = csv.reader(csv_text.splitlines())
+    all_rows = [row for row in reader if row]
+    if not all_rows:
+        return rows
+    header_cells = all_rows[0]
+    header_map = find_header_map(header_cells)
+    data_rows = all_rows[1:] if header_map else all_rows
+    for cells in data_rows:
+        card_no = pick_card_number(cells, header_map)
+        if not card_no:
+            continue
+        effect = pick_effect(cells, header_map)
+        name = pick_name(cells, header_map)
+        if not effect:
+            continue
+        rows.append(KoRow(card_number=card_no, name=name, effect=effect, source_url=source_url))
+    return rows
 
 
 def upsert_ko_text(
@@ -219,20 +282,58 @@ def import_from_pages(db_path: str, pages: list[str], page_file: str | None, *, 
     return updated
 
 
+def import_from_sheet(db_path: str, sheet_url: str, *, timeout: float, overwrite: bool, gid: str | None) -> int:
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    session = build_session()
+    csv_url = build_sheet_csv_url(sheet_url, gid)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    resp = session.get(csv_url, headers=headers, timeout=timeout)
+    resp.raise_for_status()
+    updated = 0
+    for row in parse_sheet_csv(resp.text, csv_url):
+        print_row = conn.execute(
+            "SELECT print_id FROM prints WHERE upper(card_number)=upper(?)",
+            (row.card_number,),
+        ).fetchone()
+        if not print_row:
+            print(f"[SKIP] missing print for {row.card_number}")
+            continue
+        if upsert_ko_text(conn, int(print_row["print_id"]), row.name, row.effect, row.source_url, overwrite=overwrite):
+            updated += 1
+    conn.commit()
+    conn.close()
+    return updated
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", required=True, help="SQLite DB path")
     ap.add_argument("--page", action="append", default=[], help="NamuWiki page title or full URL")
     ap.add_argument("--page-file", help="Text file containing page titles/URLs")
+    ap.add_argument("--sheet-url", help="Google Sheets URL (share or export CSV)")
+    ap.add_argument("--sheet-gid", help="Google Sheets gid (optional)")
     ap.add_argument("--timeout", type=float, default=15.0, help="HTTP timeout seconds")
     ap.add_argument("--overwrite", action="store_true", help="Overwrite existing Korean texts")
     args = ap.parse_args()
 
-    if not args.page and not args.page_file:
-        print("No pages provided. Use --page or --page-file.")
+    if not args.page and not args.page_file and not args.sheet_url:
+        print("No sources provided. Use --page/--page-file or --sheet-url.")
         return 1
 
-    updated = import_from_pages(args.db, args.page, args.page_file, timeout=args.timeout, overwrite=args.overwrite)
+    updated = 0
+    if args.page or args.page_file:
+        updated += import_from_pages(args.db, args.page, args.page_file, timeout=args.timeout, overwrite=args.overwrite)
+    if args.sheet_url:
+        updated += import_from_sheet(
+            args.db,
+            args.sheet_url,
+            timeout=args.timeout,
+            overwrite=args.overwrite,
+            gid=args.sheet_gid,
+        )
     print(f"[DONE] updated={updated}")
     return 0
 

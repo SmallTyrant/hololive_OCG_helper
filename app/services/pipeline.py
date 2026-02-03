@@ -29,6 +29,8 @@ def run_update_and_refine(
     ko_page: str | None = None,
     ko_page_file: str | None = None,
     ko_overwrite: bool = False,
+    ko_sheet_url: str | None = None,
+    ko_sheet_gid: str | None = None,
 ):
     """
     tools/hocg_tool2.py scrape -> tools/hocg_refine_update.py
@@ -94,12 +96,19 @@ def run_update_and_refine(
     if rc2 != 0:
         raise RuntimeError(f"refine failed rc={rc2}")
 
-    if ko_page or ko_page_file:
+    sheet_url = ko_sheet_url or os.environ.get("HOCG_KO_SHEET_URL")
+    sheet_gid = ko_sheet_gid or os.environ.get("HOCG_KO_SHEET_GID")
+
+    if ko_page or ko_page_file or sheet_url:
         cmd3 = [_py(), str(tool_ko), "--db", db_path]
         if ko_page:
             cmd3.extend(["--page", ko_page])
         if ko_page_file:
             cmd3.extend(["--page-file", ko_page_file])
+        if sheet_url:
+            cmd3.extend(["--sheet-url", sheet_url])
+        if sheet_gid:
+            cmd3.extend(["--sheet-gid", sheet_gid])
         if ko_overwrite:
             cmd3.append("--overwrite")
         p3 = subprocess.Popen(
