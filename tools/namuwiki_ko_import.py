@@ -93,6 +93,7 @@ def import_from_sheet(db_path: str, sheet_url: str, *, timeout: float, overwrite
         conn,
         parse_sheet_csv(resp.text, csv_url),
         overwrite=overwrite,
+        skip_if_present=True,
         print_map=print_map,
         existing_ko=existing_ko,
     )

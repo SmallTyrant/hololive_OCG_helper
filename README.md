@@ -27,6 +27,7 @@ python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-card-
 python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --member-tag "#JP"
 python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --member-tag "#ID" --member-tag "#EN" --member-tag "#DEV_IS"
 python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-expand-members
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-skip-existing
 python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-extra-list
 python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --extra-list config/namuwiki_pages.txt
 ```

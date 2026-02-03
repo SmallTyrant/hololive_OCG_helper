@@ -224,10 +224,11 @@ def upsert_ko_text(
     source_url: str,
     *,
     overwrite: bool,
+    skip_if_present: bool = True,
     existing: dict[int, tuple[str, str, int]] | None = None,
 ) -> bool:
     cached = existing.get(print_id) if existing is not None else None
-    if cached and not overwrite:
+    if cached and not overwrite and skip_if_present:
         if cached[1].strip():
             return False
     version = 1
@@ -277,6 +278,7 @@ def import_rows(
     rows: Iterable[KoRow],
     *,
     overwrite: bool,
+    skip_if_present: bool = True,
     print_map: dict[str, int],
     existing_ko: dict[int, tuple[str, str, int]],
 ) -> int:
@@ -293,6 +295,7 @@ def import_rows(
             row.effect,
             row.source_url,
             overwrite=overwrite,
+            skip_if_present=skip_if_present,
             existing=existing_ko,
         ):
             updated += 1

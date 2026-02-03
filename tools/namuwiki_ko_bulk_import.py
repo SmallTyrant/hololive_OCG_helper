@@ -440,6 +440,7 @@ def main() -> int:
     ap.add_argument("--max-pages", type=int, default=None, help="Max pages to consider")
     ap.add_argument("--dry-run", action="store_true", help="List pages and exit without DB writes")
     ap.add_argument("--overwrite", action="store_true", help="Overwrite existing Korean texts")
+    ap.add_argument("--no-skip-existing", action="store_true", help="Update even if existing text is present")
     ap.add_argument("--verbose", action="store_true", help="Log skipped pages")
     args = ap.parse_args()
 
@@ -522,6 +523,7 @@ def main() -> int:
             conn,
             rows,
             overwrite=args.overwrite,
+            skip_if_present=not args.no_skip_existing,
             print_map=print_map,
             existing_ko=existing_ko,
         )
