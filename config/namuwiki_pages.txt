@@ -1,0 +1,22 @@
+# NamuWiki pages to include by default (one per line).
+# Accepts titles or full URLs. Lines starting with # are ignored.
+
+블루밍 레디언스
+블루밍 레디언스/카드
+퀀텟 스펙트럼
+엘리트 스파크
+큐리어스 유니버스
+인챈트 레갈리아
+아야카시 버밀리온
+토키노 소라&AZKi
+적 나키리 아야메
+청 네코마타 오카유
+자 유즈키 초코
+백 토도로키 하지메
+녹 카자마 이로하
+황 시라누이 후레아
+백 아마네 카나타
+적 호쇼 마린
+오시 린도 치하야
+오시 코가네이 니코
+홀로라이브 오피셜 카드 게임/프로모션 카드

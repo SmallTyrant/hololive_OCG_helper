@@ -34,25 +34,7 @@ from tools.namuwiki_ko_common import (
 )
 from tools.namuwiki_ko_scrape import NAMU_BASE, parse_tables
 
-DEFAULT_EXTRA_PAGES = [
-    "블루밍 레디언스",
-    "퀀텟 스펙트럼",
-    "엘리트 스파크",
-    "큐리어스 유니버스",
-    "인챈트 레갈리아",
-    "아야카시 버밀리온",
-    "토키노 소라&AZKi",
-    "적 나키리 아야메",
-    "청 네코마타 오카유",
-    "자 유즈키 초코",
-    "백 토도로키 하지메",
-    "녹 카자마 이로하",
-    "황 시라누이 후레아",
-    "백 아마네 카나타",
-    "적 호쇼 마린",
-    "오시 린도 치하야",
-    "오시 코가네이 니코",
-]
+DEFAULT_EXTRA_LIST = ROOT / "config" / "namuwiki_pages.txt"
 
 
 def _is_relevant_title(title: str, base_title: str, *, match_substring: bool) -> bool:
@@ -447,6 +429,8 @@ def main() -> int:
         default=["#JP", "#ID", "#EN", "#DEV_IS"],
         help="Tag label to expand (e.g. #JP)",
     )
+    ap.add_argument("--no-extra-list", action="store_true", help="Do not load the default extra list file")
+    ap.add_argument("--extra-list", action="append", default=[], help="Extra list file with page titles/URLs")
     ap.add_argument("--category", action="append", default=[], help="Extra category page title or URL")
     ap.add_argument("--max-category-pages", type=int, default=30, help="Max category pages to scan")
     ap.add_argument("--page", action="append", default=[], help="Extra page title or URL to include")
@@ -461,9 +445,11 @@ def main() -> int:
 
     session = build_session()
     extra = list(iter_pages(args.page, args.page_file))
-    for title in DEFAULT_EXTRA_PAGES:
-        if title not in extra:
-            extra.append(title)
+    if not args.no_extra_list and DEFAULT_EXTRA_LIST.exists():
+        extra.extend(iter_pages([], str(DEFAULT_EXTRA_LIST)))
+    for list_path in args.extra_list:
+        if list_path:
+            extra.extend(iter_pages([], list_path))
     extra = expand_card_subpages(extra, include_card_subpages=not args.no_card_subpages)
     categories = list(args.category)
     if not args.no_category:

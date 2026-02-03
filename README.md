@@ -27,7 +27,11 @@ python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-card-
 python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --member-tag "#JP"
 python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --member-tag "#ID" --member-tag "#EN" --member-tag "#DEV_IS"
 python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-expand-members
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-extra-list
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --extra-list config/namuwiki_pages.txt
 ```
+
+기본 추가 페이지 목록은 `config/namuwiki_pages.txt`에서 직접 관리할 수 있습니다.
 
 Google Sheets 예시(공개 시트):
 ```
