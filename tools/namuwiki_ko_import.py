@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import re
 import sqlite3
 import sys
@@ -20,8 +21,9 @@ from typing import Iterable
 from urllib.parse import parse_qs, quote, urlparse
 
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, FeatureNotFound
 from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 NAMU_BASE = "https://namu.wiki"
 CARDNO_RE = re.compile(r"\b[hH][A-Za-z]{1,5}\d{2}-\d{3}\b")
@@ -57,7 +59,24 @@ class KoRow:
 
 def build_session() -> requests.Session:
     session = requests.Session()
-    adapter = HTTPAdapter(pool_connections=16, pool_maxsize=16, max_retries=0)
+    session.headers.update(
+        {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+        }
+    )
+    retry = Retry(
+        total=5,
+        backoff_factor=0.5,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=("GET",),
+        raise_on_status=False,
+        respect_retry_after_header=True,
+    )
+    adapter = HTTPAdapter(pool_connections=16, pool_maxsize=16, max_retries=retry)
     session.mount("https://", adapter)
     session.mount("http://", adapter)
     return session
@@ -68,29 +87,32 @@ def fetch_html(session: requests.Session, page: str, *, timeout: float) -> str:
         url = page
     else:
         url = f"{NAMU_BASE}/w/{quote(page)}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    resp = session.get(url, headers=headers, timeout=timeout)
+    resp = session.get(url, timeout=timeout)
     resp.raise_for_status()
     return resp.text
 
 
-def find_header_map(header_cells: list[str]) -> dict[str, int]:
+def find_header_map(header_cells: list[str], *, min_matches: int = 2) -> dict[str, int]:
     mapping: dict[str, int] = {}
     normalized = [normalize_header(c) for c in header_cells]
     for idx, cell in enumerate(normalized):
-        for key in CARDNO_HEADER_KEYWORDS:
-            if key in cell:
-                mapping["card_number"] = idx
-                break
-        for key in EFFECT_HEADER_KEYWORDS:
-            if key in cell:
-                mapping["effect"] = idx
-                break
-        for key in NAME_HEADER_KEYWORDS:
-            if key in cell:
-                mapping["name"] = idx
+        if "card_number" not in mapping:
+            for key in CARDNO_HEADER_KEYWORDS:
+                if key in cell:
+                    mapping["card_number"] = idx
+                    break
+        if "effect" not in mapping:
+            for key in EFFECT_HEADER_KEYWORDS:
+                if key in cell:
+                    mapping["effect"] = idx
+                    break
+        if "name" not in mapping:
+            for key in NAME_HEADER_KEYWORDS:
+                if key in cell:
+                    mapping["name"] = idx
+                    break
+    if len(mapping) < min_matches:
+        return {}
     return mapping
 
 
@@ -100,7 +122,14 @@ def pick_effect(cells: list[str], header_map: dict[str, int]) -> str:
         if 0 <= idx < len(cells):
             return normalize_ws(cells[idx])
     # fallback: pick the longest non-empty cell
-    candidates = [normalize_ws(c) for c in cells if normalize_ws(c)]
+    candidates = []
+    for cell in cells:
+        normalized = normalize_ws(cell)
+        if not normalized:
+            continue
+        if CARDNO_RE.search(normalized):
+            continue
+        candidates.append(normalized)
     if not candidates:
         return ""
     return max(candidates, key=len)
@@ -120,7 +149,7 @@ def pick_card_number(cells: list[str], header_map: dict[str, int]) -> str:
         if 0 <= idx < len(cells):
             value = normalize_ws(cells[idx])
             if value:
-                return value
+                return normalize_card_number(value)
     for cell in cells:
         match = CARDNO_RE.search(cell)
         if match:
@@ -129,7 +158,10 @@ def pick_card_number(cells: list[str], header_map: dict[str, int]) -> str:
 
 
 def parse_tables(html: str, source_url: str) -> list[KoRow]:
-    soup = BeautifulSoup(html, "html.parser")
+    try:
+        soup = BeautifulSoup(html, "lxml")
+    except FeatureNotFound:
+        soup = BeautifulSoup(html, "html.parser")
     rows: list[KoRow] = []
     for table in soup.select("table"):
         header_map: dict[str, int] = {}
@@ -201,7 +233,8 @@ def build_sheet_csv_url(sheet_url: str, gid: str | None) -> str:
 
 def parse_sheet_csv(csv_text: str, source_url: str) -> list[KoRow]:
     rows: list[KoRow] = []
-    reader = csv.reader(csv_text.splitlines())
+    csv_text = csv_text.lstrip("\ufeff")
+    reader = csv.reader(io.StringIO(csv_text))
     all_rows = [row for row in reader if row]
     if not all_rows:
         return rows
@@ -228,18 +261,16 @@ def upsert_ko_text(
     source_url: str,
     *,
     overwrite: bool,
+    existing: dict[int, tuple[str, str, int]] | None = None,
 ) -> bool:
-    row = conn.execute(
-        "SELECT name, effect_text, version FROM card_texts_ko WHERE print_id=?",
-        (print_id,),
-    ).fetchone()
-    if row and not overwrite:
-        if row["effect_text"] and row["effect_text"].strip():
+    cached = existing.get(print_id) if existing is not None else None
+    if cached and not overwrite:
+        if cached[1].strip():
             return False
     version = 1
-    if row:
-        version = int(row["version"] or 1)
-        if row["effect_text"] != effect or row["name"] != name:
+    if cached:
+        version = int(cached[2] or 1)
+        if cached[1] != effect or cached[0] != name:
             version += 1
     conn.execute(
         """
@@ -255,28 +286,74 @@ def upsert_ko_text(
         """,
         (print_id, name, effect, source_url, "namuwiki", version, now_iso()),
     )
+    if existing is not None:
+        existing[print_id] = (name, effect, version)
     return True
+
+
+def load_print_map(conn: sqlite3.Connection) -> dict[str, int]:
+    mapping: dict[str, int] = {}
+    for row in conn.execute("SELECT print_id, card_number FROM prints"):
+        mapping[normalize_card_number(row["card_number"] or "")] = int(row["print_id"])
+    return mapping
+
+
+def load_existing_ko(conn: sqlite3.Connection) -> dict[int, tuple[str, str, int]]:
+    mapping: dict[int, tuple[str, str, int]] = {}
+    for row in conn.execute("SELECT print_id, name, effect_text, version FROM card_texts_ko"):
+        mapping[int(row["print_id"])] = (
+            row["name"] or "",
+            row["effect_text"] or "",
+            int(row["version"] or 1),
+        )
+    return mapping
+
+
+def import_rows(
+    conn: sqlite3.Connection,
+    rows: Iterable[KoRow],
+    *,
+    overwrite: bool,
+    print_map: dict[str, int],
+    existing_ko: dict[int, tuple[str, str, int]],
+) -> int:
+    updated = 0
+    for row in rows:
+        print_id = print_map.get(normalize_card_number(row.card_number))
+        if not print_id:
+            print(f"[SKIP] missing print for {row.card_number}")
+            continue
+        if upsert_ko_text(
+            conn,
+            print_id,
+            row.name,
+            row.effect,
+            row.source_url,
+            overwrite=overwrite,
+            existing=existing_ko,
+        ):
+            updated += 1
+    return updated
 
 
 def import_from_pages(db_path: str, pages: list[str], page_file: str | None, *, timeout: float, overwrite: bool) -> int:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     session = build_session()
+    print_map = load_print_map(conn)
+    existing_ko = load_existing_ko(conn)
 
     updated = 0
     for page in iter_pages(pages, page_file):
         html = fetch_html(session, page, timeout=timeout)
         source_url = page if page.startswith("http") else f"{NAMU_BASE}/w/{quote(page)}"
-        for row in parse_tables(html, source_url):
-            print_row = conn.execute(
-                "SELECT print_id FROM prints WHERE upper(card_number)=upper(?)",
-                (row.card_number,),
-            ).fetchone()
-            if not print_row:
-                print(f"[SKIP] missing print for {row.card_number}")
-                continue
-            if upsert_ko_text(conn, int(print_row["print_id"]), row.name, row.effect, row.source_url, overwrite=overwrite):
-                updated += 1
+        updated += import_rows(
+            conn,
+            parse_tables(html, source_url),
+            overwrite=overwrite,
+            print_map=print_map,
+            existing_ko=existing_ko,
+        )
     conn.commit()
     conn.close()
     return updated
@@ -287,22 +364,17 @@ def import_from_sheet(db_path: str, sheet_url: str, *, timeout: float, overwrite
     conn.row_factory = sqlite3.Row
     session = build_session()
     csv_url = build_sheet_csv_url(sheet_url, gid)
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    resp = session.get(csv_url, headers=headers, timeout=timeout)
+    print_map = load_print_map(conn)
+    existing_ko = load_existing_ko(conn)
+    resp = session.get(csv_url, timeout=timeout)
     resp.raise_for_status()
-    updated = 0
-    for row in parse_sheet_csv(resp.text, csv_url):
-        print_row = conn.execute(
-            "SELECT print_id FROM prints WHERE upper(card_number)=upper(?)",
-            (row.card_number,),
-        ).fetchone()
-        if not print_row:
-            print(f"[SKIP] missing print for {row.card_number}")
-            continue
-        if upsert_ko_text(conn, int(print_row["print_id"]), row.name, row.effect, row.source_url, overwrite=overwrite):
-            updated += 1
+    updated = import_rows(
+        conn,
+        parse_sheet_csv(resp.text, csv_url),
+        overwrite=overwrite,
+        print_map=print_map,
+        existing_ko=existing_ko,
+    )
     conn.commit()
     conn.close()
     return updated
