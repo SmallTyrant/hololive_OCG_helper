@@ -16,6 +16,7 @@ from app.services.db import (
     get_print_brief,
     db_exists,
     ensure_db,
+    clear_conn_cache,
 )
 from app.services.pipeline import run_update_and_refine
 from app.paths import get_default_data_root, get_project_root
@@ -322,6 +323,7 @@ def launch_app(db_path: str) -> None:
             ):
                 try:
                     if conn is not None:
+                        clear_conn_cache(conn)
                         conn.close()
                 except Exception:
                     pass
@@ -335,6 +337,7 @@ def launch_app(db_path: str) -> None:
             conn = getattr(thread_local, "conn", None)
             if conn is not None:
                 try:
+                    clear_conn_cache(conn)
                     conn.close()
                 except Exception:
                     pass
