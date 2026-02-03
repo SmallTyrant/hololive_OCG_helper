@@ -30,7 +30,7 @@ CARDNO_RE = re.compile(r"\b[hH][A-Za-z]{1,5}\d{2}-\d{3}\b")
 
 EFFECT_HEADER_KEYWORDS = ("효과", "텍스트", "능력", "카드 효과", "효과 텍스트")
 NAME_HEADER_KEYWORDS = ("카드명", "카드 이름", "이름", "카드명(한)")
-CARDNO_HEADER_KEYWORDS = ("카드번호", "카드 번호", "card number", "card no", "card_no", "print", "카드넘버")
+CARDNO_HEADER_KEYWORDS = ("카드번호", "카드 번호", "카드 넘버", "card number", "card no", "card_no", "print", "카드넘버")
 
 
 def now_iso() -> str:
@@ -47,6 +47,53 @@ def normalize_ws(text: str) -> str:
 
 def normalize_header(text: str) -> str:
     return normalize_ws(text).lower()
+
+
+LABEL_CELL_KEYWORDS = tuple(
+    sorted(
+        {
+            normalize_header(k)
+            for k in (
+                *CARDNO_HEADER_KEYWORDS,
+                *NAME_HEADER_KEYWORDS,
+                *EFFECT_HEADER_KEYWORDS,
+                "레벨",
+                "속성",
+                "종류",
+                "타입",
+                "색",
+                "색상",
+                "컬러",
+                "레어도",
+                "코스트",
+                "에너지",
+                "소속",
+                "기수",
+                "유닛",
+                "카드종류",
+                "카드 종류",
+                "카드 타입",
+            )
+        }
+    )
+)
+
+BULLET_MARKERS = ("■", "●", "◆", "◇", "•", "·")
+
+
+def cell_has_keyword(cell: str, keywords: Iterable[str]) -> bool:
+    normalized = normalize_header(cell)
+    for key in keywords:
+        if normalize_header(key) in normalized:
+            return True
+    return False
+
+
+def is_label_cell(cell: str) -> bool:
+    normalized = normalize_header(cell)
+    if not normalized:
+        return False
+    return any(key in normalized for key in LABEL_CELL_KEYWORDS)
 
 
 @dataclass
@@ -129,6 +176,8 @@ def pick_effect(cells: list[str], header_map: dict[str, int]) -> str:
             continue
         if CARDNO_RE.search(normalized):
             continue
+        if is_label_cell(normalized):
+            continue
         candidates.append(normalized)
     if not candidates:
         return ""
@@ -157,6 +206,81 @@ def pick_card_number(cells: list[str], header_map: dict[str, int]) -> str:
     return ""
 
 
+def parse_vertical_table(table, source_url: str) -> KoRow | None:
+    rows: list[list[str]] = []
+    for tr in table.select("tr"):
+        cells = tr.find_all(["th", "td"])
+        if not cells:
+            continue
+        rows.append([c.get_text("\n", strip=True) for c in cells])
+
+    if not rows:
+        return None
+
+    header_map: dict[str, int] = {}
+    for tr in table.select("tr"):
+        if tr.find("th"):
+            header_cells = [c.get_text("\n", strip=True) for c in tr.find_all(["th", "td"])]
+            header_map = find_header_map(header_cells)
+            break
+    if len(header_map) >= 2:
+        return None
+
+    card_numbers: list[str] = []
+    for cells in rows:
+        for cell in cells:
+            for match in CARDNO_RE.finditer(cell):
+                card_numbers.append(normalize_card_number(match.group(0)))
+    unique_card_numbers = sorted(set(card_numbers))
+    if len(unique_card_numbers) != 1:
+        return None
+    if len(rows) > 20 or sum(len(r) for r in rows) > 60:
+        return None
+
+    card_no = unique_card_numbers[0]
+
+    name = ""
+    for cells in rows:
+        if len(cells) >= 2 and cell_has_keyword(cells[0], NAME_HEADER_KEYWORDS):
+            name = normalize_ws(cells[1])
+            break
+
+    effect = ""
+    for cells in rows:
+        if len(cells) >= 2 and cell_has_keyword(cells[0], EFFECT_HEADER_KEYWORDS):
+            effect = normalize_ws(cells[1])
+            break
+
+    if not effect:
+        candidates: list[tuple[int, str]] = []
+        for cells in rows:
+            for cell in cells:
+                raw = cell
+                text = normalize_ws(cell)
+                if not text:
+                    continue
+                if CARDNO_RE.search(text):
+                    continue
+                if is_label_cell(text):
+                    continue
+                if name and normalize_ws(text) == name:
+                    continue
+                score = len(text)
+                if "\n" in raw:
+                    score += 20
+                if any(marker in raw for marker in BULLET_MARKERS):
+                    score += 30
+                candidates.append((score, text))
+        if candidates:
+            candidates.sort(key=lambda x: x[0], reverse=True)
+            effect = candidates[0][1]
+
+    if not effect:
+        return None
+
+    return KoRow(card_number=card_no, name=name, effect=effect, source_url=source_url)
+
+
 def parse_tables(html: str, source_url: str) -> list[KoRow]:
     try:
         soup = BeautifulSoup(html, "lxml")
@@ -164,6 +288,10 @@ def parse_tables(html: str, source_url: str) -> list[KoRow]:
         soup = BeautifulSoup(html, "html.parser")
     rows: list[KoRow] = []
     for table in soup.select("table"):
+        vertical = parse_vertical_table(table, source_url)
+        if vertical:
+            rows.append(vertical)
+            continue
         header_map: dict[str, int] = {}
         header_cells: list[str] = []
         body_rows = []
