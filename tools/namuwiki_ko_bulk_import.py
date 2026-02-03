@@ -99,27 +99,33 @@ def _search_for_query(
     parent_title: str | None = None,
 ) -> list[str]:
     candidates: list[str] = []
-    search_urls = [f"{NAMU_BASE}/Search?q={quote(query)}"]
-    seen_search = set(search_urls)
-    idx = 0
-    while idx < len(search_urls):
-        if max_search_pages and idx >= max_search_pages:
-            break
-        url = search_urls[idx]
-        idx += 1
+    if max_search_pages is None:
+        max_pages = 200
+        stop_on_empty = True
+    else:
+        max_pages = max_search_pages
+        stop_on_empty = False
+    empty_streak = 0
+    seen_titles = set()
+    for page in range(1, max_pages + 1):
+        url = f"{NAMU_BASE}/Search?q={quote(query)}&page={page}"
         try:
             html = fetch_html(session, url, timeout)
         except Exception:
             continue
         if parent_title:
-            candidates.extend(_extract_descendants(html, parent_title))
+            found = _extract_descendants(html, parent_title)
         else:
-            candidates.extend(extract_titles(html, base_title, match_substring=match_substring))
-        for link in _extract_search_pages(html, query):
-            full = link if link.startswith("http") else f"{NAMU_BASE}{link}"
-            if full not in seen_search:
-                seen_search.add(full)
-                search_urls.append(full)
+            found = extract_titles(html, base_title, match_substring=match_substring)
+        new = [t for t in found if t not in seen_titles]
+        if new:
+            candidates.extend(new)
+            seen_titles.update(new)
+            empty_streak = 0
+        else:
+            empty_streak += 1
+        if stop_on_empty and empty_streak >= 2:
+            break
     return candidates
 
 
@@ -238,7 +244,7 @@ def main() -> int:
     ap.add_argument("--no-match-substring", action="store_true", help="Only include titles starting/ending with base title")
     ap.add_argument("--no-descendants", action="store_true", help="Do not scan subpages of matched pages")
     ap.add_argument("--max-depth", type=int, default=None, help="Max descendant depth (default: unlimited)")
-    ap.add_argument("--max-search-pages", type=int, default=None, help="Max search result pages to scan (default: unlimited)")
+    ap.add_argument("--max-search-pages", type=int, default=None, help="Max search result pages to scan (default: auto-until-empty)")
     ap.add_argument("--page", action="append", default=[], help="Extra page title or URL to include")
     ap.add_argument("--page-file", help="Text file containing page titles/URLs")
     ap.add_argument("--timeout", type=float, default=15.0, help="HTTP timeout seconds")
