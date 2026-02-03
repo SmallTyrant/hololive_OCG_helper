@@ -35,7 +35,11 @@ from tools.namuwiki_ko_scrape import NAMU_BASE, parse_tables
 
 DEFAULT_EXTRA_PAGES = [
     "블루밍 레디언스",
-    "블루밍 레디언스/카드",
+    "퀀텟 스펙트럼",
+    "엘리트 스파크",
+    "큐리어스 유니버스",
+    "인챈트 레갈리아",
+    "아야카시 버밀리온",
 ]
 
 
@@ -74,6 +78,40 @@ def iter_pages(pages: Iterable[str], page_file: str | None) -> Iterable[str]:
                 if not line or line.startswith("#"):
                     continue
                 yield line
+
+
+def normalize_title(page: str) -> str | None:
+    if not page:
+        return None
+    if page.startswith("http://") or page.startswith("https://"):
+        parsed = urlparse(page)
+        if parsed.path.startswith("/w/"):
+            return unquote(parsed.path[3:])
+        return None
+    return page
+
+
+def expand_card_subpages(pages: Iterable[str], *, include_card_subpages: bool) -> list[str]:
+    out: list[str] = []
+    seen = set()
+    for page in pages:
+        if page in seen:
+            continue
+        seen.add(page)
+        out.append(page)
+    if not include_card_subpages:
+        return out
+    for page in list(out):
+        title = normalize_title(page)
+        if not title:
+            continue
+        if title.endswith("/카드"):
+            continue
+        card_title = f"{title}/카드"
+        if card_title not in seen:
+            seen.add(card_title)
+            out.append(card_title)
+    return out
 
 
 def fetch_html(session: requests.Session, url: str, timeout: float) -> str:
@@ -351,6 +389,7 @@ def main() -> int:
     ap.add_argument("--max-depth", type=int, default=None, help="Max descendant depth (default: unlimited)")
     ap.add_argument("--max-search-pages", type=int, default=None, help="Max search result pages to scan (default: auto-until-empty)")
     ap.add_argument("--no-category", action="store_true", help="Do not scan category pages")
+    ap.add_argument("--no-card-subpages", action="store_true", help="Do not add '/카드' subpages")
     ap.add_argument("--category", action="append", default=[], help="Extra category page title or URL")
     ap.add_argument("--max-category-pages", type=int, default=30, help="Max category pages to scan")
     ap.add_argument("--page", action="append", default=[], help="Extra page title or URL to include")
@@ -368,6 +407,7 @@ def main() -> int:
     for title in DEFAULT_EXTRA_PAGES:
         if title not in extra:
             extra.append(title)
+    extra = expand_card_subpages(extra, include_card_subpages=not args.no_card_subpages)
     categories = list(args.category)
     if not args.no_category:
         categories.append(f"분류:{args.base}")
