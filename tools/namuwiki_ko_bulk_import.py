@@ -17,15 +17,13 @@ from urllib.parse import quote, unquote
 
 import requests
 
-from tools.namuwiki_ko_import import (
-    NAMU_BASE,
+from tools.namuwiki_ko_common import (
     build_session,
-    iter_pages,
-    parse_tables,
-    load_print_map,
-    load_existing_ko,
     import_rows,
+    load_existing_ko,
+    load_print_map,
 )
+from tools.namuwiki_ko_scrape import NAMU_BASE, parse_tables
 
 
 def extract_titles(html: str, base_title: str) -> list[str]:
@@ -39,6 +37,19 @@ def extract_titles(html: str, base_title: str) -> list[str]:
         if title.startswith(prefix):
             titles.append(title)
     return titles
+
+
+def iter_pages(pages: Iterable[str], page_file: str | None) -> Iterable[str]:
+    for page in pages:
+        if page:
+            yield page.strip()
+    if page_file:
+        with open(page_file, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                yield line
 
 
 def fetch_html(session: requests.Session, url: str, timeout: float) -> str:

@@ -5,17 +5,18 @@ PC-only Flet helper app.
 아직은 일본어만 지원합니다.
 
 ## 한국어 효과 텍스트 적재 (NamuWiki/Google Sheets)
-`tools/namuwiki_ko_import.py`로 NamuWiki 카드 목록 테이블(세로 표 포함) 또는 Google Sheets CSV에서 카드 번호/효과를 추출해
-`card_texts_ko`에 적재할 수 있습니다. DB 스키마 변경 없이 기존 `prints`와 카드 번호로 매칭됩니다.
+NamuWiki는 전용 벌크 스크립트로 자동 탐색해 효과 텍스트가 있는 페이지만 적재합니다.
+Google Sheets는 별도 스크립트로 CSV를 가져옵니다. DB 스키마 변경 없이 기존 `prints`와 카드 번호로 매칭됩니다.
 
-예시(단일 페이지):
+NamuWiki 벌크 예시:
 ```
-python tools/namuwiki_ko_import.py --db data/hololive_ocg.sqlite --page "홀로라이브 오피셜 카드 게임/옐"
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite
 ```
 
-예시(여러 페이지):
+NamuWiki 벌크 (옵션 예시):
 ```
-python tools/namuwiki_ko_import.py --db data/hololive_ocg.sqlite --page "홀로라이브 오피셜 카드 게임/제한 카드" --page "홀로라이브 오피셜 카드 게임/프로모션 카드" --page "홀로라이브 오피셜 카드 게임/옐"
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --dry-run
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --overwrite
 ```
 
 Google Sheets 예시(공개 시트):
