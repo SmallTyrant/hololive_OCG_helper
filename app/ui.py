@@ -19,6 +19,7 @@ from app.services.db import (
 from app.services.pipeline import run_update_and_refine
 from app.paths import get_default_data_root, get_project_root
 from app.services.images import local_image_path, download_image, resolve_url
+from app.services.verify import run_startup_checks
 
 COLORS = ft.Colors if hasattr(ft, "Colors") else ft.colors
 SECTION_LABELS = (
@@ -130,6 +131,7 @@ def launch_app(db_path: str) -> None:
         selected_print_id = {"id": None}
         selected_card_number = {"no": ""}
         downloading = set()
+        download_lock = threading.Lock()
 
         def append_log(s: str) -> None:
             print(s, flush=True)
@@ -281,8 +283,13 @@ def launch_app(db_path: str) -> None:
 
         setup_window_icon()
 
+        for issue in run_startup_checks(tf_db.value, data_root):
+            append_log(f"[WARN] {issue}")
+
         def get_conn() -> sqlite3.Connection:
             path = tf_db.value
+            if not path or not path.strip():
+                raise ValueError("DB 경로가 비어있습니다.")
             conn = getattr(thread_local, "conn", None)
             if (
                 conn is None
@@ -326,20 +333,23 @@ def launch_app(db_path: str) -> None:
             dest = local_image_path(data_root, card_number)
             if dest.exists():
                 return
-            if card_number in downloading:
-                return
-            downloading.add(card_number)
+            with download_lock:
+                if card_number in downloading:
+                    return
+                downloading.add(card_number)
 
             def worker() -> None:
                 try:
                     append_log(f"[IMG] downloading: {card_number} -> {dest.name}")
                     download_image(image_url, dest)
                     append_log("[IMG] done")
-                    set_image_for_card(card_number, image_url)
+                    if selected_card_number["no"] == card_number:
+                        set_image_for_card(card_number, image_url)
                 except Exception as ex:
                     append_log(f"[IMG][ERROR] {ex}")
                 finally:
-                    downloading.discard(card_number)
+                    with download_lock:
+                        downloading.discard(card_number)
 
             threading.Thread(target=worker, daemon=True).start()
 
@@ -532,12 +542,15 @@ def launch_app(db_path: str) -> None:
 
         # --- first-run: DB 없으면 안내 로그만 찍고 앱은 뜨게 ---
         if not db_exists(tf_db.value):
-            created = ensure_db(tf_db.value)
-            if created:
-                append_log("[INFO] DB 파일이 없어 빈 DB를 생성했습니다.")
+            if not tf_db.value or not tf_db.value.strip():
+                append_log("[WARN] DB 경로가 비어있습니다. 상단 DB 경로를 지정해주세요.")
             else:
-                append_log("[INFO] DB 파일이 없습니다.")
-            append_log("[INFO] 상단 'DB갱신'을 누르면 DB를 생성(크롤링+정제)합니다.")
+                created = ensure_db(tf_db.value)
+                if created:
+                    append_log("[INFO] DB 파일이 없어 빈 DB를 생성했습니다.")
+                else:
+                    append_log("[INFO] DB 파일이 없습니다.")
+                append_log("[INFO] 상단 'DB갱신'을 누르면 DB를 생성(크롤링+정제)합니다.")
         else:
             # DB 있으면 즉시 연결
             try:

@@ -5,6 +5,8 @@ from app.constants import TAG_ALIAS
 
 
 def ensure_db(path: str) -> bool:
+    if not path or not path.strip():
+        return False
     p = Path(path)
     if p.exists():
         return False
@@ -19,8 +21,9 @@ def ensure_db(path: str) -> bool:
 
 
 def open_db(path: str) -> sqlite3.Connection:
-    if path:
-        ensure_db(path)
+    if not path or not path.strip():
+        raise ValueError("DB path is empty")
+    ensure_db(path)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     return conn
