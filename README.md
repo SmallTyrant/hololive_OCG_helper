@@ -25,6 +25,7 @@ python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-categ
 python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --category "분류:홀로라이브 오피셜 카드 게임" --max-category-pages 50
 python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-card-subpages
 python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --member-tag "#JP"
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --member-tag "#ID" --member-tag "#EN" --member-tag "#DEV_IS"
 python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-expand-members
 ```
 

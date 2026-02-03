@@ -430,7 +430,12 @@ def main() -> int:
     ap.add_argument("--no-category", action="store_true", help="Do not scan category pages")
     ap.add_argument("--no-card-subpages", action="store_true", help="Do not add '/카드' subpages")
     ap.add_argument("--no-expand-members", action="store_true", help="Do not expand 등장 홀로멤 member lists")
-    ap.add_argument("--member-tag", action="append", default=["#JP"], help="Tag label to expand (e.g. #JP)")
+    ap.add_argument(
+        "--member-tag",
+        action="append",
+        default=["#JP", "#ID", "#EN", "#DEV_IS"],
+        help="Tag label to expand (e.g. #JP)",
+    )
     ap.add_argument("--category", action="append", default=[], help="Extra category page title or URL")
     ap.add_argument("--max-category-pages", type=int, default=30, help="Max category pages to scan")
     ap.add_argument("--page", action="append", default=[], help="Extra page title or URL to include")
