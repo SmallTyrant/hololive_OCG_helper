@@ -20,7 +20,7 @@ import re
 import sqlite3
 import time
 from typing import Iterable
-from urllib.parse import quote, unquote
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 import requests
 
@@ -33,15 +33,26 @@ from tools.namuwiki_ko_common import (
 from tools.namuwiki_ko_scrape import NAMU_BASE, parse_tables
 
 
-def extract_titles(html: str, base_title: str) -> list[str]:
+def _is_relevant_title(title: str, base_title: str, *, match_substring: bool) -> bool:
+    if title == base_title:
+        return True
+    if title.startswith(base_title + "/"):
+        return True
+    if title.endswith("/" + base_title):
+        return True
+    if match_substring and base_title in title:
+        return True
+    return False
+
+
+def extract_titles(html: str, base_title: str, *, match_substring: bool) -> list[str]:
     links = re.findall(r'href=\"(/w/[^\"]+)\"', html)
     titles: list[str] = []
-    prefix = base_title + "/"
     for link in links:
         if not link.startswith("/w/"):
             continue
         title = unquote(link[3:])
-        if title.startswith(prefix):
+        if _is_relevant_title(title, base_title, match_substring=match_substring):
             titles.append(title)
     return titles
 
@@ -65,6 +76,18 @@ def fetch_html(session: requests.Session, url: str, timeout: float) -> str:
     return resp.text
 
 
+def _extract_search_pages(html: str, query: str) -> list[str]:
+    links = re.findall(r'href=\"(/Search\\?[^\"]+)\"', html)
+    pages: list[str] = []
+    for link in links:
+        parsed = urlparse(link)
+        qs = parse_qs(parsed.query)
+        if qs.get("q", [None])[0] != query:
+            continue
+        pages.append(link)
+    return pages
+
+
 def discover_pages(
     session: requests.Session,
     *,
@@ -73,21 +96,39 @@ def discover_pages(
     include_base: bool,
     extra_pages: Iterable[str],
     max_pages: int | None,
+    match_substring: bool,
+    max_search_pages: int | None,
 ) -> list[str]:
     candidates: list[str] = []
     if include_base:
         candidates.append(base_title)
 
-    urls = [
-        f"{NAMU_BASE}/w/{quote(base_title)}",
-        f"{NAMU_BASE}/Search?q={quote(base_title + '/')}",
-    ]
-    for url in urls:
+    base_url = f"{NAMU_BASE}/w/{quote(base_title)}"
+    try:
+        html = fetch_html(session, base_url, timeout)
+        candidates.extend(extract_titles(html, base_title, match_substring=match_substring))
+    except Exception:
+        pass
+
+    search_query = base_title
+    search_urls = [f"{NAMU_BASE}/Search?q={quote(search_query)}"]
+    seen_search = set(search_urls)
+    idx = 0
+    while idx < len(search_urls):
+        if max_search_pages and idx >= max_search_pages:
+            break
+        url = search_urls[idx]
+        idx += 1
         try:
             html = fetch_html(session, url, timeout)
         except Exception:
             continue
-        candidates.extend(extract_titles(html, base_title))
+        candidates.extend(extract_titles(html, base_title, match_substring=match_substring))
+        for link in _extract_search_pages(html, search_query):
+            full = link if link.startswith("http") else f"{NAMU_BASE}{link}"
+            if full not in seen_search:
+                seen_search.add(full)
+                search_urls.append(full)
 
     for page in extra_pages:
         if page:
@@ -111,6 +152,8 @@ def main() -> int:
     ap.add_argument("--db", required=True, help="SQLite DB path")
     ap.add_argument("--base", default="홀로라이브 오피셜 카드 게임", help="Base NamuWiki page title")
     ap.add_argument("--include-base", action="store_true", help="Include the base page itself")
+    ap.add_argument("--no-match-substring", action="store_true", help="Only include titles starting/ending with base title")
+    ap.add_argument("--max-search-pages", type=int, default=50, help="Max search result pages to scan")
     ap.add_argument("--page", action="append", default=[], help="Extra page title or URL to include")
     ap.add_argument("--page-file", help="Text file containing page titles/URLs")
     ap.add_argument("--timeout", type=float, default=15.0, help="HTTP timeout seconds")
@@ -130,6 +173,8 @@ def main() -> int:
         include_base=args.include_base,
         extra_pages=extra,
         max_pages=args.max_pages,
+        match_substring=not args.no_match_substring,
+        max_search_pages=args.max_search_pages,
     )
 
     if not titles:

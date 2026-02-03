@@ -17,6 +17,8 @@ NamuWiki 벌크 (옵션 예시):
 ```
 python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --dry-run
 python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --overwrite
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-match-substring
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --max-search-pages 100
 ```
 
 Google Sheets 예시(공개 시트):
