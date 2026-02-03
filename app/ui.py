@@ -423,15 +423,26 @@ def launch_app(db_path: str) -> None:
                     detail_lv.controls.append(ft.Text(line))
                 i += 1
 
-        def set_detail_text(ja_text: str | None, ko_text: str | None) -> None:
+        def set_detail_text(ja_text: str | None, ko_text: str | None, ko_name: str | None) -> None:
             detail_lv.controls.clear()
             ja = (ja_text or "").strip()
             ko = (ko_text or "").strip()
+            ko_name = (ko_name or "").strip()
             has_any = False
 
-            if ko:
+            if ko or ko_name:
                 detail_lv.controls.append(build_section_chip("한국어"))
-                append_detail_lines(ko, apply_jp_filters=False)
+                if ko_name:
+                    detail_lv.controls.append(
+                        ft.Text(
+                            spans=[
+                                ft.TextSpan("카드명 ", style=ft.TextStyle(weight=ft.FontWeight.BOLD)),
+                                ft.TextSpan(ko_name),
+                            ]
+                        )
+                    )
+                if ko:
+                    append_detail_lines(ko, apply_jp_filters=False)
                 has_any = True
 
             if ja:
@@ -469,10 +480,11 @@ def launch_app(db_path: str) -> None:
                 set_detail_text(
                     card.get("raw_text", "") if card else None,
                     card.get("ko_text", "") if card else None,
+                    card.get("ko_name", "") if card else None,
                 )
 
             except Exception as ex:
-                set_detail_text(f"[ERROR] 상세 로드 실패: {ex}", None)
+                set_detail_text(f"[ERROR] 상세 로드 실패: {ex}", None, None)
                 clear_image()
 
             page.update()
@@ -495,7 +507,13 @@ def launch_app(db_path: str) -> None:
                 conn = get_conn()
                 rows = query_suggest(conn, q, limit=80)
                 for r in rows:
-                    title = f"{r.get('card_number','')} | {r.get('name_ja','')}"
+                    card_number = r.get("card_number", "")
+                    name_ja = r.get("name_ja", "")
+                    name_ko = r.get("name_ko", "")
+                    if name_ko:
+                        title = f"{card_number} | {name_ja} | {name_ko}"
+                    else:
+                        title = f"{card_number} | {name_ja}"
                     pid = r["print_id"]
                     lv.controls.append(
                         ft.ListTile(

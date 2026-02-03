@@ -110,19 +110,25 @@ def query_suggest(conn: sqlite3.Connection, q: str, limit: int = 40) -> list[dic
     aliases = _expand_alias(q)
 
     joins = _build_tag_joins(conn)
+    ko_join = "LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id"
 
     # 태그 JOIN 가능하면 tag까지 검색
     if joins:
         sql = f"""
-        SELECT DISTINCT p.print_id, p.card_number, COALESCE(p.name_ja,'') AS name_ja
+        SELECT DISTINCT p.print_id,
+               p.card_number,
+               COALESCE(p.name_ja,'') AS name_ja,
+               COALESCE(ko.name,'') AS name_ko
         FROM prints p
+        {ko_join}
         {joins}
         WHERE
             UPPER(p.card_number) LIKE UPPER(?)
             OR COALESCE(p.name_ja,'') LIKE ?
+            OR COALESCE(ko.name,'') LIKE ?
             OR (t.tag IS NOT NULL AND (t.tag LIKE ? OR COALESCE(t.normalized,'') LIKE ?))
         """
-        params = [like, like, like, like]
+        params = [like, like, like, like, like]
 
         for alias in aliases:
             sql += " OR t.tag LIKE ? OR COALESCE(t.normalized,'') LIKE ?"
@@ -134,15 +140,20 @@ def query_suggest(conn: sqlite3.Connection, q: str, limit: int = 40) -> list[dic
         return [dict(r) for r in conn.execute(sql, params)]
 
     # 태그 JOIN 불가하면 카드번호/이름만 검색
-    sql = """
-    SELECT p.print_id, p.card_number, COALESCE(p.name_ja,'') AS name_ja
+    sql = f"""
+    SELECT p.print_id,
+           p.card_number,
+           COALESCE(p.name_ja,'') AS name_ja,
+           COALESCE(ko.name,'') AS name_ko
     FROM prints p
+    {ko_join}
     WHERE UPPER(p.card_number) LIKE UPPER(?)
        OR COALESCE(p.name_ja,'') LIKE ?
+       OR COALESCE(ko.name,'') LIKE ?
     ORDER BY p.card_number
     LIMIT ?
     """
-    return [dict(r) for r in conn.execute(sql, (like, like, limit))]
+    return [dict(r) for r in conn.execute(sql, (like, like, like, limit))]
 
 def load_card_detail(conn: sqlite3.Connection, pid: int) -> dict | None:
     r = conn.execute(
