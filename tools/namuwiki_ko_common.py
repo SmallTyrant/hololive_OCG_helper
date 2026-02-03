@@ -58,6 +58,16 @@ LABEL_CELL_KEYWORDS = tuple(
                 "소속",
                 "기수",
                 "유닛",
+                "LIFE",
+                "HP",
+                "배턴 터치",
+                "아츠",
+                "키워드",
+                "오시 스킬",
+                "SP 오시 스킬",
+                "SP오시스킬",
+                "推しスキル",
+                "SP推しスキル",
                 "카드종류",
                 "카드 종류",
                 "카드 타입",
@@ -71,8 +81,6 @@ BULLET_MARKERS = ("■", "●", "◆", "◇", "•", "·")
 
 def is_effect_like(raw: str, normalized: str) -> bool:
     if any(marker in raw for marker in BULLET_MARKERS):
-        return True
-    if "\n" in raw:
         return True
     if "[" in raw or "]" in raw:
         return True

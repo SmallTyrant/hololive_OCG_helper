@@ -84,35 +84,61 @@ def parse_vertical_table(table, source_url: str) -> KoRow | None:
             name = normalize_ws(cells[1])
             break
 
-    effect = ""
-    for cells in rows:
-        if len(cells) >= 2 and cell_has_keyword(cells[0], EFFECT_HEADER_KEYWORDS):
-            effect = normalize_ws(cells[1])
-            break
-
-    if not effect:
-        candidates: list[tuple[int, str]] = []
-        for cells in rows:
-            for cell in cells:
-                raw = cell
-                text = normalize_ws(cell)
+    def _build_effect_lines(rows: list[list[str]]) -> list[str]:
+        lines: list[str] = []
+        i = 0
+        while i < len(rows):
+            cells = rows[i]
+            if not cells:
+                i += 1
+                continue
+            if any(cell_has_keyword(c, ("카드 넘버", "카드번호", "카드 번호", "카드넘버")) for c in cells):
+                i += 1
+                continue
+            # header/value row pairing
+            if len(cells) >= 2 and all(is_label_cell(c) for c in cells):
+                if i + 1 < len(rows) and len(rows[i + 1]) == len(cells):
+                    values = rows[i + 1]
+                    for label, value in zip(cells, values):
+                        label_norm = normalize_ws(label)
+                        value_norm = normalize_ws(value)
+                        if not value_norm:
+                            continue
+                        if cell_has_keyword(label_norm, ("카드 넘버", "카드번호", "카드 번호", "카드넘버")):
+                            continue
+                        lines.append(f"{label_norm} {value_norm}")
+                    i += 2
+                    continue
+            # label + value row
+            if len(cells) >= 2 and is_label_cell(cells[0]):
+                label_norm = normalize_ws(cells[0])
+                if cell_has_keyword(label_norm, ("카드 넘버", "카드번호", "카드 번호", "카드넘버")):
+                    i += 1
+                    continue
+                value_norm = " ".join(
+                    normalize_ws(c) for c in cells[1:] if normalize_ws(c)
+                )
+                if value_norm:
+                    lines.append(f"{label_norm} {value_norm}")
+                i += 1
+                continue
+            # single-cell effect row
+            if len(cells) == 1:
+                raw = cells[0]
+                text = normalize_ws(raw)
                 if not text:
+                    i += 1
                     continue
-                if CARDNO_RE.search(text):
+                if name and text == name:
+                    i += 1
                     continue
-                if is_label_cell(text):
-                    continue
-                if name and normalize_ws(text) == name:
-                    continue
-                if not is_effect_like(raw, text):
-                    continue
-                score = len(text)
-                if "\n" in raw:
-                    score += 20
-                candidates.append((score, text))
-        if candidates:
-            candidates.sort(key=lambda x: x[0], reverse=True)
-            effect = candidates[0][1]
+                if is_effect_like(raw, text):
+                    lines.append(text)
+            i += 1
+        return lines
+
+    effect_lines = _build_effect_lines(rows)
+    effect = "\n".join(effect_lines).strip()
 
     if not effect:
         return None
