@@ -130,6 +130,19 @@ def launch_app(db_path: str) -> None:
 
         # --- Right: detail ---
         detail_lv = ft.ListView(expand=True, spacing=4, padding=0, auto_scroll=False)
+        detail_texts = {"ko": "", "ja": ""}
+        detail_mode = {"value": "both"}
+
+        def set_detail_mode(mode: str) -> None:
+            if detail_mode["value"] == mode:
+                detail_mode["value"] = "both"
+            else:
+                detail_mode["value"] = mode
+            render_detail()
+
+        btn_detail_ko = ft.OutlinedButton("한국어", on_click=lambda e: set_detail_mode("ko"), disabled=True)
+        btn_detail_ja = ft.OutlinedButton("日本語", on_click=lambda e: set_detail_mode("ja"), disabled=True)
+        detail_header = ft.Row([btn_detail_ko, btn_detail_ja], spacing=8, wrap=True)
         # currently selected
         selected_print_id = {"id": None}
         selected_card_number = {"no": ""}
@@ -420,21 +433,28 @@ def launch_app(db_path: str) -> None:
                     detail_lv.controls.append(ft.Text(line))
                 i += 1
 
-        def set_detail_text(ja_text: str | None, ko_text: str | None) -> None:
-            detail_lv.controls.clear()
-            ja = (ja_text or "").strip()
-            ko = (ko_text or "").strip()
-            has_any = False
+        def update_detail_buttons() -> None:
+            has_ko = bool(detail_texts["ko"].strip())
+            has_ja = bool(detail_texts["ja"].strip())
+            btn_detail_ko.disabled = not has_ko
+            btn_detail_ja.disabled = not has_ja
 
-            if ko:
+        def render_detail() -> None:
+            detail_lv.controls.clear()
+            ja = (detail_texts["ja"] or "").strip()
+            ko = (detail_texts["ko"] or "").strip()
+            has_any = False
+            mode = detail_mode["value"]
+
+            if mode in ("both", "ko") and ko:
                 detail_lv.controls.append(build_section_chip("한국어"))
                 append_detail_lines(ko, apply_jp_filters=False)
                 has_any = True
 
-            if ja:
-                if ko:
+            if mode in ("both", "ja") and ja:
+                if mode == "both" and ko:
                     detail_lv.controls.append(ft.Divider(height=8))
-                    detail_lv.controls.append(build_section_chip("日本語"))
+                detail_lv.controls.append(build_section_chip("日本語"))
                 append_detail_lines(ja, apply_jp_filters=True)
                 has_any = True
 
@@ -442,6 +462,13 @@ def launch_app(db_path: str) -> None:
                 detail_lv.controls.append(ft.Text("(본문 없음)"))
 
             page.update()
+
+        def set_detail_text(ja_text: str | None, ko_text: str | None) -> None:
+            detail_texts["ja"] = (ja_text or "")
+            detail_texts["ko"] = (ko_text or "")
+            detail_mode["value"] = "both"
+            update_detail_buttons()
+            render_detail()
 
         def show_detail(pid: int) -> None:
             selected_print_id["id"] = pid
@@ -630,6 +657,7 @@ def launch_app(db_path: str) -> None:
                 effect_section = ft.Column(
                     [
                         ft.Container(ft.Text("효과"), padding=ft.padding.only(left=10, top=4)),
+                        ft.Container(detail_header, padding=ft.padding.only(left=10, right=10)),
                         ft.Container(detail_lv, height=320, padding=10),
                     ],
                     spacing=0,
@@ -674,6 +702,7 @@ def launch_app(db_path: str) -> None:
 
             right = ft.Column(
                 [
+                    ft.Container(detail_header, padding=ft.padding.only(left=10, right=10, top=4)),
                     ft.Container(detail_lv, expand=True, padding=10),
                 ],
                 expand=True,
