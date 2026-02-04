@@ -48,6 +48,10 @@ def normalize_ws(text: str) -> str:
 def normalize_header(text: str) -> str:
     return normalize_ws(text).lower()
 
+def normalize_name_key(text: str) -> str:
+    normalized = normalize_ws(text).lower()
+    return re.sub(r"[\s·・ㆍ:：()\\[\\]\"'`’“”]", "", normalized)
+
 
 @dataclass
 class KoRow:
@@ -157,7 +161,12 @@ def pick_card_number(cells: list[str], header_map: dict[str, int]) -> str:
     return ""
 
 
-def parse_tables(html: str, source_url: str) -> list[KoRow]:
+def parse_tables(
+    html: str,
+    source_url: str,
+    *,
+    fallback_card_numbers: list[str] | None = None,
+) -> list[KoRow]:
     try:
         soup = BeautifulSoup(html, "lxml")
     except FeatureNotFound:
@@ -186,12 +195,23 @@ def parse_tables(html: str, source_url: str) -> list[KoRow]:
         for cells in body_rows:
             card_no = pick_card_number(cells, header_map)
             if not card_no:
-                continue
+                card_no = ""
             effect = pick_effect(cells, header_map)
             name = pick_name(cells, header_map)
+            if not card_no and not name:
+                continue
             if not effect:
                 continue
             rows.append(KoRow(card_number=card_no, name=name, effect=effect, source_url=source_url))
+    if fallback_card_numbers:
+        missing_indices = [idx for idx, row in enumerate(rows) if not row.card_number]
+        if fallback_card_numbers and missing_indices:
+            if len(fallback_card_numbers) == 1:
+                for idx in missing_indices:
+                    rows[idx].card_number = fallback_card_numbers[0]
+            elif len(fallback_card_numbers) == len(missing_indices):
+                for idx, card_no in zip(missing_indices, fallback_card_numbers, strict=False):
+                    rows[idx].card_number = card_no
     return rows
 
 
@@ -220,6 +240,18 @@ def parse_search_results(html: str, query: str) -> list[str]:
         seen.add(url)
         deduped.append(url)
     return deduped
+
+
+def extract_card_numbers(html: str) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for match in CARDNO_RE.finditer(html):
+        normalized = normalize_card_number(match.group(0))
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(normalized)
+    return ordered
 
 
 def collect_linked_pages(
@@ -390,6 +422,30 @@ def load_existing_ko(conn: sqlite3.Connection) -> dict[int, tuple[str, str, int]
     return mapping
 
 
+def load_print_name_map(conn: sqlite3.Connection) -> dict[str, int]:
+    mapping: dict[str, int] = {}
+    duplicates: set[str] = set()
+    for row in conn.execute("SELECT print_id, name_ja FROM prints"):
+        name = normalize_name_key(row["name_ja"] or "")
+        if not name:
+            continue
+        if name in mapping:
+            duplicates.add(name)
+            continue
+        mapping[name] = int(row["print_id"])
+    for row in conn.execute("SELECT print_id, name FROM card_texts_ja WHERE name IS NOT NULL"):
+        name = normalize_name_key(row["name"] or "")
+        if not name:
+            continue
+        if name in mapping and mapping[name] != int(row["print_id"]):
+            duplicates.add(name)
+            continue
+        mapping[name] = int(row["print_id"])
+    for name in duplicates:
+        mapping.pop(name, None)
+    return mapping
+
+
 def import_rows(
     conn: sqlite3.Connection,
     rows: Iterable[KoRow],
@@ -397,12 +453,18 @@ def import_rows(
     overwrite: bool,
     print_map: dict[str, int],
     existing_ko: dict[int, tuple[str, str, int]],
+    name_map: dict[str, int],
 ) -> int:
     updated = 0
     for row in rows:
-        print_id = print_map.get(normalize_card_number(row.card_number))
+        print_id = None
+        if row.card_number:
+            print_id = print_map.get(normalize_card_number(row.card_number))
+        if not print_id and row.name:
+            print_id = name_map.get(normalize_name_key(row.name))
         if not print_id:
-            print(f"[SKIP] missing print for {row.card_number}")
+            missing = row.card_number or row.name or "unknown"
+            print(f"[SKIP] missing print for {missing}")
             continue
         if upsert_ko_text(
             conn,
@@ -434,6 +496,7 @@ def import_from_pages(
     session = build_session()
     print_map = load_print_map(conn)
     existing_ko = load_existing_ko(conn)
+    name_map = load_print_name_map(conn)
 
     updated = 0
     seen_pages: set[str] = set()
@@ -443,12 +506,14 @@ def import_from_pages(
             continue
         seen_pages.add(source_url)
         html = fetch_html(session, page, timeout=timeout)
+        fallback_card_numbers = extract_card_numbers(html)
         updated += import_rows(
             conn,
-            parse_tables(html, source_url),
+            parse_tables(html, source_url, fallback_card_numbers=fallback_card_numbers),
             overwrite=overwrite,
             print_map=print_map,
             existing_ko=existing_ko,
+            name_map=name_map,
         )
         if crawl_linked:
             linked_urls = collect_linked_pages(html, include_re=link_include, exclude_re=link_exclude)
@@ -461,12 +526,14 @@ def import_from_pages(
                 except requests.RequestException as exc:
                     print(f"[WARN] fetch failed for {url}: {exc}")
                     continue
+                fallback_card_numbers = extract_card_numbers(page_html)
                 updated += import_rows(
                     conn,
-                    parse_tables(page_html, url),
+                    parse_tables(page_html, url, fallback_card_numbers=fallback_card_numbers),
                     overwrite=overwrite,
                     print_map=print_map,
                     existing_ko=existing_ko,
+                    name_map=name_map,
                 )
 
     if search_card_numbers:
@@ -492,12 +559,14 @@ def import_from_pages(
                 except requests.RequestException as exc:
                     print(f"[WARN] fetch failed for {url}: {exc}")
                     continue
+                fallback_card_numbers = extract_card_numbers(page_html)
                 updated += import_rows(
                     conn,
-                    parse_tables(page_html, url),
+                    parse_tables(page_html, url, fallback_card_numbers=fallback_card_numbers),
                     overwrite=overwrite,
                     print_map=print_map,
                     existing_ko=existing_ko,
+                    name_map=name_map,
                 )
     conn.commit()
     conn.close()
@@ -511,6 +580,7 @@ def import_from_sheet(db_path: str, sheet_url: str, *, timeout: float, overwrite
     csv_url = build_sheet_csv_url(sheet_url, gid)
     print_map = load_print_map(conn)
     existing_ko = load_existing_ko(conn)
+    name_map = load_print_name_map(conn)
     resp = session.get(csv_url, timeout=timeout)
     resp.raise_for_status()
     updated = import_rows(
@@ -519,6 +589,7 @@ def import_from_sheet(db_path: str, sheet_url: str, *, timeout: float, overwrite
         overwrite=overwrite,
         print_map=print_map,
         existing_ko=existing_ko,
+        name_map=name_map,
     )
     conn.commit()
     conn.close()
