@@ -682,11 +682,11 @@ def launch_app(db_path: str) -> None:
                     ft.Column(
                         [
                             top_row,
-                            db_row,
                             ft.Divider(height=1),
-                            list_section,
-                            image_section,
-                            effect_section,
+                            list_section,   # 카드번호/검색 아래에 목록
+                            image_section,  # 이미지 중간
+                            effect_section, # 본문 하위
+                            db_row,
                         ],
                         expand=True,
                         spacing=8,
