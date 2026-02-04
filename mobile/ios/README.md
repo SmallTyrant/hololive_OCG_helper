@@ -10,6 +10,16 @@
 1. Xcode에서 **App (SwiftUI)** 템플릿 생성
 2. 최소 iOS 16 권장
 
+## 빌드 방법
+### Xcode
+1. `ios/` 프로젝트 열기
+2. 타깃 디바이스 선택 후 **Run** 실행
+
+### CLI (xcodebuild)
+```bash
+xcodebuild -scheme "HololiveOCG" -destination "platform=iOS Simulator,name=iPhone 15" build
+```
+
 ## DB 포함
 1. 현재 저장소의 `data/hololive_ocg.sqlite`를 앱 번들에 추가
 2. 앱 최초 실행 시 Documents 디렉터리로 복사 후 읽기 전용으로 사용
