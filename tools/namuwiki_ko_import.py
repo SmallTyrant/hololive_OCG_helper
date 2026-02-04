@@ -195,6 +195,33 @@ def parse_tables(html: str, source_url: str) -> list[KoRow]:
     return rows
 
 
+def parse_search_results(html: str, query: str) -> list[str]:
+    try:
+        soup = BeautifulSoup(html, "lxml")
+    except FeatureNotFound:
+        soup = BeautifulSoup(html, "html.parser")
+    normalized_query = normalize_ws(query).lower()
+    urls: list[str] = []
+    for link in soup.select("a[href]"):
+        href = link.get("href", "")
+        if not href.startswith("/w/"):
+            continue
+        if href.startswith("/w/검색"):
+            continue
+        text = normalize_ws(link.get_text(" ", strip=True)).lower()
+        if normalized_query and normalized_query not in text and normalized_query not in href.lower():
+            continue
+        urls.append(f"{NAMU_BASE}{href}")
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for url in urls:
+        if url in seen:
+            continue
+        seen.add(url)
+        deduped.append(url)
+    return deduped
+
+
 def iter_pages(pages: list[str], page_file: str | None) -> Iterable[str]:
     for page in pages:
         if page:
@@ -206,6 +233,22 @@ def iter_pages(pages: list[str], page_file: str | None) -> Iterable[str]:
                 if not line or line.startswith("#"):
                     continue
                 yield line
+
+
+def iter_card_numbers_for_search(
+    print_map: dict[str, int],
+    existing_ko: dict[int, tuple[str, str, int]],
+    *,
+    overwrite: bool,
+) -> Iterable[str]:
+    if overwrite:
+        yield from sorted(print_map)
+        return
+    for card_no, print_id in sorted(print_map.items()):
+        cached = existing_ko.get(print_id)
+        if cached and cached[1].strip():
+            continue
+        yield card_no
 
 
 def build_sheet_csv_url(sheet_url: str, gid: str | None) -> str:
@@ -336,7 +379,15 @@ def import_rows(
     return updated
 
 
-def import_from_pages(db_path: str, pages: list[str], page_file: str | None, *, timeout: float, overwrite: bool) -> int:
+def import_from_pages(
+    db_path: str,
+    pages: list[str],
+    page_file: str | None,
+    *,
+    timeout: float,
+    overwrite: bool,
+    search_card_numbers: bool,
+) -> int:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     session = build_session()
@@ -344,9 +395,13 @@ def import_from_pages(db_path: str, pages: list[str], page_file: str | None, *, 
     existing_ko = load_existing_ko(conn)
 
     updated = 0
+    seen_pages: set[str] = set()
     for page in iter_pages(pages, page_file):
-        html = fetch_html(session, page, timeout=timeout)
         source_url = page if page.startswith("http") else f"{NAMU_BASE}/w/{quote(page)}"
+        if source_url in seen_pages:
+            continue
+        seen_pages.add(source_url)
+        html = fetch_html(session, page, timeout=timeout)
         updated += import_rows(
             conn,
             parse_tables(html, source_url),
@@ -354,6 +409,37 @@ def import_from_pages(db_path: str, pages: list[str], page_file: str | None, *, 
             print_map=print_map,
             existing_ko=existing_ko,
         )
+
+    if search_card_numbers:
+        for card_no in iter_card_numbers_for_search(print_map, existing_ko, overwrite=overwrite):
+            query = normalize_card_number(card_no)
+            search_url = f"{NAMU_BASE}/w/검색?query={quote(query)}"
+            try:
+                html = fetch_html(session, search_url, timeout=timeout)
+            except requests.RequestException as exc:
+                print(f"[WARN] search failed for {query}: {exc}")
+                continue
+            result_urls = parse_search_results(html, query)
+            if not result_urls:
+                if search_url not in seen_pages:
+                    seen_pages.add(search_url)
+                continue
+            for url in result_urls:
+                if url in seen_pages:
+                    continue
+                seen_pages.add(url)
+                try:
+                    page_html = fetch_html(session, url, timeout=timeout)
+                except requests.RequestException as exc:
+                    print(f"[WARN] fetch failed for {url}: {exc}")
+                    continue
+                updated += import_rows(
+                    conn,
+                    parse_tables(page_html, url),
+                    overwrite=overwrite,
+                    print_map=print_map,
+                    existing_ko=existing_ko,
+                )
     conn.commit()
     conn.close()
     return updated
@@ -389,6 +475,11 @@ def main() -> int:
     ap.add_argument("--sheet-gid", help="Google Sheets gid (optional)")
     ap.add_argument("--timeout", type=float, default=15.0, help="HTTP timeout seconds")
     ap.add_argument("--overwrite", action="store_true", help="Overwrite existing Korean texts")
+    ap.add_argument(
+        "--search-card-numbers",
+        action="store_true",
+        help="Search NamuWiki by card number and crawl matching pages",
+    )
     args = ap.parse_args()
 
     if not args.page and not args.page_file and not args.sheet_url:
@@ -397,7 +488,23 @@ def main() -> int:
 
     updated = 0
     if args.page or args.page_file:
-        updated += import_from_pages(args.db, args.page, args.page_file, timeout=args.timeout, overwrite=args.overwrite)
+        updated += import_from_pages(
+            args.db,
+            args.page,
+            args.page_file,
+            timeout=args.timeout,
+            overwrite=args.overwrite,
+            search_card_numbers=args.search_card_numbers,
+        )
+    elif args.search_card_numbers:
+        updated += import_from_pages(
+            args.db,
+            [],
+            None,
+            timeout=args.timeout,
+            overwrite=args.overwrite,
+            search_card_numbers=True,
+        )
     if args.sheet_url:
         updated += import_from_sheet(
             args.db,
