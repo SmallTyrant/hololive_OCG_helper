@@ -138,6 +138,24 @@ def init_db(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS tags_ja(
+          tag_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          tag TEXT NOT NULL UNIQUE,
+          normalized TEXT NOT NULL
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tags_ko(
+          tag_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          tag TEXT NOT NULL UNIQUE,
+          normalized TEXT NOT NULL
+        );
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS print_tags(
           print_id INTEGER NOT NULL,
           tag_id INTEGER NOT NULL,
@@ -171,18 +189,48 @@ def normalize_tag(tag: str) -> str:
     return t
 
 
+def _has_table(conn: sqlite3.Connection, table: str) -> bool:
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        (table,),
+    ).fetchone()
+    return row is not None
+
+
 def upsert_tag(conn: sqlite3.Connection, tag: str) -> int:
     norm = normalize_tag(tag)
-    conn.execute(
-        """
-        INSERT INTO tags(tag, normalized)
-        VALUES(?, ?)
-        ON CONFLICT(tag) DO UPDATE SET normalized=excluded.normalized
-        """,
-        (tag, norm),
-    )
-    row = conn.execute("SELECT tag_id FROM tags WHERE tag=?", (tag,)).fetchone()
-    return int(row[0])
+    # Always write to tags_ja if it exists
+    if _has_table(conn, "tags_ja"):
+        conn.execute(
+            """
+            INSERT INTO tags_ja(tag, normalized)
+            VALUES(?, ?)
+            ON CONFLICT(tag) DO UPDATE SET normalized=excluded.normalized
+            """,
+            (tag, norm),
+        )
+        row = conn.execute("SELECT tag_id FROM tags_ja WHERE tag=?", (tag,)).fetchone()
+        tag_id = int(row[0])
+    else:
+        tag_id = None
+
+    # Legacy tags table for backward compatibility with existing print_tags FK
+    if _has_table(conn, "tags"):
+        conn.execute(
+            """
+            INSERT INTO tags(tag, normalized)
+            VALUES(?, ?)
+            ON CONFLICT(tag) DO UPDATE SET normalized=excluded.normalized
+            """,
+            (tag, norm),
+        )
+        if tag_id is None:
+            row = conn.execute("SELECT tag_id FROM tags WHERE tag=?", (tag,)).fetchone()
+            tag_id = int(row[0])
+
+    if tag_id is None:
+        raise RuntimeError("No tags table available")
+    return tag_id
 
 
 def replace_print_tags(conn: sqlite3.Connection, print_id: int, tags: List[str]) -> None:

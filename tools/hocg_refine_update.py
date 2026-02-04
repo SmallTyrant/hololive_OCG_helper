@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sqlite3
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 
 
@@ -151,36 +153,95 @@ def normalize_raw_text(text: str) -> str:
     return refined if refined else text
 
 
-def refine_db(db_path: str) -> None:
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
-    rows = conn.execute(
-        "SELECT print_id, raw_text FROM card_texts_ja"
-    ).fetchall()
-
-    updated = 0
-    total = len(rows)
-    t0 = datetime.now().timestamp()
-    for i, r in enumerate(rows, 1):
-        raw = r["raw_text"] or ""
+def _refine_chunk(rows: list[tuple[int, str]]) -> tuple[int, list[tuple[int, str]]]:
+    updates: list[tuple[int, str]] = []
+    for print_id, raw_text in rows:
+        raw = raw_text or ""
         cleaned = normalize_raw_text(raw)
         if cleaned != raw:
-            conn.execute(
-                """
-                UPDATE card_texts_ja
-                SET raw_text=?, effect_text=?, updated_at=?
-                WHERE print_id=?
-                """,
-                (cleaned, cleaned, now_iso(), r["print_id"]),
-            )
-            updated += 1
-        if i % 500 == 0 or i == total:
-            elapsed = max(1e-6, datetime.now().timestamp() - t0)
-            pct = (i / total) * 100 if total else 100.0
-            eta = int(elapsed * (total - i) / i) if i > 0 else 0
-            print(f"[REFINE] {i}/{total} updated={updated}", flush=True)
-            print(f"[PROGRESS_PCT] stage=refine pct={pct:.2f} eta={eta}", flush=True)
+            updates.append((print_id, cleaned))
+    return len(rows), updates
+
+
+def refine_db(db_path: str, jobs: int) -> None:
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=OFF;")
+    conn.execute("PRAGMA temp_store=MEMORY;")
+
+    total = conn.execute("SELECT COUNT(*) FROM card_texts_ja").fetchone()[0]
+    updated = 0
+    seen = 0
+    t0 = datetime.now().timestamp()
+    chunk_size = 1000
+
+    def _apply_updates(updates: list[tuple[int, str]]) -> None:
+        if not updates:
+            return
+        ts = now_iso()
+        batch = [(cleaned, cleaned, ts, pid) for pid, cleaned in updates]
+        conn.executemany(
+            """
+            UPDATE card_texts_ja
+            SET raw_text=?, effect_text=?, updated_at=?
+            WHERE print_id=?
+            """,
+            batch,
+        )
+
+    cursor = conn.execute("SELECT print_id, raw_text FROM card_texts_ja")
+    if jobs <= 1:
+        for r in cursor:
+            seen += 1
+            raw = r["raw_text"] or ""
+            cleaned = normalize_raw_text(raw)
+            if cleaned != raw:
+                _apply_updates([(r["print_id"], cleaned)])
+                updated += 1
+            if seen % 500 == 0 or seen == total:
+                elapsed = max(1e-6, datetime.now().timestamp() - t0)
+                pct = (seen / total) * 100 if total else 100.0
+                eta = int(elapsed * (total - seen) / seen) if seen > 0 else 0
+                print(f"[REFINE] {seen}/{total} updated={updated}", flush=True)
+                print(f"[PROGRESS_PCT] stage=refine pct={pct:.2f} eta={eta}", flush=True)
+    else:
+        futures = []
+        with ProcessPoolExecutor(max_workers=jobs) as ex:
+            while True:
+                rows = cursor.fetchmany(chunk_size)
+                if not rows:
+                    break
+                chunk = [(r["print_id"], r["raw_text"]) for r in rows]
+                futures.append(ex.submit(_refine_chunk, chunk))
+
+                if len(futures) >= jobs * 2:
+                    for f in as_completed(futures[:jobs]):
+                        processed, updates = f.result()
+                        seen += processed
+                        if updates:
+                            _apply_updates(updates)
+                            updated += len(updates)
+                        futures.remove(f)
+                        if seen % 500 == 0 or seen == total:
+                            elapsed = max(1e-6, datetime.now().timestamp() - t0)
+                            pct = (seen / total) * 100 if total else 100.0
+                            eta = int(elapsed * (total - seen) / seen) if seen > 0 else 0
+                            print(f"[REFINE] {seen}/{total} updated={updated}", flush=True)
+                            print(f"[PROGRESS_PCT] stage=refine pct={pct:.2f} eta={eta}", flush=True)
+
+            for f in as_completed(futures):
+                processed, updates = f.result()
+                seen += processed
+                if updates:
+                    _apply_updates(updates)
+                    updated += len(updates)
+                if seen % 500 == 0 or seen == total:
+                    elapsed = max(1e-6, datetime.now().timestamp() - t0)
+                    pct = (seen / total) * 100 if total else 100.0
+                    eta = int(elapsed * (total - seen) / seen) if seen > 0 else 0
+                    print(f"[REFINE] {seen}/{total} updated={updated}", flush=True)
+                    print(f"[PROGRESS_PCT] stage=refine pct={pct:.2f} eta={eta}", flush=True)
 
     conn.commit()
     conn.close()
@@ -190,9 +251,11 @@ def refine_db(db_path: str) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", required=True, help="SQLite DB path")
+    ap.add_argument("--jobs", type=int, default=4, help="Parallel workers for refine")
     args = ap.parse_args()
 
-    refine_db(args.db)
+    jobs = max(1, args.jobs)
+    refine_db(args.db, jobs=jobs)
     return 0
 
 
