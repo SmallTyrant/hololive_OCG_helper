@@ -13,6 +13,11 @@ PC-only Flet helper app.
 python tools/namuwiki_ko_import.py --db data/hololive_ocg.sqlite --page "hololive OCG/카드 목록"
 ```
 
+카드 번호로 NamuWiki 검색까지 포함하려면 `--search-card-numbers`를 추가하세요:
+```
+python tools/namuwiki_ko_import.py --db data/hololive_ocg.sqlite --page "hololive OCG/카드 목록" --search-card-numbers
+```
+
 Google Sheets 예시(공개 시트):
 ```
 python tools/namuwiki_ko_import.py --db data/hololive_ocg.sqlite --sheet-url "https://docs.google.com/spreadsheets/d/<id>/edit#gid=0"
