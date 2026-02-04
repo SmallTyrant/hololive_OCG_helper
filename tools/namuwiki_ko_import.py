@@ -222,6 +222,44 @@ def parse_search_results(html: str, query: str) -> list[str]:
     return deduped
 
 
+def collect_linked_pages(
+    html: str,
+    *,
+    include_re: re.Pattern[str] | None,
+    exclude_re: re.Pattern[str] | None,
+) -> list[str]:
+    try:
+        soup = BeautifulSoup(html, "lxml")
+    except FeatureNotFound:
+        soup = BeautifulSoup(html, "html.parser")
+    urls: list[str] = []
+    for link in soup.select("a[href]"):
+        href = link.get("href", "")
+        if not href:
+            continue
+        if href.startswith("/w/검색") or href.startswith("/w/파일"):
+            continue
+        if href.startswith("/w/"):
+            url = f"{NAMU_BASE}{href}"
+        elif href.startswith(f"{NAMU_BASE}/w/"):
+            url = href
+        else:
+            continue
+        if include_re and not include_re.search(url):
+            continue
+        if exclude_re and exclude_re.search(url):
+            continue
+        urls.append(url)
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for url in urls:
+        if url in seen:
+            continue
+        seen.add(url)
+        deduped.append(url)
+    return deduped
+
+
 def iter_pages(pages: list[str], page_file: str | None) -> Iterable[str]:
     for page in pages:
         if page:
@@ -387,6 +425,9 @@ def import_from_pages(
     timeout: float,
     overwrite: bool,
     search_card_numbers: bool,
+    crawl_linked: bool,
+    link_include: re.Pattern[str] | None,
+    link_exclude: re.Pattern[str] | None,
 ) -> int:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -409,6 +450,24 @@ def import_from_pages(
             print_map=print_map,
             existing_ko=existing_ko,
         )
+        if crawl_linked:
+            linked_urls = collect_linked_pages(html, include_re=link_include, exclude_re=link_exclude)
+            for url in linked_urls:
+                if url in seen_pages:
+                    continue
+                seen_pages.add(url)
+                try:
+                    page_html = fetch_html(session, url, timeout=timeout)
+                except requests.RequestException as exc:
+                    print(f"[WARN] fetch failed for {url}: {exc}")
+                    continue
+                updated += import_rows(
+                    conn,
+                    parse_tables(page_html, url),
+                    overwrite=overwrite,
+                    print_map=print_map,
+                    existing_ko=existing_ko,
+                )
 
     if search_card_numbers:
         for card_no in iter_card_numbers_for_search(print_map, existing_ko, overwrite=overwrite):
@@ -475,6 +534,9 @@ def main() -> int:
     ap.add_argument("--sheet-gid", help="Google Sheets gid (optional)")
     ap.add_argument("--timeout", type=float, default=15.0, help="HTTP timeout seconds")
     ap.add_argument("--overwrite", action="store_true", help="Overwrite existing Korean texts")
+    ap.add_argument("--crawl-linked", action="store_true", help="Crawl linked NamuWiki pages from sources")
+    ap.add_argument("--link-include", help="Regex for linked URLs to include")
+    ap.add_argument("--link-exclude", help="Regex for linked URLs to exclude")
     ap.add_argument(
         "--search-card-numbers",
         action="store_true",
@@ -488,6 +550,8 @@ def main() -> int:
 
     updated = 0
     if args.page or args.page_file:
+        link_include = re.compile(args.link_include) if args.link_include else None
+        link_exclude = re.compile(args.link_exclude) if args.link_exclude else None
         updated += import_from_pages(
             args.db,
             args.page,
@@ -495,6 +559,9 @@ def main() -> int:
             timeout=args.timeout,
             overwrite=args.overwrite,
             search_card_numbers=args.search_card_numbers,
+            crawl_linked=args.crawl_linked,
+            link_include=link_include,
+            link_exclude=link_exclude,
         )
     elif args.search_card_numbers:
         updated += import_from_pages(
@@ -504,6 +571,9 @@ def main() -> int:
             timeout=args.timeout,
             overwrite=args.overwrite,
             search_card_numbers=True,
+            crawl_linked=False,
+            link_include=None,
+            link_exclude=None,
         )
     if args.sheet_url:
         updated += import_from_sheet(
