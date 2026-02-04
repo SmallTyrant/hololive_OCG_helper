@@ -4,6 +4,9 @@ PC-only Flet helper app.
 
 아직은 일본어만 지원합니다.
 
+## 모바일 앱 제작 안내
+Android(Kotlin) / iOS(Swift) 앱 제작을 위한 가이드는 `mobile/` 폴더를 참고하세요.
+
 ## 한국어 효과 텍스트 적재 (NamuWiki/Google Sheets)
 `tools/namuwiki_ko_import.py`로 NamuWiki 카드 목록 테이블 또는 Google Sheets CSV에서 카드 번호/효과를 추출해
 `card_texts_ko`에 적재할 수 있습니다. DB 스키마 변경 없이 기존 `prints`와 카드 번호로 매칭됩니다.
