@@ -2,7 +2,7 @@
 PC-only Flet helper app.
 
 
-아직은 일본어만 지원합니다.
+한국어만 지원합니다.
 
 ## 모바일 앱 제작 안내
 Android(Kotlin) / iOS(Swift) 앱 제작을 위한 가이드는 `mobile/` 폴더를 참고하세요.
