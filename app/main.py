@@ -15,7 +15,8 @@ def _resolve_db_path(db_arg: str | None) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Launch hololive OCG helper UI.")
     ap.add_argument("--db", default=None)
-    args = ap.parse_args()
+    # Flet runtime may pass extra args; ignore unknown to avoid startup crash.
+    args, _unknown = ap.parse_known_args()
     db_path = _resolve_db_path(args.db)
     launch_app(db_path)
 

@@ -1,6 +1,7 @@
 # app/ui.py
 from __future__ import annotations
 
+import re
 import sqlite3
 import threading
 import sys
@@ -13,6 +14,7 @@ from app.services.db import (
     open_db,
     query_suggest,
     load_card_detail,
+    load_print_tags,
     get_print_brief,
     db_exists,
     ensure_db,
@@ -37,6 +39,56 @@ SECTION_LABELS = (
     "LIFE",
     "HP",
 )
+KO_NAME_PREFIXES = ("카드명", "카드 이름")
+JP_NAME_PREFIXES = ("カード名",)
+TAG_JA_GEN_RE = re.compile(r"^#?(\d+)期生$")
+LIST_VISIBLE_ROWS = 3
+LIST_ROW_HEIGHT = 56
+LIST_PADDING = 10
+LIST_HEIGHT = LIST_ROW_HEIGHT * LIST_VISIBLE_ROWS + (LIST_PADDING * 2)
+TOP_PADDING = 50
+
+def load_tag_ja_to_ko_map(project_root: Path) -> dict[str, str]:
+    path = project_root / "config" / "tag_ja_to_ko.txt"
+    if not path.exists():
+        return {}
+    mapping: dict[str, str] = {}
+    try:
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line:
+                continue
+            if line.startswith("# ") or line.startswith(";"):
+                continue
+            if "=" not in line:
+                continue
+            left, right = line.split("=", 1)
+            left = left.strip()
+            right = right.strip()
+            if left and right:
+                mapping[left] = right
+    except Exception:
+        return {}
+    return mapping
+
+def translate_tag_ja_to_ko(tag: str, tag_map: dict[str, str]) -> str:
+    t = (tag or "").strip()
+    if not t:
+        return t
+    mapped = tag_map.get(t)
+    if mapped:
+        return mapped
+    has_hash = t.startswith("#")
+    core = t[1:] if has_hash else t
+    mapped = tag_map.get(core)
+    if mapped:
+        if mapped.startswith("#") or not has_hash:
+            return mapped
+        return f"#{mapped}"
+    m = TAG_JA_GEN_RE.match(t)
+    if m:
+        return f"#{m.group(1)}기생"
+    return t
 
 DB_MISSING_TOAST = "DB파일이 존재하지 않습니다. DB갱신을 해주세요"
 DB_UPDATING_TOAST = "갱신중..."
@@ -82,6 +134,21 @@ def launch_app(db_path: str) -> None:
         conn_epoch = {"value": 0}
         db_health_cache = {"path": None, "value": None, "checked_at": 0.0}
         DB_HEALTH_CACHE_TTL = 2.0
+        tag_ja_to_ko_map = load_tag_ja_to_ko_map(project_root)
+
+        def is_mobile_platform() -> bool:
+            platform = getattr(page, "platform", None)
+            if platform is None:
+                return False
+            page_platform = getattr(ft, "PagePlatform", None)
+            if page_platform is not None:
+                try:
+                    if platform in (page_platform.ANDROID, page_platform.IOS):
+                        return True
+                except Exception:
+                    pass
+            s = str(platform).lower()
+            return "android" in s or "ios" in s
 
         page.title = "hOCG_helper"
         page.window_width = 1280
@@ -131,6 +198,8 @@ def launch_app(db_path: str) -> None:
 
         # --- Right: detail ---
         detail_lv = ft.ListView(expand=True, spacing=4, padding=0, auto_scroll=False)
+        ko_body = ft.Column(spacing=2, visible=True)
+        detail_lv.controls.extend([ko_body])
         # currently selected
         selected_print_id = {"id": None}
         selected_card_number = {"no": ""}
@@ -403,14 +472,49 @@ def launch_app(db_path: str) -> None:
                     )
             return ft.Text(line)
 
-        def append_detail_lines(text: str, apply_jp_filters: bool) -> None:
+        def _match_name_line(line: str, prefixes: tuple[str, ...]) -> str | None:
+            s = line.strip()
+            if not s:
+                return None
+            for prefix in prefixes:
+                if s == prefix:
+                    return "label_only"
+                if s.startswith(prefix):
+                    rest = s[len(prefix):]
+                    if not rest:
+                        return "label_only"
+                    if rest[0] in (" ", "\t", ":", "-", "("):
+                        return "label_value"
+            return None
+
+        def collect_detail_lines(
+            text: str,
+            apply_jp_filters: bool,
+            drop_name_line: bool = False,
+            name_prefixes: tuple[str, ...] | None = None,
+        ) -> list[ft.Control]:
             lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+            out: list[ft.Control] = []
             i = 0
+            skip_next_name_value = False
             while i < len(lines):
                 line = lines[i].strip()
                 if not line:
                     i += 1
                     continue
+                if skip_next_name_value:
+                    skip_next_name_value = False
+                    i += 1
+                    continue
+                if drop_name_line and name_prefixes:
+                    match = _match_name_line(line, name_prefixes)
+                    if match == "label_only":
+                        skip_next_name_value = True
+                        i += 1
+                        continue
+                    if match == "label_value":
+                        i += 1
+                        continue
                 if apply_jp_filters:
                     if line == "色" or line.startswith("色 "):
                         i += 1
@@ -418,42 +522,47 @@ def launch_app(db_path: str) -> None:
                     if line == "バトンタッチ" or line.startswith("バトンタッチ "):
                         i += 1
                         continue
-                    detail_lv.controls.append(build_detail_line(line))
+                    out.append(build_detail_line(line))
                 else:
-                    detail_lv.controls.append(ft.Text(line))
+                    out.append(ft.Text(line))
                 i += 1
+            return out
 
-        def set_detail_text(ja_text: str | None, ko_text: str | None, ko_name: str | None) -> None:
-            detail_lv.controls.clear()
+        def set_detail_text(
+            ja_text: str | None,
+            ko_text: str | None,
+            ko_name: str | None,
+            tags: list[str] | None,
+        ) -> None:
             ja = (ja_text or "").strip()
             ko = (ko_text or "").strip()
-            ko_name = (ko_name or "").strip()
-            has_any = False
+            tags = [t.strip() for t in (tags or []) if t and t.strip()]
+            tags_with_hash = [t if t.startswith("#") else f"#{t}" for t in tags]
+            tags_ko = [translate_tag_ja_to_ko(t, tag_ja_to_ko_map) for t in tags_with_hash]
+            tag_line_ko = " ".join(tags_ko)
+            tag_line_ja = " ".join(tags_with_hash)
+            tags_used = False
 
-            if ko or ko_name:
-                detail_lv.controls.append(build_section_chip("한국어"))
-                if ko_name:
-                    detail_lv.controls.append(
-                        ft.Text(
-                            spans=[
-                                ft.TextSpan("카드명 ", style=ft.TextStyle(weight=ft.FontWeight.BOLD)),
-                                ft.TextSpan(ko_name),
-                            ]
-                        )
-                    )
-                if ko:
-                    append_detail_lines(ko, apply_jp_filters=False)
-                has_any = True
+            ko_body.controls.clear()
+            ko_body.visible = True
 
-            if ja:
-                if ko:
-                    detail_lv.controls.append(ft.Divider(height=8))
-                    detail_lv.controls.append(build_section_chip("日本語"))
-                append_detail_lines(ja, apply_jp_filters=True)
-                has_any = True
+            ko_lines: list[ft.Control] = []
+            if ko:
+                ko_lines = collect_detail_lines(
+                    ko,
+                    apply_jp_filters=False,
+                    drop_name_line=True,
+                    name_prefixes=KO_NAME_PREFIXES,
+                )
+            if tag_line_ko:
+                ko_lines.append(ft.Text(tag_line_ko))
+                tags_used = True
+            if not ko_lines:
+                ko_lines = [ft.Text("(본문 없음)")]
+            ko_body.controls.extend(ko_lines)
 
-            if not has_any:
-                detail_lv.controls.append(ft.Text("(본문 없음)"))
+            if tag_line_ja and not tags_used:
+                tags_used = True
 
             page.update()
 
@@ -477,14 +586,16 @@ def launch_app(db_path: str) -> None:
 
                 # 본문 갱신
                 card = load_card_detail(conn, pid)
+                tags = load_print_tags(conn, pid)
                 set_detail_text(
                     card.get("raw_text", "") if card else None,
                     card.get("ko_text", "") if card else None,
                     card.get("ko_name", "") if card else None,
+                    tags,
                 )
 
             except Exception as ex:
-                set_detail_text(f"[ERROR] 상세 로드 실패: {ex}", None, None)
+                set_detail_text(f"[ERROR] 상세 로드 실패: {ex}", None, None, None)
                 clear_image()
 
             page.update()
@@ -616,6 +727,8 @@ def launch_app(db_path: str) -> None:
         layout_state = {"mobile": None}
 
         def is_mobile_layout() -> bool:
+            if is_mobile_platform():
+                return True
             width = page.window_width or page.width or 0
             return bool(width) and width < 900
 
@@ -628,16 +741,16 @@ def launch_app(db_path: str) -> None:
             page.controls.clear()
 
             if mobile:
-                top_row = ft.Row(
+                db_row = ft.Row([tf_db], vertical_alignment=ft.CrossAxisAlignment.CENTER)
+                search_row = ft.Row(
                     [tf_search, btn_update],
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     spacing=8,
                 )
-                db_row = ft.Row([tf_db], vertical_alignment=ft.CrossAxisAlignment.CENTER)
                 list_section = ft.Column(
                     [
                         ft.Container(ft.Text("목록"), padding=ft.padding.only(left=10, top=4)),
-                        ft.Container(lv, height=240, padding=10),
+                        ft.Container(lv, height=LIST_HEIGHT, padding=LIST_PADDING),
                     ],
                     spacing=0,
                 )
@@ -656,29 +769,37 @@ def launch_app(db_path: str) -> None:
                     spacing=0,
                 )
                 page.add(
-                    ft.Column(
-                        [
-                            top_row,
-                            db_row,
-                            ft.Divider(height=1),
-                            list_section,
-                            image_section,
-                            effect_section,
-                        ],
+                    ft.Container(
+                        content=ft.Column(
+                            [
+                                db_row,
+                                search_row,
+                                ft.Divider(height=1),
+                                list_section,
+                                image_section,
+                                effect_section,
+                            ],
+                            expand=True,
+                            spacing=8,
+                            scroll=ft.ScrollMode.AUTO,
+                        ),
+                        padding=ft.padding.only(top=TOP_PADDING),
                         expand=True,
-                        spacing=8,
-                        scroll=ft.ScrollMode.AUTO,
                     )
                 )
                 return
 
-            top = ft.Row([tf_db, btn_update], vertical_alignment=ft.CrossAxisAlignment.CENTER)
-            search_row = ft.Row([tf_search], vertical_alignment=ft.CrossAxisAlignment.CENTER)
+            top = ft.Row([tf_db], vertical_alignment=ft.CrossAxisAlignment.CENTER)
+            search_row = ft.Row(
+                [tf_search, btn_update],
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=8,
+            )
 
             left = ft.Column(
                 [
                     ft.Container(ft.Text("목록"), padding=ft.padding.only(left=10, top=4)),
-                    ft.Container(lv, expand=True, padding=10),
+                    ft.Container(lv, height=LIST_HEIGHT, padding=LIST_PADDING),
                 ],
                 expand=True,
                 spacing=0,
@@ -713,15 +834,19 @@ def launch_app(db_path: str) -> None:
             )
 
             page.add(
-                ft.Column(
-                    [
-                        top,
-                        search_row,
-                        ft.Divider(height=1),
-                        body,
-                    ],
+                ft.Container(
+                    content=ft.Column(
+                        [
+                            top,
+                            search_row,
+                            ft.Divider(height=1),
+                            body,
+                        ],
+                        expand=True,
+                        spacing=8,
+                    ),
+                    padding=ft.padding.only(top=TOP_PADDING),
                     expand=True,
-                    spacing=8,
                 )
             )
 

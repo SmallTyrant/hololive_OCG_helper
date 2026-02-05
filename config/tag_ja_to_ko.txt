@@ -1,0 +1,5 @@
+# Tag translation map (one per line): <ja_tag>=<ko_tag>
+# Lines starting with "# " or ";" are ignored.
+#
+# Example:
+# #ゲーマーズ=#게이머즈

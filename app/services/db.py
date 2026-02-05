@@ -3,6 +3,97 @@ from pathlib import Path
 
 from app.constants import TAG_ALIAS
 
+
+def _init_db(conn: sqlite3.Connection) -> None:
+    conn.execute("PRAGMA foreign_keys=ON;")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS meta(
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS prints(
+          print_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          card_number TEXT NOT NULL UNIQUE,
+          set_code TEXT,
+          rarity TEXT,
+          color TEXT,
+          card_type TEXT,
+          product TEXT,
+          name_ja TEXT,
+          image_url TEXT,
+          image_sha256 TEXT,
+          detail_id INTEGER,
+          detail_url TEXT,
+          updated_at TEXT NOT NULL
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS card_texts_ja(
+          print_id INTEGER PRIMARY KEY,
+          name TEXT,
+          effect_text TEXT,
+          raw_text TEXT,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY(print_id) REFERENCES prints(print_id) ON DELETE CASCADE
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS card_texts_ko(
+          print_id INTEGER PRIMARY KEY,
+          name TEXT,
+          effect_text TEXT,
+          memo TEXT,
+          source TEXT DEFAULT 'manual',
+          version INTEGER DEFAULT 1,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY(print_id) REFERENCES prints(print_id) ON DELETE CASCADE
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tags(
+          tag_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          tag TEXT NOT NULL UNIQUE,
+          normalized TEXT NOT NULL
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS print_tags(
+          print_id INTEGER NOT NULL,
+          tag_id INTEGER NOT NULL,
+          PRIMARY KEY(print_id, tag_id),
+          FOREIGN KEY(print_id) REFERENCES prints(print_id) ON DELETE CASCADE,
+          FOREIGN KEY(tag_id) REFERENCES tags(tag_id) ON DELETE CASCADE
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS raw_snapshots(
+          snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          print_id INTEGER NOT NULL,
+          fetched_at TEXT NOT NULL,
+          url TEXT NOT NULL,
+          content_sha256 TEXT NOT NULL,
+          raw_html BLOB NOT NULL,
+          FOREIGN KEY(print_id) REFERENCES prints(print_id) ON DELETE CASCADE
+        );
+        """
+    )
+    conn.commit()
+
 _COL_CACHE: dict[int, dict[str, set[str]]] = {}
 _JOIN_CACHE: dict[int, str | None] = {}
 _MISSING = object()
@@ -17,8 +108,7 @@ def ensure_db(path: str) -> bool:
     p.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     try:
-        from tools.hocg_tool2 import init_db
-        init_db(conn)
+        _init_db(conn)
     finally:
         conn.close()
     return True
@@ -170,6 +260,31 @@ def load_card_detail(conn: sqlite3.Connection, pid: int) -> dict | None:
         (pid,),
     ).fetchone()
     return dict(r) if r else None
+
+def load_print_tags(conn: sqlite3.Connection, print_id: int) -> list[str]:
+    joins = _build_tag_joins(conn)
+    if joins:
+        rows = conn.execute(
+            f"""
+            SELECT DISTINCT t.tag AS tag
+            FROM prints p
+            {joins}
+            WHERE p.print_id=? AND t.tag IS NOT NULL
+            ORDER BY t.tag
+            """,
+            (print_id,),
+        ).fetchall()
+        return [r["tag"] for r in rows if r["tag"]]
+
+    pt_cols = _cols(conn, "print_tags")
+    if "tag" in pt_cols:
+        rows = conn.execute(
+            "SELECT DISTINCT tag FROM print_tags WHERE print_id=? ORDER BY tag",
+            (print_id,),
+        ).fetchall()
+        return [r[0] for r in rows if r[0]]
+
+    return []
 
 def get_print_brief(conn: sqlite3.Connection, print_id: int) -> dict | None:
     row = conn.execute(
