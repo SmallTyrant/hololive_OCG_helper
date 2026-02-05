@@ -131,13 +131,14 @@ def launch_app(db_path: str) -> None:
         # --- Right: detail ---
         detail_lv = ft.ListView(expand=True, spacing=4, padding=0, auto_scroll=False)
         detail_texts = {"ko": "", "ja": ""}
-        detail_mode = {"value": "both"}
+        detail_mode = {"value": "ko"}
 
         def set_detail_mode(mode: str) -> None:
-            if detail_mode["value"] == mode:
-                detail_mode["value"] = "both"
-            else:
-                detail_mode["value"] = mode
+            if mode == "ko" and not detail_texts["ko"].strip():
+                return
+            if mode == "ja" and not detail_texts["ja"].strip():
+                return
+            detail_mode["value"] = mode
             render_detail()
 
         btn_detail_ko = ft.OutlinedButton("한국어", on_click=lambda e: set_detail_mode("ko"), disabled=True)
@@ -446,14 +447,12 @@ def launch_app(db_path: str) -> None:
             has_any = False
             mode = detail_mode["value"]
 
-            if mode in ("both", "ko") and ko:
+            if mode == "ko" and ko:
                 detail_lv.controls.append(build_section_chip("한국어"))
                 append_detail_lines(ko, apply_jp_filters=False)
                 has_any = True
 
-            if mode in ("both", "ja") and ja:
-                if mode == "both" and ko:
-                    detail_lv.controls.append(ft.Divider(height=8))
+            if mode == "ja" and ja:
                 detail_lv.controls.append(build_section_chip("日本語"))
                 append_detail_lines(ja, apply_jp_filters=True)
                 has_any = True
@@ -466,7 +465,12 @@ def launch_app(db_path: str) -> None:
         def set_detail_text(ja_text: str | None, ko_text: str | None) -> None:
             detail_texts["ja"] = (ja_text or "")
             detail_texts["ko"] = (ko_text or "")
-            detail_mode["value"] = "both"
+            if detail_mode["value"] not in ("ko", "ja"):
+                detail_mode["value"] = "ko"
+            if detail_mode["value"] == "ko" and not detail_texts["ko"].strip():
+                detail_mode["value"] = "ja" if detail_texts["ja"].strip() else "ko"
+            if detail_mode["value"] == "ja" and not detail_texts["ja"].strip():
+                detail_mode["value"] = "ko" if detail_texts["ko"].strip() else "ja"
             update_detail_buttons()
             render_detail()
 
