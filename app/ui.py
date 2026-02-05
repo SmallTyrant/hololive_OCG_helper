@@ -643,7 +643,6 @@ def launch_app(db_path: str) -> None:
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     spacing=8,
                 )
-                db_row = ft.Row([tf_db], vertical_alignment=ft.CrossAxisAlignment.CENTER)
                 list_section = ft.Column(
                     [
                         ft.Container(ft.Text("목록"), padding=ft.padding.only(left=10, top=4)),
@@ -670,7 +669,6 @@ def launch_app(db_path: str) -> None:
                     ft.Column(
                         [
                             top_row,
-                            db_row,
                             ft.Divider(height=1),
                             list_section,
                             image_section,
