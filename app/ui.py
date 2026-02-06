@@ -181,6 +181,7 @@ def launch_app(db_path: str) -> None:
             visible=False,
         )
         page.overlay.append(ft.TransparentPointer(content=toast_host, expand=True))
+        page.update()
 
         toast_state = {"seq": 0, "message": None}
 
@@ -249,7 +250,10 @@ def launch_app(db_path: str) -> None:
 
             toast_text.value = message
             toast_host.visible = True
-            toast_host.update()
+            if toast_host.page is None:
+                page.update()
+            if toast_host.page is not None:
+                toast_host.update()
 
             if duration_ms is not None and duration_ms > 0:
                 def _after():
@@ -258,7 +262,10 @@ def launch_app(db_path: str) -> None:
                     if persist:
                         return
                     toast_host.visible = False
-                    toast_host.update()
+                    if toast_host.page is None:
+                        page.update()
+                    if toast_host.page is not None:
+                        toast_host.update()
                     if restore_missing_after and needs_db_update():
                         show_toast(DB_MISSING_TOAST, persist=True)
 
