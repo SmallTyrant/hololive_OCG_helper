@@ -1,6 +1,7 @@
 # app/ui.py
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 import threading
 import sys
@@ -23,6 +24,7 @@ from app.services.images import local_image_path, download_image, resolve_url
 from app.services.verify import run_startup_checks
 
 COLORS = ft.Colors if hasattr(ft, "Colors") else ft.colors
+ICONS = ft.Icons if hasattr(ft, "Icons") else ft.icons
 SECTION_LABELS = (
     "カードタイプ",
     "タグ",
@@ -83,43 +85,82 @@ def launch_app(db_path: str) -> None:
         DB_HEALTH_CACHE_TTL = 2.0
 
         page.title = APP_NAME
-        page.window_width = 1280
-        page.window_height = 820
-        page.padding = ft.padding.only(left=10, right=10, bottom=10, top=0)
+        page.padding = 0
+
+        def is_mobile_platform() -> bool:
+            platform = getattr(page, "platform", None)
+            if hasattr(ft, "PagePlatform") and platform in (
+                ft.PagePlatform.IOS,
+                ft.PagePlatform.ANDROID,
+            ):
+                return True
+            platform_name = str(platform).lower()
+            user_agent = (getattr(page, "client_user_agent", "") or "").lower()
+            return any(token in platform_name for token in ("ios", "android")) or any(
+                token in user_agent for token in ("iphone", "ipad", "android")
+            )
+
+        if not is_mobile_platform():
+            page.window_width = 1280
+            page.window_height = 820
 
         # --- Controls ---
         tf_db = ft.TextField(label="DB", value=db_path, expand=True)
         tf_search = ft.TextField(label="카드번호 / 이름 / 태그 검색", expand=True)
+        btn_update = ft.ElevatedButton("DB갱신", icon=ICONS.SYNC)
+        update_progress = ft.ProgressRing(width=18, height=18, stroke_width=2, visible=False)
+        update_status = ft.Text("", size=12, color=COLORS.RED_300, visible=False)
 
-        btn_update = ft.ElevatedButton("DB갱신")  # DB 없을 때도 이 버튼으로 생성
-        # Progress bar removed (user requested no ETA/loader in UI)
+        # --- Results / Detail ---
+        lv = ft.Column(spacing=2, scroll=ft.ScrollMode.AUTO, expand=True)
+        detail_lv = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO, expand=True)
+        detail_texts = {"ko": "", "ja": ""}
 
-        # --- Left: results ---
-        lv = ft.ListView(expand=True, spacing=2, padding=0)
+        # --- Image area ---
+        def build_image_placeholder(text: str, loading: bool = False) -> ft.Control:
+            marker: ft.Control
+            if loading:
+                marker = ft.ProgressRing(width=24, height=24, stroke_width=2)
+            else:
+                marker = ft.Icon(ICONS.IMAGE_NOT_SUPPORTED_OUTLINED, size=28, color=COLORS.GREY_400)
+            return ft.Container(
+                content=ft.Column(
+                    [marker, ft.Text(text, color=COLORS.GREY_400)],
+                    spacing=8,
+                    tight=True,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                alignment=ALIGN_CENTER,
+                expand=True,
+                border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
+            )
 
-        # --- Image area (중요: ft.Image()를 빈 생성자로 만들지 않음) ---
-        def build_image_widget(image_path: Path | None, image_url: str | None = None) -> ft.Control:
-            # 이미지 파일이 존재할 때만 ft.Image(src=...) 생성
+        def build_image_widget(
+            image_path: Path | None,
+            image_url: str | None = None,
+            *,
+            loading: bool = False,
+            placeholder_text: str = "이미지 없음",
+        ) -> ft.Control:
+            if loading:
+                return build_image_placeholder("이미지 로딩 중...", loading=True)
+
+            error_content = build_image_placeholder("이미지 로딩 실패")
             if image_path and image_path.exists():
                 return ft.Image(
                     src=str(image_path),
                     fit=IMAGE_FIT_CONTAIN,
                     expand=True,
+                    error_content=error_content,
                 )
-            # 로컬이 없으면 URL로 표시
             if image_url:
                 return ft.Image(
                     src=image_url,
                     fit=IMAGE_FIT_CONTAIN,
                     expand=True,
+                    error_content=error_content,
                 )
-            # 이미지 없을 때 플레이스홀더
-            return ft.Container(
-                content=ft.Text("이미지 없음", color=COLORS.GREY_400),
-                alignment=ALIGN_CENTER,
-                expand=True,
-                border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
-            )
+            return build_image_placeholder(placeholder_text)
 
         img_container = ft.Container(
             content=build_image_widget(None),
@@ -129,25 +170,11 @@ def launch_app(db_path: str) -> None:
             border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
         )
 
-        # --- Right: detail ---
-        detail_lv = ft.ListView(expand=True, spacing=4, padding=0, auto_scroll=False)
-        detail_texts = {"ko": "", "ja": ""}
-        detail_mode = {"value": "ko"}
-
-        def set_detail_mode(mode: str) -> None:
-            if mode == "ko" and not detail_texts["ko"].strip():
-                return
-            if mode == "ja" and not detail_texts["ja"].strip():
-                return
-            detail_mode["value"] = mode
-            render_detail()
-
-        btn_detail_ko = ft.OutlinedButton("한국어", on_click=lambda e: set_detail_mode("ko"), disabled=True)
-        btn_detail_ja = ft.OutlinedButton("日本語", on_click=lambda e: set_detail_mode("ja"), disabled=True)
-        detail_header = ft.Row([btn_detail_ko, btn_detail_ja], spacing=8, wrap=True)
-        # currently selected
         selected_print_id = {"id": None}
         selected_card_number = {"no": ""}
+        selected_image_url = {"url": ""}
+        results_state = {"rows": []}
+        update_state = {"running": False}
         downloading = set()
         download_lock = threading.Lock()
 
@@ -257,20 +284,29 @@ def launch_app(db_path: str) -> None:
                 toast_host.update()
 
             if duration_ms is not None and duration_ms > 0:
-                def _after():
-                    if toast_state["seq"] != seq:
+                async def _after_hide(
+                    token: int,
+                    delay_ms: int,
+                    should_restore_missing: bool,
+                    keep_persist: bool,
+                ) -> None:
+                    await asyncio.sleep(delay_ms / 1000.0)
+                    if toast_state["seq"] != token:
                         return
-                    if persist:
+                    if keep_persist:
                         return
                     toast_host.visible = False
-                    if toast_host.page is None:
-                        page.update()
-                    if toast_host.page is not None:
-                        toast_host.update()
-                    if restore_missing_after and needs_db_update():
+                    if should_restore_missing and needs_db_update():
                         show_toast(DB_MISSING_TOAST, persist=True)
+                    page.update()
 
-                threading.Timer(duration_ms / 1000.0, _after).start()
+                page.run_task(
+                    _after_hide,
+                    seq,
+                    duration_ms,
+                    restore_missing_after,
+                    persist,
+                )
 
         def setup_window_icon() -> None:
             ico_path, png_path = icon_paths(project_root)
@@ -364,40 +400,69 @@ def launch_app(db_path: str) -> None:
             thread_local.epoch = -1
             thread_local.path = None
 
-        def set_image_for_card(card_number: str, image_url: str | None = None) -> None:
-            p = local_image_path(data_root, card_number)
-            img_container.content = build_image_widget(p if p.exists() else None, image_url)
+        def set_image_for_card(
+            card_number: str,
+            image_url: str | None = None,
+            *,
+            loading: bool = False,
+            placeholder_text: str = "이미지 없음",
+        ) -> None:
+            image_path = local_image_path(data_root, card_number) if card_number else None
+            resolved = resolve_url((image_url or "").strip())
+            img_container.content = build_image_widget(
+                image_path if image_path and image_path.exists() else None,
+                resolved,
+                loading=loading and not (image_path and image_path.exists()),
+                placeholder_text=placeholder_text,
+            )
             page.update()
 
-        def clear_image() -> None:
-            img_container.content = build_image_widget(None)
+        def clear_image(placeholder_text: str = "이미지 없음") -> None:
+            img_container.content = build_image_widget(None, placeholder_text=placeholder_text)
             page.update()
+
+        async def download_selected_image(
+            card_number: str,
+            image_url: str,
+        ) -> None:
+            dest = local_image_path(data_root, card_number)
+            try:
+                append_log(f"[IMG] downloading: {card_number} -> {dest.name}")
+                await asyncio.to_thread(download_image, image_url, dest)
+                append_log("[IMG] done")
+                if selected_card_number["no"] == card_number:
+                    set_image_for_card(card_number, image_url)
+            except Exception as ex:
+                append_log(f"[IMG][ERROR] {ex}")
+                if selected_card_number["no"] == card_number:
+                    clear_image("이미지 로딩 실패")
+            finally:
+                with download_lock:
+                    downloading.discard(card_number)
+                page.update()
 
         def ensure_image_download(card_number: str, image_url: str) -> None:
-            if not card_number or not image_url:
+            if not card_number:
+                clear_image()
                 return
+
+            resolved_url = resolve_url((image_url or "").strip())
             dest = local_image_path(data_root, card_number)
+
             if dest.exists():
+                set_image_for_card(card_number, resolved_url)
                 return
+
+            if not resolved_url:
+                clear_image("이미지 URL 없음")
+                return
+
             with download_lock:
                 if card_number in downloading:
                     return
                 downloading.add(card_number)
 
-            def worker() -> None:
-                try:
-                    append_log(f"[IMG] downloading: {card_number} -> {dest.name}")
-                    download_image(image_url, dest)
-                    append_log("[IMG] done")
-                    if selected_card_number["no"] == card_number:
-                        set_image_for_card(card_number, image_url)
-                except Exception as ex:
-                    append_log(f"[IMG][ERROR] {ex}")
-                finally:
-                    with download_lock:
-                        downloading.discard(card_number)
-
-            threading.Thread(target=worker, daemon=True).start()
+            page.run_task(download_selected_image, card_number, resolved_url)
 
         def build_section_chip(text: str) -> ft.Control:
             return ft.Container(
@@ -407,46 +472,13 @@ def launch_app(db_path: str) -> None:
                 border_radius=12,
             )
 
-        def build_detail_line(line: str) -> ft.Control | None:
+        def build_detail_line(line: str) -> ft.Control:
             if line in SECTION_LABELS:
                 return build_section_chip(line)
 
             for label in SECTION_LABELS:
                 if line.startswith(label + " "):
                     rest = line[len(label):]
-                    if label == "カードタイプ" and ("ホロメン" in rest or "홀로멤" in rest):
-                        return None
-                    if label == "HP":
-                        rest_txt = rest.strip()
-                        if "200" in rest_txt:
-                            hp_text = ft.Text(
-                                spans=[
-                                    ft.TextSpan(rest_txt.replace("200", "")),
-                                    ft.TextSpan(
-                                        "200",
-                                        style=ft.TextStyle(
-                                            weight=ft.FontWeight.BOLD,
-                                            color=getattr(COLORS, "RED_400", COLORS.RED),
-                                        ),
-                                    ),
-                                ]
-                            )
-                            return ft.Row(
-                                [build_section_chip(label), hp_text],
-                                spacing=6,
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                            )
-                        return ft.Row(
-                            [build_section_chip(label), ft.Text(rest_txt)],
-                            spacing=6,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        )
-                    if label == "Bloomレベル":
-                        return ft.Row(
-                            [build_section_chip(label), ft.Text(rest.strip())],
-                            spacing=6,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        )
                     return ft.Text(
                         spans=[
                             ft.TextSpan(label, style=ft.TextStyle(weight=ft.FontWeight.BOLD)),
@@ -457,54 +489,30 @@ def launch_app(db_path: str) -> None:
 
         def append_detail_lines(text: str, apply_jp_filters: bool) -> None:
             lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-            i = 0
-            while i < len(lines):
-                line = lines[i].strip()
-                if not line:
-                    i += 1
-                    continue
+            for line in lines:
                 if apply_jp_filters:
-                    if line == "Bloomレベル" and i + 1 < len(lines):
-                        next_line = lines[i + 1].strip()
-                        if next_line:
-                            merged = f"Bloomレベル {next_line}"
-                            item = build_detail_line(merged)
-                            if item:
-                                detail_lv.controls.append(item)
-                            i += 2
-                            continue
                     if line == "色" or line.startswith("色 "):
-                        i += 1
                         continue
                     if line == "バトンタッチ" or line.startswith("バトンタッチ "):
-                        i += 1
                         continue
-                    item = build_detail_line(line)
-                    if item:
-                        detail_lv.controls.append(item)
+                    detail_lv.controls.append(build_detail_line(line))
                 else:
                     detail_lv.controls.append(ft.Text(line))
-                i += 1
-
-        def update_detail_buttons() -> None:
-            has_ko = bool(detail_texts["ko"].strip())
-            has_ja = bool(detail_texts["ja"].strip())
-            btn_detail_ko.disabled = not has_ko
-            btn_detail_ja.disabled = not has_ja
 
         def render_detail() -> None:
             detail_lv.controls.clear()
             ja = (detail_texts["ja"] or "").strip()
             ko = (detail_texts["ko"] or "").strip()
             has_any = False
-            mode = detail_mode["value"]
 
-            if mode == "ko" and ko:
+            if ko:
                 detail_lv.controls.append(build_section_chip("한국어"))
                 append_detail_lines(ko, apply_jp_filters=False)
                 has_any = True
 
-            if mode == "ja" and ja:
+            if ja:
+                if has_any:
+                    detail_lv.controls.append(ft.Divider(height=12))
                 detail_lv.controls.append(build_section_chip("日本語"))
                 append_detail_lines(ja, apply_jp_filters=True)
                 has_any = True
@@ -517,34 +525,66 @@ def launch_app(db_path: str) -> None:
         def set_detail_text(ja_text: str | None, ko_text: str | None) -> None:
             detail_texts["ja"] = (ja_text or "")
             detail_texts["ko"] = (ko_text or "")
-            if detail_mode["value"] not in ("ko", "ja"):
-                detail_mode["value"] = "ko"
-            if detail_mode["value"] == "ko" and not detail_texts["ko"].strip():
-                detail_mode["value"] = "ja" if detail_texts["ja"].strip() else "ko"
-            if detail_mode["value"] == "ja" and not detail_texts["ja"].strip():
-                detail_mode["value"] = "ko" if detail_texts["ko"].strip() else "ja"
-            update_detail_buttons()
             render_detail()
+
+        def clear_selection() -> None:
+            selected_print_id["id"] = None
+            selected_card_number["no"] = ""
+            selected_image_url["url"] = ""
+            set_detail_text("", "")
+            clear_image("카드를 선택하세요")
+
+        def render_result_list() -> None:
+            lv.controls.clear()
+            rows = results_state["rows"]
+            if not rows:
+                lv.controls.append(
+                    ft.Container(
+                        content=ft.Text("검색 결과가 없습니다.", color=COLORS.GREY_400),
+                        padding=ft.padding.symmetric(horizontal=12, vertical=10),
+                    )
+                )
+                return
+
+            for row in rows:
+                pid = row["print_id"]
+                title = f"{row.get('card_number', '')} | {row.get('name_ja', '')}"
+                is_selected = selected_print_id["id"] == pid
+                lv.controls.append(
+                    ft.ListTile(
+                        title=ft.Text(title),
+                        selected=is_selected,
+                        selected_tile_color=with_opacity(0.22, COLORS.BLUE_GREY_700),
+                        selected_color=COLORS.WHITE,
+                        dense=True,
+                        on_click=lambda e, _pid=pid: show_detail(_pid),
+                    )
+                )
 
         def show_detail(pid: int) -> None:
             selected_print_id["id"] = pid
+            render_result_list()
 
             try:
                 conn = get_conn()
                 brief = get_print_brief(conn, pid) or {}
                 selected_card_number["no"] = (brief.get("card_number") or "").strip()
-                image_url = resolve_url((brief.get("image_url") or "").strip())
+                selected_image_url["url"] = resolve_url((brief.get("image_url") or "").strip())
 
-                # 이미지 패널 갱신
                 if selected_card_number["no"]:
-                    set_image_for_card(selected_card_number["no"], image_url)
+                    set_image_for_card(
+                        selected_card_number["no"],
+                        selected_image_url["url"],
+                        loading=True,
+                        placeholder_text="이미지 없음",
+                    )
+                    ensure_image_download(
+                        selected_card_number["no"],
+                        selected_image_url["url"],
+                    )
                 else:
-                    clear_image()
+                    clear_image("이미지 없음")
 
-                # 이미지 자동 다운로드 (없으면)
-                ensure_image_download(selected_card_number["no"], image_url)
-
-                # 본문 갱신
                 card = load_card_detail(conn, pid)
                 set_detail_text(
                     card.get("raw_text", "") if card else None,
@@ -553,38 +593,45 @@ def launch_app(db_path: str) -> None:
 
             except Exception as ex:
                 set_detail_text(f"[ERROR] 상세 로드 실패: {ex}", None)
-                clear_image()
+                clear_image("이미지 로딩 실패")
 
             page.update()
 
         def refresh_list() -> None:
-            q = (tf_search.value or "").strip()
-            lv.controls.clear()
+            query = (tf_search.value or "").strip()
+            results_state["rows"] = []
+            selected_print_id["id"] = None
 
-            if not q:
+            if not query:
+                render_result_list()
+                clear_selection()
                 page.update()
                 return
 
             if needs_db_update():
                 append_log("[INFO] DB가 없거나 손상되어 검색 불가. 'DB갱신'을 먼저 실행하세요.")
                 show_toast(DB_MISSING_TOAST, persist=True)
+                render_result_list()
+                clear_selection()
                 page.update()
                 return
 
             try:
                 conn = get_conn()
-                rows = query_suggest(conn, q, limit=80)
-                for r in rows:
-                    title = f"{r.get('card_number','')} | {r.get('name_ja','')}"
-                    pid = r["print_id"]
-                    lv.controls.append(
-                        ft.ListTile(
-                            title=ft.Text(title),
-                            on_click=lambda e, _pid=pid: show_detail(_pid),
-                        )
-                    )
+                results_state["rows"] = query_suggest(conn, query, limit=80)
+                render_result_list()
+                if results_state["rows"]:
+                    show_detail(results_state["rows"][0]["print_id"])
+                else:
+                    clear_selection()
             except Exception as ex:
-                append_log(f"[ERROR] 검색 실패: {ex}")
+                message = f"검색 실패: {ex}"
+                append_log(f"[ERROR] {message}")
+                update_status.value = message
+                update_status.visible = True
+                update_status.color = COLORS.RED_300
+                render_result_list()
+                clear_selection()
 
             page.update()
 
@@ -592,64 +639,75 @@ def launch_app(db_path: str) -> None:
             refresh_list()
 
         tf_search.on_change = on_search_change
+        tf_search.on_submit = on_search_change
 
         def on_db_change(e) -> None:
             invalidate_db_health_cache()
 
         tf_db.on_change = on_db_change
 
-        # --- Update pipeline (background thread) ---
-        def do_update() -> None:
+        def set_update_running(running: bool) -> None:
+            update_state["running"] = running
+            btn_update.disabled = running
+            tf_search.disabled = running
+            tf_db.disabled = running
+            update_progress.visible = running
+
+        def set_update_status(message: str = "", is_error: bool = False) -> None:
+            text = (message or "").strip()
+            update_status.value = text
+            update_status.visible = bool(text)
+            update_status.color = COLORS.RED_300 if is_error else COLORS.GREEN_300
+
+        def run_update_pipeline_blocking(dbp: str) -> None:
+            for line in run_update_and_refine(dbp):
+                append_log(line)
+
+        async def do_update_async() -> None:
+            if update_state["running"]:
+                return
+
+            dbp = (tf_db.value or "").strip()
+            if not dbp:
+                set_update_status("DB 경로가 비어 있습니다.", is_error=True)
+                show_toast("DB 경로가 비어 있습니다.", duration_ms=3000)
+                page.update()
+                return
+
             try:
+                set_update_running(True)
+                set_update_status("DB 갱신 중...")
                 show_toast(DB_UPDATING_TOAST, persist=True)
-                btn_update.disabled = True
-                tf_search.disabled = True
                 page.update()
 
-                dbp = tf_db.value.strip()
                 append_log("[START] DB 갱신")
-
-                # subprocess로 크롤링/정제
-                done_seen = False
-                for line in run_update_and_refine(dbp):
-                    append_log(line)
-                    if line.strip().startswith("[DONE]"):
-                        done_seen = True
-                        show_toast(
-                            DB_UPDATED_TOAST,
-                            duration_ms=3000,
-                            restore_missing_after=True,
-                        )
-
+                await asyncio.to_thread(run_update_pipeline_blocking, dbp)
                 append_log("[DONE] DB 갱신")
-                if not done_seen:
-                    done_seen = True
-                    show_toast(
-                        DB_UPDATED_TOAST,
-                        duration_ms=3000,
-                        restore_missing_after=True,
-                    )
 
-                # 모든 스레드의 DB 연결 갱신 유도
                 conn_epoch["value"] += 1
                 close_thread_conn()
                 invalidate_db_health_cache()
 
-                # 검색 결과 재갱신
+                set_update_status("DB 갱신 완료")
+                show_toast(
+                    DB_UPDATED_TOAST,
+                    duration_ms=3000,
+                    restore_missing_after=True,
+                )
                 refresh_list()
-
             except Exception as ex:
-                append_log(f"[ERROR] DB 갱신 실패: {ex}")
+                message = f"DB 갱신 실패: {ex}"
+                append_log(f"[ERROR] {message}")
+                set_update_status(message, is_error=True)
+                show_toast(message, duration_ms=4000, restore_missing_after=True)
                 if needs_db_update():
                     show_toast(DB_MISSING_TOAST, persist=True)
-
             finally:
-                btn_update.disabled = False
-                tf_search.disabled = False
+                set_update_running(False)
                 page.update()
 
         def on_update_click(e) -> None:
-            threading.Thread(target=do_update, daemon=True).start()
+            page.run_task(do_update_async)
 
         btn_update.on_click = on_update_click
 
@@ -665,7 +723,6 @@ def launch_app(db_path: str) -> None:
                     append_log("[INFO] DB 파일이 없습니다.")
                 append_log("[INFO] 상단 'DB갱신'을 누르면 DB를 생성(크롤링+정제)합니다.")
         else:
-            # DB 있으면 즉시 연결
             try:
                 get_conn()
             except Exception as ex:
@@ -708,51 +765,78 @@ def launch_app(db_path: str) -> None:
             page.controls.clear()
 
             if mobile:
+                btn_update.width = 100
+                lv.expand = True
+                lv.scroll = ft.ScrollMode.AUTO
+                detail_lv.expand = False
+                detail_lv.scroll = None
+
                 top_row = ft.Row(
-                    [tf_search, btn_update],
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    [
+                        tf_search,
+                        ft.Row([update_progress, btn_update], tight=True, spacing=8),
+                    ],
                     spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 )
-                list_section = ft.Column(
+
+                mobile_root = ft.Column(
                     [
-                        ft.Container(ft.Text("목록"), padding=ft.padding.only(left=10, top=4)),
-                        ft.Container(lv, height=240, padding=10),
+                        top_row,
+                        update_status,
+                        ft.Divider(height=1),
+                        ft.Text("목록"),
+                        ft.Container(
+                            content=lv,
+                            height=260,
+                            padding=10,
+                            border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
+                            border_radius=10,
+                        ),
+                        ft.Text("이미지"),
+                        ft.Container(
+                            content=img_container,
+                            height=460,
+                            border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
+                            border_radius=10,
+                        ),
+                        ft.Text("효과"),
+                        ft.Container(
+                            content=detail_lv,
+                            padding=10,
+                            border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
+                            border_radius=10,
+                        ),
                     ],
-                    spacing=0,
+                    expand=True,
+                    spacing=8,
+                    scroll=ft.ScrollMode.AUTO,
                 )
-                image_section = ft.Column(
-                    [
-                        ft.Container(ft.Text("이미지"), padding=ft.padding.only(left=10, top=4)),
-                        ft.Container(img_container, height=320),
-                    ],
-                    spacing=0,
-                )
-                effect_section = ft.Column(
-                    [
-                        ft.Container(ft.Text("효과"), padding=ft.padding.only(left=10, top=4)),
-                        ft.Container(detail_header, padding=ft.padding.only(left=10, right=10)),
-                        ft.Container(detail_lv, height=320, padding=10),
-                    ],
-                    spacing=0,
-                )
+
                 page.add(
-                    ft.Column(
-                        [
-                            top_row,
-                            ft.Divider(height=1),
-                            list_section,   # 카드번호/검색 아래에 목록
-                            image_section,  # 이미지 중간
-                            effect_section, # 본문 하위
-                            db_row,
-                        ],
+                    ft.SafeArea(
+                        content=ft.Container(
+                            content=mobile_root,
+                            padding=ft.padding.only(left=10, right=10, top=6, bottom=10),
+                        ),
                         expand=True,
-                        spacing=8,
-                        scroll=ft.ScrollMode.AUTO,
                     )
                 )
                 return
 
-            top = ft.Row([tf_db, btn_update], vertical_alignment=ft.CrossAxisAlignment.CENTER)
+            btn_update.width = None
+            lv.expand = True
+            lv.scroll = ft.ScrollMode.AUTO
+            detail_lv.expand = True
+            detail_lv.scroll = ft.ScrollMode.AUTO
+
+            top = ft.Row(
+                [
+                    tf_db,
+                    ft.Row([update_progress, btn_update], tight=True, spacing=8),
+                ],
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            )
             search_row = ft.Row([tf_search], vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
             left = ft.Column(
@@ -775,7 +859,7 @@ def launch_app(db_path: str) -> None:
 
             right = ft.Column(
                 [
-                    ft.Container(detail_header, padding=ft.padding.only(left=10, right=10, top=4)),
+                    ft.Container(ft.Text("효과"), padding=ft.padding.only(left=10, top=4)),
                     ft.Container(detail_lv, expand=True, padding=10),
                 ],
                 expand=True,
@@ -793,16 +877,25 @@ def launch_app(db_path: str) -> None:
                 expand=True,
             )
 
+            desktop_root = ft.Column(
+                [
+                    top,
+                    search_row,
+                    update_status,
+                    ft.Divider(height=1),
+                    body,
+                ],
+                expand=True,
+                spacing=8,
+            )
+
             page.add(
-                ft.Column(
-                    [
-                        top,
-                        search_row,
-                        ft.Divider(height=1),
-                        body,
-                    ],
+                ft.SafeArea(
+                    content=ft.Container(
+                        content=desktop_root,
+                        padding=ft.padding.only(left=10, right=10, top=6, bottom=10),
+                    ),
                     expand=True,
-                    spacing=8,
                 )
             )
 
@@ -810,6 +903,8 @@ def launch_app(db_path: str) -> None:
             build_layout()
 
         page.on_resize = on_resize
+        clear_selection()
+        render_result_list()
         build_layout()
         if needs_db_update():
             show_toast(DB_MISSING_TOAST, persist=True)
