@@ -625,9 +625,30 @@ def launch_app(db_path: str) -> None:
         # --- Layout ---
         layout_state = {"mobile": None}
 
+        def is_android_tablet() -> bool:
+            platform = getattr(page, "platform", None)
+            is_android = False
+            if platform is not None:
+                if hasattr(ft, "PagePlatform") and platform == ft.PagePlatform.ANDROID:
+                    is_android = True
+                elif isinstance(platform, str) and platform.lower() == "android":
+                    is_android = True
+
+            user_agent = (getattr(page, "client_user_agent", "") or "").lower()
+            ua_android = "android" in user_agent
+            ua_mobile = "mobile" in user_agent
+            ua_tablet_hint = "tablet" in user_agent or (ua_android and not ua_mobile)
+
+            width = page.window_width or page.width or 0
+            height = page.window_height or page.height or 0
+            min_dim = min([dim for dim in (width, height) if dim]) if width or height else 0
+            size_tablet_hint = min_dim >= 600
+
+            return (is_android or ua_android) and (ua_tablet_hint or size_tablet_hint)
+
         def is_mobile_layout() -> bool:
             width = page.window_width or page.width or 0
-            return bool(width) and width < 900
+            return bool(width) and width < 900 and not is_android_tablet()
 
         def build_layout() -> None:
             mobile = is_mobile_layout()
