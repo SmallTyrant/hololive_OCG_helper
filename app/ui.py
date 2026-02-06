@@ -85,6 +85,7 @@ def launch_app(db_path: str) -> None:
         page.title = APP_NAME
         page.window_width = 1280
         page.window_height = 820
+        page.padding = ft.padding.only(left=10, right=10, bottom=10, top=0)
 
         # --- Controls ---
         tf_db = ft.TextField(label="DB", value=db_path, expand=True)
