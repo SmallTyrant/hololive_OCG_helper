@@ -60,3 +60,16 @@ fun provideDatabase(context: Context): HololiveDb =
 - 스키마 변경 금지
 - 필드명은 DB 스키마에 맞춰 Entity를 정의
 - 검색/필터는 SQL에서 처리하는 것을 우선
+
+---
+
+## 즉시 빌드 가능한 템플릿
+루트 저장소 기준 `android/kotlin`에 Kotlin 네이티브 프로젝트 템플릿이 추가되어 있습니다.
+
+```bash
+cd android/kotlin
+gradle assembleDebug
+```
+
+- 빌드 시 `data/hololive_ocg.sqlite`가 존재하면 자동으로 `assets`에 복사됩니다.
+- 저장소 정책에 따라 DB 파일은 커밋하지 않습니다.
