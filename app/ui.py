@@ -184,6 +184,14 @@ def launch_app(db_path: str) -> None:
         page.update()
 
         toast_state = {"seq": 0, "message": None}
+        pending_toast: dict[str, object] = {"args": None}
+
+        def flush_pending_toast() -> None:
+            args = pending_toast["args"]
+            if not args:
+                return
+            pending_toast["args"] = None
+            show_toast(*args)
 
         def invalidate_db_health_cache() -> None:
             db_health_cache["path"] = None
@@ -237,6 +245,9 @@ def launch_app(db_path: str) -> None:
             duration_ms: int | None = None,
             restore_missing_after: bool = False,
         ) -> None:
+            if toast_host.page is None:
+                pending_toast["args"] = (message, persist, duration_ms, restore_missing_after)
+                return
             if (
                 toast_state["message"] == message
                 and persist
@@ -753,6 +764,7 @@ def launch_app(db_path: str) -> None:
                     spacing=8,
                 )
             )
+            flush_pending_toast()
 
         def on_resize(e) -> None:
             build_layout()
