@@ -1,0 +1,23 @@
+name: HololiveOCGHelper
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    SWIFT_VERSION: 5.9
+targets:
+  HololiveOCGHelper:
+    type: application
+    platform: iOS
+    sources:
+      - HololiveOCGHelper
+    resources:
+      - HololiveOCGHelper/Resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.hololiveOCGHelper
+        INFOPLIST_FILE: HololiveOCGHelper/Resources/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
