@@ -39,14 +39,17 @@ def run_update_and_refine(
     root = Path(__file__).resolve().parents[2]  # project root
     tool_scrape = root / "tools" / "hocg_tool2.py"
     tool_refine = root / "tools" / "hocg_refine_update.py"
-    tool_ko = root / "tools" / "namuwiki_ko_import.py"
+    tool_ko_sheet = root / "tools" / "namuwiki_ko_import.py"
+    tool_ko_bulk = root / "tools" / "namuwiki_ko_bulk_import.py"
 
     if not tool_scrape.exists():
         raise FileNotFoundError(f"missing: {tool_scrape}")
     if not tool_refine.exists():
         raise FileNotFoundError(f"missing: {tool_refine}")
-    if not tool_ko.exists():
-        raise FileNotFoundError(f"missing: {tool_ko}")
+    if not tool_ko_sheet.exists():
+        raise FileNotFoundError(f"missing: {tool_ko_sheet}")
+    if not tool_ko_bulk.exists():
+        raise FileNotFoundError(f"missing: {tool_ko_bulk}")
 
     env = dict(**os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
 
@@ -99,16 +102,12 @@ def run_update_and_refine(
     sheet_url = ko_sheet_url or os.environ.get("HOCG_KO_SHEET_URL")
     sheet_gid = ko_sheet_gid or os.environ.get("HOCG_KO_SHEET_GID")
 
-    if ko_page or ko_page_file or sheet_url:
-        cmd3 = [_py(), str(tool_ko), "--db", db_path]
+    if ko_page or ko_page_file:
+        cmd3 = [_py(), str(tool_ko_bulk), "--db", db_path]
         if ko_page:
             cmd3.extend(["--page", ko_page])
         if ko_page_file:
             cmd3.extend(["--page-file", ko_page_file])
-        if sheet_url:
-            cmd3.extend(["--sheet-url", sheet_url])
-        if sheet_gid:
-            cmd3.extend(["--sheet-gid", sheet_gid])
         if ko_overwrite:
             cmd3.append("--overwrite")
         p3 = subprocess.Popen(
@@ -125,4 +124,26 @@ def run_update_and_refine(
             yield line
         rc3 = p3.wait()
         if rc3 != 0:
-            raise RuntimeError(f"namuwiki import failed rc={rc3}")
+            raise RuntimeError(f"namuwiki bulk import failed rc={rc3}")
+
+    if sheet_url:
+        cmd4 = [_py(), str(tool_ko_sheet), "--db", db_path, "--sheet-url", sheet_url]
+        if sheet_gid:
+            cmd4.extend(["--sheet-gid", sheet_gid])
+        if ko_overwrite:
+            cmd4.append("--overwrite")
+        p4 = subprocess.Popen(
+            cmd4,
+            cwd=str(root),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+        )
+        for line in _stream_output(p4):
+            yield line
+        rc4 = p4.wait()
+        if rc4 != 0:
+            raise RuntimeError(f"sheet import failed rc={rc4}")

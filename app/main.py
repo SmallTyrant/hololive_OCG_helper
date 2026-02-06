@@ -36,7 +36,8 @@ def _copy_bundled_db(db_path: Path) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Launch hololive OCG helper UI.")
     ap.add_argument("--db", default=None)
-    args = ap.parse_args()
+    # Flet runtime may pass extra args; ignore unknown to avoid startup crash.
+    args, _unknown = ap.parse_known_args()
     db_path = _resolve_db_path(args.db)
     if args.db is None:
         _copy_bundled_db(Path(db_path))

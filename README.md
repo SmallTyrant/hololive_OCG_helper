@@ -2,40 +2,37 @@
 PC-only Flet helper app.
 
 
-한국어만 지원합니다.
-
-
-## 데스크톱 빌드 (Windows/macOS)
-동일한 Python 스크립트로 플랫폼별 패키징을 실행할 수 있습니다.
-
-```
-# Windows(.exe)
-python scripts/build_desktop.py windows
-
-# macOS(.app)
-python scripts/build_desktop.py macos
-```
-
-간단 실행용 래퍼 스크립트도 유지됩니다.
-- Windows: `scripts/pack.bat`, `scripts/pack.ps1`
-- macOS: `scripts/pack.sh`
-
-## 모바일 앱 제작 안내
-Android(Kotlin) / iOS(Swift) 앱 제작을 위한 가이드는 `mobile/` 폴더를 참고하세요.
+아직은 일본어만 지원합니다.
 
 ## 한국어 효과 텍스트 적재 (NamuWiki/Google Sheets)
-`tools/namuwiki_ko_import.py`로 NamuWiki 카드 목록 테이블 또는 Google Sheets CSV에서 카드 번호/효과를 추출해
-`card_texts_ko`에 적재할 수 있습니다. DB 스키마 변경 없이 기존 `prints`와 카드 번호로 매칭됩니다.
+NamuWiki는 전용 벌크 스크립트로 자동 탐색해 효과 텍스트가 있는 페이지만 적재합니다.
+Google Sheets는 별도 스크립트로 CSV를 가져옵니다. DB 스키마 변경 없이 기존 `prints`와 카드 번호로 매칭됩니다.
 
-예시:
+NamuWiki 벌크 예시:
 ```
-python tools/namuwiki_ko_import.py --db data/hololive_ocg.sqlite --page "hololive OCG/카드 목록"
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite
 ```
 
-카드 번호로 NamuWiki 검색까지 포함하려면 `--search-card-numbers`를 추가하세요:
+NamuWiki 벌크 (옵션 예시):
 ```
-python tools/namuwiki_ko_import.py --db data/hololive_ocg.sqlite --page "hololive OCG/카드 목록" --search-card-numbers
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --dry-run
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --overwrite
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-match-substring
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --max-search-pages 100
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --max-depth 3
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-descendants
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-category
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --category "분류:홀로라이브 오피셜 카드 게임" --max-category-pages 50
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-card-subpages
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --member-tag "#JP"
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --member-tag "#ID" --member-tag "#EN" --member-tag "#DEV_IS"
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-expand-members
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-skip-existing
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --no-extra-list
+python tools/namuwiki_ko_bulk_import.py --db data/hololive_ocg.sqlite --extra-list config/namuwiki_pages.txt
 ```
+
+기본 추가 페이지 목록은 `config/namuwiki_pages.txt`에서 직접 관리할 수 있습니다.
 
 Google Sheets 예시(공개 시트):
 ```

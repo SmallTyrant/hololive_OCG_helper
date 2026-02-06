@@ -1,3 +1,11 @@
+[project]
+name = "hOCG_H"
+version = "0.0.0"
+dependencies = [
+  "flet",
+  "requests",
+]
+
 [tool.flet]
 product = "hOCG_H"
 org = "com.smalltyrant"

@@ -1,324 +1,38 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Import Korean card texts from NamuWiki or Google Sheets into card_texts_ko.
+"""Import Korean card texts from Google Sheets into card_texts_ko.
 
 Usage example:
-  python tools/namuwiki_ko_import.py --db data/hololive_ocg.sqlite --page "hololive OCG/카드 목록"
   python tools/namuwiki_ko_import.py --db data/hololive_ocg.sqlite --sheet-url "https://docs.google.com/spreadsheets/d/<id>/edit#gid=0"
 """
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 import argparse
 import csv
 import io
-import re
 import sqlite3
 import sys
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Iterable
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, urlparse
 
-import requests
-from bs4 import BeautifulSoup, FeatureNotFound
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-
-NAMU_BASE = "https://namu.wiki"
-CARDNO_RE = re.compile(r"\b[hH][A-Za-z]{1,5}\d{2}-\d{3}\b")
-
-EFFECT_HEADER_KEYWORDS = ("효과", "텍스트", "능력", "카드 효과", "효과 텍스트")
-NAME_HEADER_KEYWORDS = ("카드명", "카드 이름", "이름", "카드명(한)")
-CARDNO_HEADER_KEYWORDS = ("카드번호", "카드 번호", "card number", "card no", "card_no", "print", "카드넘버")
-
-
-def now_iso() -> str:
-    return datetime.now().isoformat(timespec="seconds")
-
-
-def normalize_card_number(card_no: str) -> str:
-    return card_no.strip().upper()
-
-
-def normalize_ws(text: str) -> str:
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def normalize_header(text: str) -> str:
-    return normalize_ws(text).lower()
-
-def normalize_name_key(text: str) -> str:
-    normalized = normalize_ws(text).lower()
-    return re.sub(r"[\s·・ㆍ:：()\\[\\]\"'`’“”]", "", normalized)
-
-
-@dataclass
-class KoRow:
-    card_number: str
-    name: str
-    effect: str
-    source_url: str
-
-
-def build_session() -> requests.Session:
-    session = requests.Session()
-    session.headers.update(
-        {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            ),
-            "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
-        }
-    )
-    retry = Retry(
-        total=5,
-        backoff_factor=0.5,
-        status_forcelist=(429, 500, 502, 503, 504),
-        allowed_methods=("GET",),
-        raise_on_status=False,
-        respect_retry_after_header=True,
-    )
-    adapter = HTTPAdapter(pool_connections=16, pool_maxsize=16, max_retries=retry)
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-    return session
-
-
-def fetch_html(session: requests.Session, page: str, *, timeout: float) -> str:
-    if page.startswith("http://") or page.startswith("https://"):
-        url = page
-    else:
-        url = f"{NAMU_BASE}/w/{quote(page)}"
-    resp = session.get(url, timeout=timeout)
-    resp.raise_for_status()
-    return resp.text
-
-
-def find_header_map(header_cells: list[str], *, min_matches: int = 2) -> dict[str, int]:
-    mapping: dict[str, int] = {}
-    normalized = [normalize_header(c) for c in header_cells]
-    for idx, cell in enumerate(normalized):
-        if "card_number" not in mapping:
-            for key in CARDNO_HEADER_KEYWORDS:
-                if key in cell:
-                    mapping["card_number"] = idx
-                    break
-        if "effect" not in mapping:
-            for key in EFFECT_HEADER_KEYWORDS:
-                if key in cell:
-                    mapping["effect"] = idx
-                    break
-        if "name" not in mapping:
-            for key in NAME_HEADER_KEYWORDS:
-                if key in cell:
-                    mapping["name"] = idx
-                    break
-    if len(mapping) < min_matches:
-        return {}
-    return mapping
-
-
-def pick_effect(cells: list[str], header_map: dict[str, int]) -> str:
-    if "effect" in header_map:
-        idx = header_map["effect"]
-        if 0 <= idx < len(cells):
-            return normalize_ws(cells[idx])
-    # fallback: pick the longest non-empty cell
-    candidates = []
-    for cell in cells:
-        normalized = normalize_ws(cell)
-        if not normalized:
-            continue
-        if CARDNO_RE.search(normalized):
-            continue
-        candidates.append(normalized)
-    if not candidates:
-        return ""
-    return max(candidates, key=len)
-
-
-def pick_name(cells: list[str], header_map: dict[str, int]) -> str:
-    if "name" in header_map:
-        idx = header_map["name"]
-        if 0 <= idx < len(cells):
-            return normalize_ws(cells[idx])
-    return ""
-
-
-def pick_card_number(cells: list[str], header_map: dict[str, int]) -> str:
-    if "card_number" in header_map:
-        idx = header_map["card_number"]
-        if 0 <= idx < len(cells):
-            value = normalize_ws(cells[idx])
-            if value:
-                return normalize_card_number(value)
-    for cell in cells:
-        match = CARDNO_RE.search(cell)
-        if match:
-            return normalize_card_number(match.group(0))
-    return ""
-
-
-def parse_tables(
-    html: str,
-    source_url: str,
-    *,
-    fallback_card_numbers: list[str] | None = None,
-) -> list[KoRow]:
-    try:
-        soup = BeautifulSoup(html, "lxml")
-    except FeatureNotFound:
-        soup = BeautifulSoup(html, "html.parser")
-    rows: list[KoRow] = []
-    for table in soup.select("table"):
-        header_map: dict[str, int] = {}
-        header_cells: list[str] = []
-        body_rows = []
-        for tr in table.select("tr"):
-            cells = tr.find_all(["th", "td"])
-            if not cells:
-                continue
-            cell_texts = [c.get_text("\n", strip=True) for c in cells]
-            if not header_cells and tr.find("th"):
-                header_cells = cell_texts
-                header_map = find_header_map(header_cells)
-                continue
-            body_rows.append(cell_texts)
-
-        if not header_cells and body_rows:
-            header_cells = body_rows[0]
-            header_map = find_header_map(header_cells)
-            body_rows = body_rows[1:]
-
-        for cells in body_rows:
-            card_no = pick_card_number(cells, header_map)
-            if not card_no:
-                card_no = ""
-            effect = pick_effect(cells, header_map)
-            name = pick_name(cells, header_map)
-            if not card_no and not name:
-                continue
-            if not effect:
-                continue
-            rows.append(KoRow(card_number=card_no, name=name, effect=effect, source_url=source_url))
-    if fallback_card_numbers:
-        missing_indices = [idx for idx, row in enumerate(rows) if not row.card_number]
-        if fallback_card_numbers and missing_indices:
-            if len(fallback_card_numbers) == 1:
-                for idx in missing_indices:
-                    rows[idx].card_number = fallback_card_numbers[0]
-            elif len(fallback_card_numbers) == len(missing_indices):
-                for idx, card_no in zip(missing_indices, fallback_card_numbers, strict=False):
-                    rows[idx].card_number = card_no
-    return rows
-
-
-def parse_search_results(html: str, query: str) -> list[str]:
-    try:
-        soup = BeautifulSoup(html, "lxml")
-    except FeatureNotFound:
-        soup = BeautifulSoup(html, "html.parser")
-    normalized_query = normalize_ws(query).lower()
-    urls: list[str] = []
-    for link in soup.select("a[href]"):
-        href = link.get("href", "")
-        if not href.startswith("/w/"):
-            continue
-        if href.startswith("/w/검색"):
-            continue
-        text = normalize_ws(link.get_text(" ", strip=True)).lower()
-        if normalized_query and normalized_query not in text and normalized_query not in href.lower():
-            continue
-        urls.append(f"{NAMU_BASE}{href}")
-    seen: set[str] = set()
-    deduped: list[str] = []
-    for url in urls:
-        if url in seen:
-            continue
-        seen.add(url)
-        deduped.append(url)
-    return deduped
-
-
-def extract_card_numbers(html: str) -> list[str]:
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for match in CARDNO_RE.finditer(html):
-        normalized = normalize_card_number(match.group(0))
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        ordered.append(normalized)
-    return ordered
-
-
-def collect_linked_pages(
-    html: str,
-    *,
-    include_re: re.Pattern[str] | None,
-    exclude_re: re.Pattern[str] | None,
-) -> list[str]:
-    try:
-        soup = BeautifulSoup(html, "lxml")
-    except FeatureNotFound:
-        soup = BeautifulSoup(html, "html.parser")
-    urls: list[str] = []
-    for link in soup.select("a[href]"):
-        href = link.get("href", "")
-        if not href:
-            continue
-        if href.startswith("/w/검색") or href.startswith("/w/파일"):
-            continue
-        if href.startswith("/w/"):
-            url = f"{NAMU_BASE}{href}"
-        elif href.startswith(f"{NAMU_BASE}/w/"):
-            url = href
-        else:
-            continue
-        if include_re and not include_re.search(url):
-            continue
-        if exclude_re and exclude_re.search(url):
-            continue
-        urls.append(url)
-    seen: set[str] = set()
-    deduped: list[str] = []
-    for url in urls:
-        if url in seen:
-            continue
-        seen.add(url)
-        deduped.append(url)
-    return deduped
-
-
-def iter_pages(pages: list[str], page_file: str | None) -> Iterable[str]:
-    for page in pages:
-        if page:
-            yield page.strip()
-    if page_file:
-        with open(page_file, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                yield line
-
-
-def iter_card_numbers_for_search(
-    print_map: dict[str, int],
-    existing_ko: dict[int, tuple[str, str, int]],
-    *,
-    overwrite: bool,
-) -> Iterable[str]:
-    if overwrite:
-        yield from sorted(print_map)
-        return
-    for card_no, print_id in sorted(print_map.items()):
-        cached = existing_ko.get(print_id)
-        if cached and cached[1].strip():
-            continue
-        yield card_no
+from tools.namuwiki_ko_common import (
+    KoRow,
+    build_session,
+    find_header_map,
+    import_rows,
+    load_existing_ko,
+    load_print_map,
+    pick_card_number,
+    pick_effect,
+    pick_name,
+)
 
 
 def build_sheet_csv_url(sheet_url: str, gid: str | None) -> str:
@@ -366,213 +80,6 @@ def parse_sheet_csv(csv_text: str, source_url: str) -> list[KoRow]:
     return rows
 
 
-def upsert_ko_text(
-    conn: sqlite3.Connection,
-    print_id: int,
-    name: str,
-    effect: str,
-    source_url: str,
-    *,
-    overwrite: bool,
-    existing: dict[int, tuple[str, str, int]] | None = None,
-) -> bool:
-    cached = existing.get(print_id) if existing is not None else None
-    if cached and not overwrite:
-        if cached[1].strip():
-            return False
-    version = 1
-    if cached:
-        version = int(cached[2] or 1)
-        if cached[1] != effect or cached[0] != name:
-            version += 1
-    conn.execute(
-        """
-        INSERT INTO card_texts_ko(print_id,name,effect_text,memo,source,version,updated_at)
-        VALUES(?,?,?,?,?,?,?)
-        ON CONFLICT(print_id) DO UPDATE SET
-          name=excluded.name,
-          effect_text=excluded.effect_text,
-          memo=excluded.memo,
-          source=excluded.source,
-          version=excluded.version,
-          updated_at=excluded.updated_at
-        """,
-        (print_id, name, effect, source_url, "namuwiki", version, now_iso()),
-    )
-    if existing is not None:
-        existing[print_id] = (name, effect, version)
-    return True
-
-
-def load_print_map(conn: sqlite3.Connection) -> dict[str, int]:
-    mapping: dict[str, int] = {}
-    for row in conn.execute("SELECT print_id, card_number FROM prints"):
-        mapping[normalize_card_number(row["card_number"] or "")] = int(row["print_id"])
-    return mapping
-
-
-def load_existing_ko(conn: sqlite3.Connection) -> dict[int, tuple[str, str, int]]:
-    mapping: dict[int, tuple[str, str, int]] = {}
-    for row in conn.execute("SELECT print_id, name, effect_text, version FROM card_texts_ko"):
-        mapping[int(row["print_id"])] = (
-            row["name"] or "",
-            row["effect_text"] or "",
-            int(row["version"] or 1),
-        )
-    return mapping
-
-
-def load_print_name_map(conn: sqlite3.Connection) -> dict[str, int]:
-    mapping: dict[str, int] = {}
-    duplicates: set[str] = set()
-    for row in conn.execute("SELECT print_id, name_ja FROM prints"):
-        name = normalize_name_key(row["name_ja"] or "")
-        if not name:
-            continue
-        if name in mapping:
-            duplicates.add(name)
-            continue
-        mapping[name] = int(row["print_id"])
-    for row in conn.execute("SELECT print_id, name FROM card_texts_ja WHERE name IS NOT NULL"):
-        name = normalize_name_key(row["name"] or "")
-        if not name:
-            continue
-        if name in mapping and mapping[name] != int(row["print_id"]):
-            duplicates.add(name)
-            continue
-        mapping[name] = int(row["print_id"])
-    for name in duplicates:
-        mapping.pop(name, None)
-    return mapping
-
-
-def import_rows(
-    conn: sqlite3.Connection,
-    rows: Iterable[KoRow],
-    *,
-    overwrite: bool,
-    print_map: dict[str, int],
-    existing_ko: dict[int, tuple[str, str, int]],
-    name_map: dict[str, int],
-) -> int:
-    updated = 0
-    for row in rows:
-        print_id = None
-        if row.card_number:
-            print_id = print_map.get(normalize_card_number(row.card_number))
-        if not print_id and row.name:
-            print_id = name_map.get(normalize_name_key(row.name))
-        if not print_id:
-            missing = row.card_number or row.name or "unknown"
-            print(f"[SKIP] missing print for {missing}")
-            continue
-        if upsert_ko_text(
-            conn,
-            print_id,
-            row.name,
-            row.effect,
-            row.source_url,
-            overwrite=overwrite,
-            existing=existing_ko,
-        ):
-            updated += 1
-    return updated
-
-
-def import_from_pages(
-    db_path: str,
-    pages: list[str],
-    page_file: str | None,
-    *,
-    timeout: float,
-    overwrite: bool,
-    search_card_numbers: bool,
-    crawl_linked: bool,
-    link_include: re.Pattern[str] | None,
-    link_exclude: re.Pattern[str] | None,
-) -> int:
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    session = build_session()
-    print_map = load_print_map(conn)
-    existing_ko = load_existing_ko(conn)
-    name_map = load_print_name_map(conn)
-
-    updated = 0
-    seen_pages: set[str] = set()
-    for page in iter_pages(pages, page_file):
-        source_url = page if page.startswith("http") else f"{NAMU_BASE}/w/{quote(page)}"
-        if source_url in seen_pages:
-            continue
-        seen_pages.add(source_url)
-        html = fetch_html(session, page, timeout=timeout)
-        fallback_card_numbers = extract_card_numbers(html)
-        updated += import_rows(
-            conn,
-            parse_tables(html, source_url, fallback_card_numbers=fallback_card_numbers),
-            overwrite=overwrite,
-            print_map=print_map,
-            existing_ko=existing_ko,
-            name_map=name_map,
-        )
-        if crawl_linked:
-            linked_urls = collect_linked_pages(html, include_re=link_include, exclude_re=link_exclude)
-            for url in linked_urls:
-                if url in seen_pages:
-                    continue
-                seen_pages.add(url)
-                try:
-                    page_html = fetch_html(session, url, timeout=timeout)
-                except requests.RequestException as exc:
-                    print(f"[WARN] fetch failed for {url}: {exc}")
-                    continue
-                fallback_card_numbers = extract_card_numbers(page_html)
-                updated += import_rows(
-                    conn,
-                    parse_tables(page_html, url, fallback_card_numbers=fallback_card_numbers),
-                    overwrite=overwrite,
-                    print_map=print_map,
-                    existing_ko=existing_ko,
-                    name_map=name_map,
-                )
-
-    if search_card_numbers:
-        for card_no in iter_card_numbers_for_search(print_map, existing_ko, overwrite=overwrite):
-            query = normalize_card_number(card_no)
-            search_url = f"{NAMU_BASE}/w/검색?query={quote(query)}"
-            try:
-                html = fetch_html(session, search_url, timeout=timeout)
-            except requests.RequestException as exc:
-                print(f"[WARN] search failed for {query}: {exc}")
-                continue
-            result_urls = parse_search_results(html, query)
-            if not result_urls:
-                if search_url not in seen_pages:
-                    seen_pages.add(search_url)
-                continue
-            for url in result_urls:
-                if url in seen_pages:
-                    continue
-                seen_pages.add(url)
-                try:
-                    page_html = fetch_html(session, url, timeout=timeout)
-                except requests.RequestException as exc:
-                    print(f"[WARN] fetch failed for {url}: {exc}")
-                    continue
-                fallback_card_numbers = extract_card_numbers(page_html)
-                updated += import_rows(
-                    conn,
-                    parse_tables(page_html, url, fallback_card_numbers=fallback_card_numbers),
-                    overwrite=overwrite,
-                    print_map=print_map,
-                    existing_ko=existing_ko,
-                    name_map=name_map,
-                )
-    conn.commit()
-    conn.close()
-    return updated
-
-
 def import_from_sheet(db_path: str, sheet_url: str, *, timeout: float, overwrite: bool, gid: str | None) -> int:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -580,16 +87,15 @@ def import_from_sheet(db_path: str, sheet_url: str, *, timeout: float, overwrite
     csv_url = build_sheet_csv_url(sheet_url, gid)
     print_map = load_print_map(conn)
     existing_ko = load_existing_ko(conn)
-    name_map = load_print_name_map(conn)
     resp = session.get(csv_url, timeout=timeout)
     resp.raise_for_status()
     updated = import_rows(
         conn,
         parse_sheet_csv(resp.text, csv_url),
         overwrite=overwrite,
+        skip_if_present=True,
         print_map=print_map,
         existing_ko=existing_ko,
-        name_map=name_map,
     )
     conn.commit()
     conn.close()
@@ -599,61 +105,19 @@ def import_from_sheet(db_path: str, sheet_url: str, *, timeout: float, overwrite
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", required=True, help="SQLite DB path")
-    ap.add_argument("--page", action="append", default=[], help="NamuWiki page title or full URL")
-    ap.add_argument("--page-file", help="Text file containing page titles/URLs")
-    ap.add_argument("--sheet-url", help="Google Sheets URL (share or export CSV)")
+    ap.add_argument("--sheet-url", required=True, help="Google Sheets URL (share or export CSV)")
     ap.add_argument("--sheet-gid", help="Google Sheets gid (optional)")
     ap.add_argument("--timeout", type=float, default=15.0, help="HTTP timeout seconds")
     ap.add_argument("--overwrite", action="store_true", help="Overwrite existing Korean texts")
-    ap.add_argument("--crawl-linked", action="store_true", help="Crawl linked NamuWiki pages from sources")
-    ap.add_argument("--link-include", help="Regex for linked URLs to include")
-    ap.add_argument("--link-exclude", help="Regex for linked URLs to exclude")
-    ap.add_argument(
-        "--search-card-numbers",
-        action="store_true",
-        help="Search NamuWiki by card number and crawl matching pages",
-    )
     args = ap.parse_args()
 
-    if not args.page and not args.page_file and not args.sheet_url:
-        print("No sources provided. Use --page/--page-file or --sheet-url.")
-        return 1
-
-    updated = 0
-    if args.page or args.page_file:
-        link_include = re.compile(args.link_include) if args.link_include else None
-        link_exclude = re.compile(args.link_exclude) if args.link_exclude else None
-        updated += import_from_pages(
-            args.db,
-            args.page,
-            args.page_file,
-            timeout=args.timeout,
-            overwrite=args.overwrite,
-            search_card_numbers=args.search_card_numbers,
-            crawl_linked=args.crawl_linked,
-            link_include=link_include,
-            link_exclude=link_exclude,
-        )
-    elif args.search_card_numbers:
-        updated += import_from_pages(
-            args.db,
-            [],
-            None,
-            timeout=args.timeout,
-            overwrite=args.overwrite,
-            search_card_numbers=True,
-            crawl_linked=False,
-            link_include=None,
-            link_exclude=None,
-        )
-    if args.sheet_url:
-        updated += import_from_sheet(
-            args.db,
-            args.sheet_url,
-            timeout=args.timeout,
-            overwrite=args.overwrite,
-            gid=args.sheet_gid,
-        )
+    updated = import_from_sheet(
+        args.db,
+        args.sheet_url,
+        timeout=args.timeout,
+        overwrite=args.overwrite,
+        gid=args.sheet_gid,
+    )
     print(f"[DONE] updated={updated}")
     return 0
 

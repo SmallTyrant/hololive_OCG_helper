@@ -1,0 +1,38 @@
+# NamuWiki pages to include by default (one per line).
+# Accepts titles or full URLs. Lines starting with # are ignored.
+
+블루밍 레디언스
+블루밍 레디언스/카드
+퀀텟 스펙트럼
+엘리트 스파크
+큐리어스 유니버스
+인챈트 레갈리아
+아야카시 버밀리온
+토키노 소라&AZKi
+적 나키리 아야메
+청 네코마타 오카유
+자 유즈키 초코
+백 토도로키 하지메
+녹 카자마 이로하
+황 시라누이 후레아
+백 아마네 카나타
+적 호쇼 마린
+오시 린도 치하야
+오시 코가네이 니코
+홀로라이브 오피셜 카드 게임/프로모션 카드
+https://namu.wiki/w/%ED%86%A0%ED%82%A4%EB%85%B8%20%EC%86%8C%EB%9D%BC%26AZKi
+https://namu.wiki/w/%EC%A0%81%20%EB%82%98%ED%82%A4%EB%A6%AC%20%EC%95%84%EC%95%BC%EB%A9%94
+https://namu.wiki/w/%EC%B2%AD%20%EB%84%A4%EC%BD%94%EB%A7%88%ED%83%80%20%EC%98%A4%EC%B9%B4%EC%9C%A0
+https://namu.wiki/w/%EC%9E%90%20%EC%9C%A0%EC%A6%88%ED%82%A4%20%EC%B4%88%EC%BD%94
+https://namu.wiki/w/%EB%B0%B1%20%ED%86%A0%EB%8F%84%EB%A1%9C%ED%82%A4%20%ED%95%98%EC%A7%80%EB%A9%94
+https://namu.wiki/w/%EB%85%B9%20%EC%B9%B4%EC%9E%90%EB%A7%88%20%EC%9D%B4%EB%A1%9C%ED%95%98
+https://namu.wiki/w/%ED%99%A9%20%EC%8B%9C%EB%9D%BC%EB%88%84%EC%9D%B4%20%ED%9B%84%EB%A0%88%EC%95%84
+https://namu.wiki/w/%EB%B0%B1%20%EC%95%84%EB%A7%88%EB%84%A4%20%EC%B9%B4%EB%82%98%ED%83%80
+https://namu.wiki/w/%EC%A0%81%20%ED%98%B8%EC%87%BC%20%EB%A7%88%EB%A6%B0
+https://namu.wiki/w/%EC%98%A4%EC%8B%9C%20%EB%A6%B0%EB%8F%84%20%EC%B9%98%ED%95%98%EC%95%BC
+https://namu.wiki/w/%EC%98%A4%EC%8B%9C%20%EC%BD%94%EA%B0%80%EB%84%A4%EC%9D%B4%20%EB%8B%88%EC%BD%94
+https://namu.wiki/w/%ED%80%B8%ED%85%9F%20%EC%8A%A4%ED%8E%99%ED%8A%B8%EB%9F%BC
+https://namu.wiki/w/%EC%97%98%EB%A6%AC%ED%8A%B8%20%EC%8A%A4%ED%8C%8C%ED%81%AC
+https://namu.wiki/w/%EC%9D%B8%EC%B1%88%ED%8A%B8%20%EB%A0%88%EA%B0%88%EB%A6%AC%EC%95%84
+https://namu.wiki/w/%EC%95%84%EC%95%BC%EC%B9%B4%EC%8B%9C%20%EB%B2%84%EB%B0%80%EB%A6%AC%EC%98%A8
+https://namu.wiki/w/%ED%99%80%EB%A1%9C%EB%9D%BC%EC%9D%B4%EB%B8%8C%20%EC%98%A4%ED%94%BC%EC%85%9C%20%EC%B9%B4%EB%93%9C%20%EA%B2%8C%EC%9E%84/%ED%94%84%EB%A1%9C%EB%AA%A8%EC%85%98%20%EC%B9%B4%EB%93%9C
