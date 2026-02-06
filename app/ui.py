@@ -619,9 +619,6 @@ def launch_app(db_path: str) -> None:
             except Exception as ex:
                 append_log(f"[ERROR] DB open failed: {ex}")
 
-        if needs_db_update():
-            show_toast(DB_MISSING_TOAST, persist=True)
-
         # --- Layout ---
         layout_state = {"mobile": None}
 
@@ -761,5 +758,7 @@ def launch_app(db_path: str) -> None:
 
         page.on_resize = on_resize
         build_layout()
+        if needs_db_update():
+            show_toast(DB_MISSING_TOAST, persist=True)
 
     ft.app(target=main)
