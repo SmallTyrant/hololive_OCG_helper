@@ -40,6 +40,7 @@ SECTION_LABELS = (
 DB_MISSING_TOAST = "DB파일이 존재하지 않습니다. DB갱신을 해주세요"
 DB_UPDATING_TOAST = "갱신중..."
 DB_UPDATED_TOAST = "갱신완료"
+APP_NAME = "hOCG_H"
 
 def with_opacity(opacity: float, color: str) -> str:
     return COLORS.with_opacity(opacity, color)
@@ -65,16 +66,15 @@ IMAGE_FIT_CONTAIN = _image_fit_contain()
 def icon_dir(project_root: Path) -> Path:
     return project_root / "app"
 
-def icon_paths(project_root: Path, data_root: Path | None = None) -> tuple[Path, Path]:
+def icon_paths(project_root: Path) -> tuple[Path, Path]:
     d = icon_dir(project_root)
     png_path = d / "app_icon.png"
-    ico_root = data_root if data_root is not None else d
-    return ico_root / "app_icon.ico", png_path
+    return d / "app_icon.ico", png_path
 
 
 def launch_app(db_path: str) -> None:
     project_root = get_project_root()
-    data_root = get_default_data_root("hOCG_helper")
+    data_root = get_default_data_root(APP_NAME)
 
     def main(page: ft.Page) -> None:
         thread_local = threading.local()
@@ -82,7 +82,7 @@ def launch_app(db_path: str) -> None:
         db_health_cache = {"path": None, "value": None, "checked_at": 0.0}
         DB_HEALTH_CACHE_TTL = 2.0
 
-        page.title = "hOCG_helper"
+        page.title = APP_NAME
         page.window_width = 1280
         page.window_height = 820
 
@@ -265,7 +265,7 @@ def launch_app(db_path: str) -> None:
                 threading.Timer(duration_ms / 1000.0, _after).start()
 
         def setup_window_icon() -> None:
-            ico_path, png_path = icon_paths(project_root, data_root)
+            ico_path, png_path = icon_paths(project_root)
 
             def set_icon(path: Path) -> bool:
                 try:
