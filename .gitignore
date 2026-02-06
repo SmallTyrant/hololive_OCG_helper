@@ -2,3 +2,14 @@ __pycache__/
 .venv/
 data/images/
 .DS_Store
+build/
+dist/
+app/build/
+android/kotlin/app/build/
+main.spec
+data/hololive_ocg.sqlite
+data/*.sqlite
+data/*.db
+data/*.ico
+app/*.png
+app/*.ico

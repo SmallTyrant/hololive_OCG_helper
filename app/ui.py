@@ -87,7 +87,8 @@ def launch_app(db_path: str) -> None:
         page.window_height = 820
 
         # --- Controls ---
-        tf_db = ft.TextField(label="DB", value=db_path, expand=True)
+        # Keep DB path in state without exposing it in UI.
+        tf_db = ft.TextField(value=db_path, visible=False)
         tf_search = ft.TextField(label="카드번호 / 이름 / 태그 검색", expand=True)
 
         btn_update = ft.ElevatedButton("DB갱신")  # DB 없을 때도 이 버튼으로 생성
@@ -604,14 +605,14 @@ def launch_app(db_path: str) -> None:
         # --- first-run: DB 없으면 안내 로그만 찍고 앱은 뜨게 ---
         if not db_exists(tf_db.value):
             if not tf_db.value or not tf_db.value.strip():
-                append_log("[WARN] DB 경로가 비어있습니다. 상단 DB 경로를 지정해주세요.")
+                append_log("[WARN] DB 경로가 비어있습니다.")
             else:
                 created = ensure_db(tf_db.value)
                 if created:
                     append_log("[INFO] DB 파일이 없어 빈 DB를 생성했습니다.")
                 else:
                     append_log("[INFO] DB 파일이 없습니다.")
-                append_log("[INFO] 상단 'DB갱신'을 누르면 DB를 생성(크롤링+정제)합니다.")
+                append_log("[INFO] 'DB갱신'을 누르면 DB를 생성(크롤링+정제)합니다.")
         else:
             # DB 있으면 즉시 연결
             try:
@@ -702,7 +703,11 @@ def launch_app(db_path: str) -> None:
                 )
                 return
 
-            top = ft.Row([tf_db, btn_update], vertical_alignment=ft.CrossAxisAlignment.CENTER)
+            top = ft.Row(
+                [btn_update],
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                alignment=ft.MainAxisAlignment.END,
+            )
             search_row = ft.Row([tf_search], vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
             left = ft.Column(

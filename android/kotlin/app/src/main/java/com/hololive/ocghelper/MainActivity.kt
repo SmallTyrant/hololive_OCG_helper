@@ -43,7 +43,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }.onFailure {
-                return "assets DB 없음(빌드는 가능). data/hololive_ocg.sqlite 배치 후 재빌드하세요."
+                return "assets DB 없음(빌드는 가능). DB를 포함해 다시 빌드하세요."
             }
         }
 
@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
                 "DB 로드 성공: 테이블 ${count}개 감지"
             }
         }.getOrElse {
-            "DB 열기 실패: ${it.message}"
+            "DB 열기 실패"
         }
     }
 }
