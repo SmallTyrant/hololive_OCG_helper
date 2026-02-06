@@ -27,6 +27,11 @@ struct CardListView: View {
                 }
             }
             .listStyle(.plain)
+
+            Text("본 앱은 팬이 제작한 비공식 도우미이며, 카드 정보는 참고용입니다.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
         .padding()
         .navigationTitle("hOCG Helper")
