@@ -407,13 +407,46 @@ def launch_app(db_path: str) -> None:
                 border_radius=12,
             )
 
-        def build_detail_line(line: str) -> ft.Control:
+        def build_detail_line(line: str) -> ft.Control | None:
             if line in SECTION_LABELS:
                 return build_section_chip(line)
 
             for label in SECTION_LABELS:
                 if line.startswith(label + " "):
                     rest = line[len(label):]
+                    if label == "カードタイプ" and ("ホロメン" in rest or "홀로멤" in rest):
+                        return None
+                    if label == "HP":
+                        rest_txt = rest.strip()
+                        if "200" in rest_txt:
+                            hp_text = ft.Text(
+                                spans=[
+                                    ft.TextSpan(rest_txt.replace("200", "")),
+                                    ft.TextSpan(
+                                        "200",
+                                        style=ft.TextStyle(
+                                            weight=ft.FontWeight.BOLD,
+                                            color=getattr(COLORS, "RED_400", COLORS.RED),
+                                        ),
+                                    ),
+                                ]
+                            )
+                            return ft.Row(
+                                [build_section_chip(label), hp_text],
+                                spacing=6,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            )
+                        return ft.Row(
+                            [build_section_chip(label), ft.Text(rest_txt)],
+                            spacing=6,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        )
+                    if label == "Bloomレベル":
+                        return ft.Row(
+                            [build_section_chip(label), ft.Text(rest.strip())],
+                            spacing=6,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        )
                     return ft.Text(
                         spans=[
                             ft.TextSpan(label, style=ft.TextStyle(weight=ft.FontWeight.BOLD)),
@@ -431,13 +464,24 @@ def launch_app(db_path: str) -> None:
                     i += 1
                     continue
                 if apply_jp_filters:
+                    if line == "Bloomレベル" and i + 1 < len(lines):
+                        next_line = lines[i + 1].strip()
+                        if next_line:
+                            merged = f"Bloomレベル {next_line}"
+                            item = build_detail_line(merged)
+                            if item:
+                                detail_lv.controls.append(item)
+                            i += 2
+                            continue
                     if line == "色" or line.startswith("色 "):
                         i += 1
                         continue
                     if line == "バトンタッチ" or line.startswith("バトンタッチ "):
                         i += 1
                         continue
-                    detail_lv.controls.append(build_detail_line(line))
+                    item = build_detail_line(line)
+                    if item:
+                        detail_lv.controls.append(item)
                 else:
                     detail_lv.controls.append(ft.Text(line))
                 i += 1
@@ -696,9 +740,10 @@ def launch_app(db_path: str) -> None:
                         [
                             top_row,
                             ft.Divider(height=1),
-                            list_section,
-                            image_section,
-                            effect_section,
+                            list_section,   # 카드번호/검색 아래에 목록
+                            image_section,  # 이미지 중간
+                            effect_section, # 본문 하위
+                            db_row,
                         ],
                         expand=True,
                         spacing=8,
