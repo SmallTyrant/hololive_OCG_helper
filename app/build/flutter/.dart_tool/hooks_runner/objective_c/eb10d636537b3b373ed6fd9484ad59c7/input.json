@@ -1,0 +1,30 @@
+{
+  "assets": {},
+  "config": {
+    "build_asset_types": [
+      "code_assets/code"
+    ],
+    "extensions": {
+      "code_assets": {
+        "c_compiler": {
+          "ar": "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ar",
+          "cc": "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang",
+          "ld": "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld"
+        },
+        "ios": {
+          "target_sdk": "iphonesimulator",
+          "target_version": 12
+        },
+        "link_mode_preference": "dynamic",
+        "target_architecture": "x64",
+        "target_os": "ios"
+      }
+    },
+    "linking_enabled": false
+  },
+  "out_dir_shared": "/Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/",
+  "out_file": "/Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/objective_c/eb10d636537b3b373ed6fd9484ad59c7/output.json",
+  "package_name": "objective_c",
+  "package_root": "/Users/perlihite/.pub-cache/hosted/pub.dev/objective_c-9.3.0/",
+  "user_defines": {}
+}

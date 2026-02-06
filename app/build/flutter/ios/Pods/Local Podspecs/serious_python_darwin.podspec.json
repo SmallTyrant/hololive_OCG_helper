@@ -1,0 +1,58 @@
+{
+  "name": "serious_python_darwin",
+  "version": "0.9.9",
+  "summary": "A cross-platform plugin for adding embedded Python runtime to your Flutter apps.",
+  "description": "A cross-platform plugin for adding embedded Python runtime to your Flutter apps.",
+  "homepage": "https://flet.dev",
+  "license": {
+    "file": "../LICENSE"
+  },
+  "authors": {
+    "Appveyor Systems Inc.": "hello@flet.dev"
+  },
+  "source": {
+    "path": "."
+  },
+  "source_files": [
+    "Classes/**/*"
+  ],
+  "ios": {
+    "dependencies": {
+      "Flutter": []
+    },
+    "script_phases": {
+      "name": "Add Python frameworks into iOS app bundle",
+      "script": "$PODS_TARGET_SRCROOT/bundle-python-frameworks-ios.sh",
+      "execution_position": "before_compile"
+    },
+    "vendored_frameworks": "dist_ios/xcframeworks/*",
+    "resource_bundles": {
+      "python": [
+        "dist_ios/stdlib",
+        "dist_ios/site-packages"
+      ]
+    }
+  },
+  "osx": {
+    "dependencies": {
+      "FlutterMacOS": []
+    },
+    "vendored_frameworks": "dist_macos/xcframeworks/*",
+    "resource_bundles": {
+      "python": [
+        "dist_macos/stdlib",
+        "dist_macos/site-packages"
+      ]
+    }
+  },
+  "platforms": {
+    "ios": "13.0",
+    "osx": "10.15"
+  },
+  "pod_target_xcconfig": {
+    "DEFINES_MODULE": "YES",
+    "OTHER_LDFLAGS": "-ObjC -all_load -lc++"
+  },
+  "swift_versions": "5.0",
+  "swift_version": "5.0"
+}

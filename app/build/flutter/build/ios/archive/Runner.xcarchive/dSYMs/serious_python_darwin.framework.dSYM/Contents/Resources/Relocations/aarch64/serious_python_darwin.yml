@@ -1,0 +1,35 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     '/Users/perlihite/Library/Developer/Xcode/DerivedData/Runner-fvcjagqgwgflbcgwsybnxysbyrxn/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos/serious_python_darwin.framework/serious_python_darwin'
+relocations:
+  - { offset: 0x72CBE, size: 0x8, addend: 0x0, symName: _serious_python_darwinVersionString, symObjAddr: 0x0, symBinAddr: 0xAA30, symSize: 0x0 }
+  - { offset: 0x72CF5, size: 0x8, addend: 0x0, symName: _serious_python_darwinVersionNumber, symObjAddr: 0x38, symBinAddr: 0xAA68, symSize: 0x0 }
+  - { offset: 0x72EF1, size: 0x8, addend: 0x0, symName: '_$sSD17dictionaryLiteralSDyxq_Gx_q_td_tcfCSS_SSTt0g5Tf4g_n', symObjAddr: 0x1B5C, symBinAddr: 0x5B5C, symSize: 0x110 }
+  - { offset: 0x7302B, size: 0x8, addend: 0x0, symName: '_$sSD17dictionaryLiteralSDyxq_Gx_q_td_tcfCSS_ypTt0g5Tf4g_n', symObjAddr: 0x1E28, symBinAddr: 0x5E28, symSize: 0x12C }
+  - { offset: 0x73410, size: 0x8, addend: 0x0, symName: '_$ss22__RawDictionaryStorageC4findys10_HashTableV6BucketV6bucket_Sb5foundtxSHRzlFSS_Tg5', symObjAddr: 0x16D8, symBinAddr: 0x56D8, symSize: 0x64 }
+  - { offset: 0x73545, size: 0x8, addend: 0x0, symName: '_$sSa6append10contentsOfyqd__n_t7ElementQyd__RszSTRd__lFSS_SaySSGTg5', symObjAddr: 0x173C, symBinAddr: 0x573C, symSize: 0xF0 }
+  - { offset: 0x737FA, size: 0x8, addend: 0x0, symName: '_$ss12_ArrayBufferV20_consumeAndCreateNew14bufferIsUnique15minimumCapacity13growForAppendAByxGSb_SiSbtFSS_Tg5', symObjAddr: 0x182C, symBinAddr: 0x582C, symSize: 0x108 }
+  - { offset: 0x73907, size: 0x8, addend: 0x0, symName: '_$ss22__RawDictionaryStorageC4find_9hashValues10_HashTableV6BucketV6bucket_Sb5foundtx_SitSHRzlFSS_Tg5', symObjAddr: 0x1934, symBinAddr: 0x5934, symSize: 0xB4 }
+  - { offset: 0x7395E, size: 0x8, addend: 0x0, symName: '_$sypSgWOh', symObjAddr: 0x1AD0, symBinAddr: 0x5AD0, symSize: 0x48 }
+  - { offset: 0x73972, size: 0x8, addend: 0x0, symName: ___swift_instantiateConcreteTypeFromMangledNameV2, symObjAddr: 0x1B18, symBinAddr: 0x5B18, symSize: 0x44 }
+  - { offset: 0x73A6D, size: 0x8, addend: 0x0, symName: '_$sypWOc', symObjAddr: 0x1F54, symBinAddr: 0x5F54, symSize: 0x3C }
+  - { offset: 0x73A81, size: 0x8, addend: 0x0, symName: '_$sypWOb', symObjAddr: 0x1F90, symBinAddr: 0x5F90, symSize: 0x10 }
+  - { offset: 0x73A95, size: 0x8, addend: 0x0, symName: ___swift_project_boxed_opaque_existential_0, symObjAddr: 0x1FA0, symBinAddr: 0x5FA0, symSize: 0x24 }
+  - { offset: 0x73AA9, size: 0x8, addend: 0x0, symName: ___swift_destroy_boxed_opaque_existential_0, symObjAddr: 0x1FC4, symBinAddr: 0x5FC4, symSize: 0x20 }
+  - { offset: 0x73ABD, size: 0x8, addend: 0x0, symName: '_$sSaySSGSayxGSKsWl', symObjAddr: 0x1FE4, symBinAddr: 0x5FE4, symSize: 0x44 }
+  - { offset: 0x73AD1, size: 0x8, addend: 0x0, symName: '_$sSaySSGMa', symObjAddr: 0x2028, symBinAddr: 0x6028, symSize: 0x50 }
+  - { offset: 0x73AE5, size: 0x8, addend: 0x0, symName: '_$s21serious_python_darwin19SeriousPythonPluginCMa', symObjAddr: 0x20B8, symBinAddr: 0x60B8, symSize: 0x20 }
+  - { offset: 0x73BC4, size: 0x8, addend: 0x0, symName: '_$s21serious_python_darwin19SeriousPythonPluginC8register4withySo07FlutterF9Registrar_p_tFZ', symObjAddr: 0x0, symBinAddr: 0x4000, symSize: 0x4 }
+  - { offset: 0x73BD8, size: 0x8, addend: 0x0, symName: '_$s21serious_python_darwin19SeriousPythonPluginCACycfC', symObjAddr: 0x4, symBinAddr: 0x4004, symSize: 0x20 }
+  - { offset: 0x73BFA, size: 0x8, addend: 0x0, symName: '_$s21serious_python_darwin19SeriousPythonPluginC8register4withySo07FlutterF9Registrar_p_tFZTo', symObjAddr: 0x24, symBinAddr: 0x4024, symSize: 0x30 }
+  - { offset: 0x73D6A, size: 0x8, addend: 0x0, symName: '_$s21serious_python_darwin19SeriousPythonPluginC6handle_6resultySo17FlutterMethodCallC_yypSgctF', symObjAddr: 0x54, symBinAddr: 0x4054, symSize: 0x13C4 }
+  - { offset: 0x7444D, size: 0x8, addend: 0x0, symName: '_$sSo8NSThreadC6target8selector6objectAByp_10ObjectiveC8SelectorVypSgtcfC', symObjAddr: 0x1418, symBinAddr: 0x5418, symSize: 0x134 }
+  - { offset: 0x7447D, size: 0x8, addend: 0x0, symName: '_$s21serious_python_darwin19SeriousPythonPluginC6handle_6resultySo17FlutterMethodCallC_yypSgctFTo', symObjAddr: 0x154C, symBinAddr: 0x554C, symSize: 0x7C }
+  - { offset: 0x744A7, size: 0x8, addend: 0x0, symName: '_$s21serious_python_darwin19SeriousPythonPluginCACycfc', symObjAddr: 0x163C, symBinAddr: 0x563C, symSize: 0x30 }
+  - { offset: 0x744DF, size: 0x8, addend: 0x0, symName: '_$s21serious_python_darwin19SeriousPythonPluginCACycfcTo', symObjAddr: 0x166C, symBinAddr: 0x566C, symSize: 0x3C }
+  - { offset: 0x74514, size: 0x8, addend: 0x0, symName: '_$s21serious_python_darwin19SeriousPythonPluginCfD', symObjAddr: 0x16A8, symBinAddr: 0x56A8, symSize: 0x30 }
+  - { offset: 0x74561, size: 0x8, addend: 0x0, symName: '_$s21serious_python_darwin19SeriousPythonPluginC8register4withySo07FlutterF9Registrar_p_tFZTf4nd_n', symObjAddr: 0x19E8, symBinAddr: 0x59E8, symSize: 0xE8 }
+  - { offset: 0x7461B, size: 0x8, addend: 0x0, symName: '_$s21serious_python_darwin19SeriousPythonPluginC03runE6Script6scriptySS_tFTf4nd_n', symObjAddr: 0x1C6C, symBinAddr: 0x5C6C, symSize: 0xC0 }
+  - { offset: 0x746C0, size: 0x8, addend: 0x0, symName: '_$s21serious_python_darwin19SeriousPythonPluginC03runE4File7appPathySS_tFTf4nd_n', symObjAddr: 0x1D2C, symBinAddr: 0x5D2C, symSize: 0xFC }
+  - { offset: 0x74783, size: 0x8, addend: 0x0, symName: '_$s21serious_python_darwin19SeriousPythonPluginC6handle_6resultySo17FlutterMethodCallC_yypSgctF015$syXlSgIeyBy_ypN7Iegn_TRyXlSgIeyBy_Tf1ncn_nTf4nng_n', symObjAddr: 0x20D8, symBinAddr: 0x60D8, symSize: 0x168C }
+...
