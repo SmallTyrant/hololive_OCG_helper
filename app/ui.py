@@ -93,6 +93,7 @@ def translate_tag_ja_to_ko(tag: str, tag_map: dict[str, str]) -> str:
 DB_MISSING_TOAST = "DB파일이 존재하지 않습니다. DB갱신을 해주세요"
 DB_UPDATING_TOAST = "갱신중..."
 DB_UPDATED_TOAST = "갱신완료"
+APP_NAME = "hOCG_H"
 
 def with_opacity(opacity: float, color: str) -> str:
     return COLORS.with_opacity(opacity, color)
@@ -118,16 +119,15 @@ IMAGE_FIT_CONTAIN = _image_fit_contain()
 def icon_dir(project_root: Path) -> Path:
     return project_root / "app"
 
-def icon_paths(project_root: Path, data_root: Path | None = None) -> tuple[Path, Path]:
+def icon_paths(project_root: Path) -> tuple[Path, Path]:
     d = icon_dir(project_root)
     png_path = d / "app_icon.png"
-    ico_root = data_root if data_root is not None else d
-    return ico_root / "app_icon.ico", png_path
+    return d / "app_icon.ico", png_path
 
 
 def launch_app(db_path: str) -> None:
     project_root = get_project_root()
-    data_root = get_default_data_root("hOCG_helper")
+    data_root = get_default_data_root(APP_NAME)
 
     def main(page: ft.Page) -> None:
         thread_local = threading.local()
@@ -150,7 +150,7 @@ def launch_app(db_path: str) -> None:
             s = str(platform).lower()
             return "android" in s or "ios" in s
 
-        page.title = "hOCG_helper"
+        page.title = APP_NAME
         page.window_width = 1280
         page.window_height = 820
 
@@ -238,6 +238,7 @@ def launch_app(db_path: str) -> None:
             visible=False,
         )
         page.overlay.append(ft.TransparentPointer(content=toast_host, expand=True))
+        page.update()
 
         toast_state = {"seq": 0, "message": None}
 
@@ -306,7 +307,10 @@ def launch_app(db_path: str) -> None:
 
             toast_text.value = message
             toast_host.visible = True
-            toast_host.update()
+            if toast_host.page is None:
+                page.update()
+            if toast_host.page is not None:
+                toast_host.update()
 
             if duration_ms is not None and duration_ms > 0:
                 def _after():
@@ -315,14 +319,17 @@ def launch_app(db_path: str) -> None:
                     if persist:
                         return
                     toast_host.visible = False
-                    toast_host.update()
+                    if toast_host.page is None:
+                        page.update()
+                    if toast_host.page is not None:
+                        toast_host.update()
                     if restore_missing_after and needs_db_update():
                         show_toast(DB_MISSING_TOAST, persist=True)
 
                 threading.Timer(duration_ms / 1000.0, _after).start()
 
         def setup_window_icon() -> None:
-            ico_path, png_path = icon_paths(project_root, data_root)
+            ico_path, png_path = icon_paths(project_root)
 
             def set_icon(path: Path) -> bool:
                 try:
@@ -721,9 +728,6 @@ def launch_app(db_path: str) -> None:
             except Exception as ex:
                 append_log(f"[ERROR] DB open failed: {ex}")
 
-        if needs_db_update():
-            show_toast(DB_MISSING_TOAST, persist=True)
-
         # --- Layout ---
         layout_state = {"mobile": None}
 
@@ -852,5 +856,7 @@ def launch_app(db_path: str) -> None:
 
         page.on_resize = on_resize
         build_layout()
+        if needs_db_update():
+            show_toast(DB_MISSING_TOAST, persist=True)
 
     ft.app(target=main)

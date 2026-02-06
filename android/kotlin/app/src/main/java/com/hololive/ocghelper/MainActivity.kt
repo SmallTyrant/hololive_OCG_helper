@@ -71,7 +71,7 @@ private fun HomeScreen(dbStatus: String) {
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(text = "hololive OCG Helper", style = MaterialTheme.typography.headlineSmall)
+        Text(text = "hOCG_H", style = MaterialTheme.typography.headlineSmall)
         Text(text = "Android Kotlin 네이티브 앱 초기화 완료")
         Text(text = dbStatus)
     }

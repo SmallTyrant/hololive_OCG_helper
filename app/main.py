@@ -1,15 +1,22 @@
 import argparse
 import shutil
+import sys
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.paths import get_default_data_root, get_project_root
 from app.ui import launch_app
+
+APP_NAME = "hOCG_H"
 
 
 def _resolve_db_path(db_arg: str | None) -> str:
     if db_arg:
         return str(Path(db_arg).expanduser())
-    data_root = get_default_data_root("hOCG_helper")
+    data_root = get_default_data_root(APP_NAME)
     return str(data_root / "hololive_ocg.sqlite")
 
 
@@ -34,7 +41,7 @@ def _copy_bundled_db(db_path: Path) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Launch hololive OCG helper UI.")
+    ap = argparse.ArgumentParser(description="Launch hOCG_H UI.")
     ap.add_argument("--db", default=None)
     # Flet runtime may pass extra args; ignore unknown to avoid startup crash.
     args, _unknown = ap.parse_known_args()
