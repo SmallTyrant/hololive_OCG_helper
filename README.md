@@ -4,6 +4,22 @@ PC-only Flet helper app.
 
 한국어만 지원합니다.
 
+
+## 데스크톱 빌드 (Windows/macOS)
+동일한 Python 스크립트로 플랫폼별 패키징을 실행할 수 있습니다.
+
+```
+# Windows(.exe)
+python scripts/build_desktop.py windows
+
+# macOS(.app)
+python scripts/build_desktop.py macos
+```
+
+간단 실행용 래퍼 스크립트도 유지됩니다.
+- Windows: `scripts/pack.bat`, `scripts/pack.ps1`
+- macOS: `scripts/pack.sh`
+
 ## 모바일 앱 제작 안내
 Android(Kotlin) / iOS(Swift) 앱 제작을 위한 가이드는 `mobile/` 폴더를 참고하세요.
 
