@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CardDetailView: View {
     @StateObject private var viewModel: CardDetailViewModel
+    @StateObject private var networkMonitor = NetworkMonitor()
 
     init(viewModel: CardDetailViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -14,12 +15,18 @@ struct CardDetailView: View {
                     Text(detail.cardNumber).font(.headline)
                     Text(detail.nameKO.isEmpty ? detail.nameJA : detail.nameKO)
                         .font(.title3)
-                    if let url = URL(string: detail.imageURL), !detail.imageURL.isEmpty {
+                    if networkMonitor.isConnected,
+                       let url = URL(string: detail.imageURL),
+                       !detail.imageURL.isEmpty {
                         AsyncImage(url: url) { image in
                             image.resizable().scaledToFit()
                         } placeholder: {
                             ProgressView()
                         }
+                    } else if !networkMonitor.isConnected {
+                        Text("오프라인 상태에서는 이미지를 불러오지 않습니다.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                     Group {
                         Text("한국어 효과")
