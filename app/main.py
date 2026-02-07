@@ -81,9 +81,13 @@ def _copy_bundled_db(db_path: Path) -> None:
         return
 
     project_root = get_project_root()
+    module_root = Path(__file__).resolve().parent
     bundled_candidates = [
+        module_root / "assets" / "hololive_ocg.sqlite",
+        module_root / "app" / "assets" / "hololive_ocg.sqlite",
         project_root / "data" / "hololive_ocg.sqlite",
         project_root / "assets" / "hololive_ocg.sqlite",
+        project_root / "app" / "assets" / "hololive_ocg.sqlite",
     ]
 
     for candidate in bundled_candidates:

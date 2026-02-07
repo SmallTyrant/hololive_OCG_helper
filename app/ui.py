@@ -16,7 +16,6 @@ from app.services.db import (
     load_card_detail,
     get_print_brief,
     db_exists,
-    ensure_db,
 )
 from app.services.pipeline import run_update_and_refine
 from app.paths import get_default_data_root, get_project_root
@@ -389,8 +388,10 @@ def launch_app(db_path: str) -> None:
 
         setup_window_icon()
 
-        for issue in run_startup_checks(tf_db.value, data_root):
-            append_log(f"[WARN] {issue}")
+        async def run_startup_checks_async() -> None:
+            issues = await asyncio.to_thread(run_startup_checks, tf_db.value, data_root)
+            for issue in issues:
+                append_log(f"[WARN] {issue}")
 
         def get_conn() -> sqlite3.Connection:
             path = tf_db.value
@@ -735,22 +736,13 @@ def launch_app(db_path: str) -> None:
 
         btn_update.on_click = on_update_click
 
-        # --- first-run: DB 없으면 안내 로그만 찍고 앱은 뜨게 ---
+        # --- first-run: 초기 렌더 속도를 위해 DB open/init은 지연 ---
         if not db_exists(tf_db.value):
             if not tf_db.value or not tf_db.value.strip():
                 append_log("[WARN] DB 경로가 비어있습니다. 상단 DB 경로를 지정해주세요.")
             else:
-                created = ensure_db(tf_db.value)
-                if created:
-                    append_log("[INFO] DB 파일이 없어 빈 DB를 생성했습니다.")
-                else:
-                    append_log("[INFO] DB 파일이 없습니다.")
-                append_log("[INFO] 상단 'DB갱신'을 누르면 DB를 생성(크롤링+정제)합니다.")
-        else:
-            try:
-                get_conn()
-            except Exception as ex:
-                append_log(f"[ERROR] DB open failed: {ex}")
+                append_log("[INFO] DB 파일이 없습니다.")
+                append_log("[INFO] 상단 'DB갱신'을 누르면 번들 DB를 복원하거나(모바일), 갱신을 실행합니다.")
 
         # --- Layout ---
         layout_state = {"mobile": None}
@@ -932,6 +924,7 @@ def launch_app(db_path: str) -> None:
         clear_selection()
         render_result_list()
         build_layout()
+        page.run_task(run_startup_checks_async)
         if needs_db_update():
             show_toast(DB_MISSING_TOAST, persist=True)
 
