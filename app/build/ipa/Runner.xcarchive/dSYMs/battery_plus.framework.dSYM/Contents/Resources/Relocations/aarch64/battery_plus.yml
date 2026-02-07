@@ -1,0 +1,17 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     '/Users/perlihite/Library/Developer/Xcode/DerivedData/Runner-fvcjagqgwgflbcgwsybnxysbyrxn/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos/battery_plus.framework/battery_plus'
+relocations:
+  - { offset: 0x1A97A, size: 0x8, addend: 0x0, symName: _battery_plusVersionString, symObjAddr: 0x0, symBinAddr: 0x4960, symSize: 0x0 }
+  - { offset: 0x1A9AE, size: 0x8, addend: 0x0, symName: _battery_plusVersionNumber, symObjAddr: 0x30, symBinAddr: 0x4990, symSize: 0x0 }
+  - { offset: 0x1A9EA, size: 0x8, addend: 0x0, symName: '+[FPPBatteryPlusPlugin registerWithRegistrar:]', symObjAddr: 0x0, symBinAddr: 0x4000, symSize: 0x108 }
+  - { offset: 0x1AA4B, size: 0x8, addend: 0x0, symName: '+[FPPBatteryPlusPlugin registerWithRegistrar:]', symObjAddr: 0x0, symBinAddr: 0x4000, symSize: 0x108 }
+  - { offset: 0x1AAB3, size: 0x8, addend: 0x0, symName: '-[FPPBatteryPlusPlugin handleMethodCall:result:]', symObjAddr: 0x108, symBinAddr: 0x4108, symSize: 0x238 }
+  - { offset: 0x1AB8D, size: 0x8, addend: 0x0, symName: '-[FPPBatteryPlusPlugin onBatteryStateDidChange:]', symObjAddr: 0x340, symBinAddr: 0x4340, symSize: 0x4 }
+  - { offset: 0x1ABC6, size: 0x8, addend: 0x0, symName: '-[FPPBatteryPlusPlugin sendBatteryStateEvent]', symObjAddr: 0x344, symBinAddr: 0x4344, symSize: 0xA4 }
+  - { offset: 0x1AC35, size: 0x8, addend: 0x0, symName: '-[FPPBatteryPlusPlugin getBatteryState]', symObjAddr: 0x3E8, symBinAddr: 0x43E8, symSize: 0x68 }
+  - { offset: 0x1AC83, size: 0x8, addend: 0x0, symName: '-[FPPBatteryPlusPlugin getBatteryLevel]', symObjAddr: 0x450, symBinAddr: 0x4450, symSize: 0x70 }
+  - { offset: 0x1ACC2, size: 0x8, addend: 0x0, symName: '-[FPPBatteryPlusPlugin onListenWithArguments:eventSink:]', symObjAddr: 0x4C0, symBinAddr: 0x44C0, symSize: 0xA8 }
+  - { offset: 0x1AD10, size: 0x8, addend: 0x0, symName: '-[FPPBatteryPlusPlugin onCancelWithArguments:]', symObjAddr: 0x568, symBinAddr: 0x4568, symSize: 0x7C }
+  - { offset: 0x1AD4F, size: 0x8, addend: 0x0, symName: '-[FPPBatteryPlusPlugin .cxx_destruct]', symObjAddr: 0x5E4, symBinAddr: 0x45E4, symSize: 0xC }
+...
