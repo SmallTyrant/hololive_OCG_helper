@@ -1,6 +1,6 @@
 {
-    "name": "app",
-    "short_name": "app",
+    "name": "hOCG_H",
+    "short_name": "hocg_h",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#FFFFFF",

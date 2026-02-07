@@ -3,10 +3,10 @@
 <plist version="1.0">
 <dict>
     <key>method</key>
-    <string>debugging</string>
+    <string>release-testing</string>
     <key>provisioningProfiles</key>
     <dict>
-        <key>com.flet.app</key>
+        <key>com.smalltyrant.hocghelper</key>
         <string></string>
     </dict>
 

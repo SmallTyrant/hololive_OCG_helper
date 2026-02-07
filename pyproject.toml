@@ -1,5 +1,16 @@
+[project]
+name = "hOCG_H"
+version = "1.0.0"
+description = "hOCG_H"
+dependencies = [
+  "flet",
+  "pillow",
+  "requests",
+  "openpyxl",
+  "beautifulsoup4",
+]
+
 [tool.flet]
-project = "hOCG_H"
 product = "hOCG_H"
 org = "com.smalltyrant"
 bundle_id = "com.smalltyrant.hocghelper"
@@ -7,10 +18,10 @@ bundle_id = "com.smalltyrant.hocghelper"
 [tool.flet.ios]
 # iOS release testing build (for AltStore re-signing)
 export_method = "release-testing"
-info_plist = [
-  "CFBundleDisplayName=hOCG_H",
-  "CFBundleName=hOCG_H",
-]
+
+[tool.flet.ios.info]
+CFBundleDisplayName = "hOCG_H"
+CFBundleName = "hOCG_H"
 
 [tool.flet.splash]
 ios = false

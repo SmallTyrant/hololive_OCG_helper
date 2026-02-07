@@ -100,9 +100,33 @@ def launch_app(db_path: str) -> None:
                 token in user_agent for token in ("iphone", "ipad", "android")
             )
 
+        def get_view_size() -> tuple[float, float]:
+            # Flet 0.80+에서는 page.window_width/page.window_height가 기본 속성이 아님.
+            # 모바일에서 해당 속성을 직접 읽으면 AttributeError가 날 수 있어 안전하게 조회.
+            window = getattr(page, "window", None)
+            window_width = getattr(window, "width", None) if window is not None else None
+            window_height = getattr(window, "height", None) if window is not None else None
+            legacy_width = getattr(page, "window_width", None)
+            legacy_height = getattr(page, "window_height", None)
+            width = window_width or legacy_width or getattr(page, "width", None) or 0
+            height = window_height or legacy_height or getattr(page, "height", None) or 0
+            return float(width), float(height)
+
+        def set_desktop_window_size(width: int, height: int) -> None:
+            window = getattr(page, "window", None)
+            if window is not None:
+                try:
+                    window.width = width
+                    window.height = height
+                    return
+                except Exception:
+                    pass
+            # 구버전/호환 경로
+            page.window_width = width
+            page.window_height = height
+
         if not is_mobile_platform():
-            page.window_width = 1280
-            page.window_height = 820
+            set_desktop_window_size(1280, 820)
 
         # --- Controls ---
         tf_db = ft.TextField(label="DB", value=db_path, expand=True)
@@ -745,15 +769,17 @@ def launch_app(db_path: str) -> None:
             ua_mobile = "mobile" in user_agent
             ua_tablet_hint = "tablet" in user_agent or (ua_android and not ua_mobile)
 
-            width = page.window_width or page.width or 0
-            height = page.window_height or page.height or 0
+            width, height = get_view_size()
             min_dim = min([dim for dim in (width, height) if dim]) if width or height else 0
             size_tablet_hint = min_dim >= 600
 
             return (is_android or ua_android) and (ua_tablet_hint or size_tablet_hint)
 
         def is_mobile_layout() -> bool:
-            width = page.window_width or page.width or 0
+            width, _ = get_view_size()
+            if width <= 0:
+                # 초기 사이즈가 아직 확정되지 않은 모바일 환경은 플랫폼 정보로 우선 판정.
+                return is_mobile_platform() and not is_android_tablet()
             return bool(width) and width < 900 and not is_android_tablet()
 
         def build_layout() -> None:

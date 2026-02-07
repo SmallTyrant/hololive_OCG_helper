@@ -69,8 +69,8 @@ flutter_native_splash:
   image_dark_web: images/icon.png
   image_ios: images/icon.png
   image_web: images/icon.png
-  ios: true
+  ios: false
   web: true
-name: app
+name: hocg_h
 publish_to: none
 version: 1.0.0+1
