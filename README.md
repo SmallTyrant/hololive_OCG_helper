@@ -1,49 +1,8 @@
 # hololive_OCG_helper
-PC-only Flet helper app.
 
+안드로이드, iOS, Window, MAC OS 지원하는 홀로라이브 OCG 카드효과 찾는 도우미입니다.
+현재 한국어만 지원합니다.
 
-한국어만 지원합니다.
-
-
-## 데스크톱 빌드 (Windows/macOS)
-동일한 Python 스크립트로 플랫폼별 패키징을 실행할 수 있습니다.
-
-```
-# Windows(.exe)
-python scripts/build_desktop.py windows
-
-# macOS(.app)
-python scripts/build_desktop.py macos
-```
-
-간단 실행용 래퍼 스크립트도 유지됩니다.
-- Windows: `scripts/pack.bat`, `scripts/pack.ps1`
-- macOS: `scripts/pack.sh`
-
-## 모바일 앱 제작 안내
-Android(Kotlin) / iOS(Swift) 앱 제작을 위한 가이드는 `mobile/` 폴더를 참고하세요.
-
-## 한국어 효과 텍스트 적재 (NamuWiki/Google Sheets)
-`tools/namuwiki_ko_import.py`로 NamuWiki 카드 목록 테이블 또는 Google Sheets CSV에서 카드 번호/효과를 추출해
-`card_texts_ko`에 적재할 수 있습니다. DB 스키마 변경 없이 기존 `prints`와 카드 번호로 매칭됩니다.
-
-예시:
-```
-python tools/namuwiki_ko_import.py --db data/hololive_ocg.sqlite --page "hololive OCG/카드 목록"
-```
-
-카드 번호로 NamuWiki 검색까지 포함하려면 `--search-card-numbers`를 추가하세요:
-```
-python tools/namuwiki_ko_import.py --db data/hololive_ocg.sqlite --page "hololive OCG/카드 목록" --search-card-numbers
-```
-
-Google Sheets 예시(공개 시트):
-```
-python tools/namuwiki_ko_import.py --db data/hololive_ocg.sqlite --sheet-url "https://docs.google.com/spreadsheets/d/<id>/edit#gid=0"
-```
-
-앱의 DB 갱신 시 자동으로 불러오려면 환경변수를 설정하세요:
-```
-HOCG_KO_SHEET_URL="https://docs.google.com/spreadsheets/d/<id>/edit#gid=0"
-HOCG_KO_SHEET_GID="0"
-```
+# 사용방법
+1. 각 OS에서 설치를 진행합니다. (iOS는 알트스토어나 사이드로딩을 하셔야합니다)
+2. 실행 후 원하는 카드 번호를 검색하면 이미지와 카드 본문 번역된것이 보입니다.
