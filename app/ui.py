@@ -138,7 +138,7 @@ def launch_app(db_path: str) -> None:
         # --- Results / Detail ---
         lv = ft.Column(spacing=2, scroll=ft.ScrollMode.AUTO, expand=True)
         detail_lv = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO, expand=True)
-        detail_texts = {"ko": "", "ja": ""}
+        detail_texts = {"ko": ""}
 
         # --- Image area ---
         def build_image_placeholder(text: str, loading: bool = False) -> ft.Control:
@@ -515,43 +515,24 @@ def launch_app(db_path: str) -> None:
                     )
             return ft.Text(line)
 
-        def append_detail_lines(text: str, apply_jp_filters: bool) -> None:
+        def append_detail_lines(text: str) -> None:
             lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
             for line in lines:
-                if apply_jp_filters:
-                    if line == "色" or line.startswith("色 "):
-                        continue
-                    if line == "バトンタッチ" or line.startswith("バトンタッチ "):
-                        continue
-                    detail_lv.controls.append(build_detail_line(line))
-                else:
-                    detail_lv.controls.append(ft.Text(line))
+                detail_lv.controls.append(build_detail_line(line))
 
         def render_detail() -> None:
             detail_lv.controls.clear()
-            ja = (detail_texts["ja"] or "").strip()
             ko = (detail_texts["ko"] or "").strip()
-            has_any = False
 
             if ko:
                 detail_lv.controls.append(build_section_chip("한국어"))
-                append_detail_lines(ko, apply_jp_filters=False)
-                has_any = True
-
-            if ja:
-                if has_any:
-                    detail_lv.controls.append(ft.Divider(height=12))
-                detail_lv.controls.append(build_section_chip("日本語"))
-                append_detail_lines(ja, apply_jp_filters=True)
-                has_any = True
-
-            if not has_any:
-                detail_lv.controls.append(ft.Text("(본문 없음)"))
+                append_detail_lines(ko)
+            else:
+                detail_lv.controls.append(ft.Text("(한국어 본문 없음)"))
 
             page.update()
 
-        def set_detail_text(ja_text: str | None, ko_text: str | None) -> None:
-            detail_texts["ja"] = (ja_text or "")
+        def set_detail_text(ko_text: str | None) -> None:
             detail_texts["ko"] = (ko_text or "")
             render_detail()
 
@@ -559,7 +540,7 @@ def launch_app(db_path: str) -> None:
             selected_print_id["id"] = None
             selected_card_number["no"] = ""
             selected_image_url["url"] = ""
-            set_detail_text("", "")
+            set_detail_text("")
             clear_image("카드를 선택하세요")
 
         def render_result_list() -> None:
@@ -576,7 +557,11 @@ def launch_app(db_path: str) -> None:
 
             for row in rows:
                 pid = row["print_id"]
-                title = f"{row.get('card_number', '')} | {row.get('name_ja', '')}"
+                card_number = (row.get("card_number") or "").strip()
+                name_ko = (row.get("name_ko") or "").strip()
+                name_ja = (row.get("name_ja") or "").strip()
+                display_name = name_ko or name_ja or "(이름 없음)"
+                title = f"{card_number} | {display_name}" if card_number else display_name
                 is_selected = selected_print_id["id"] == pid
                 lv.controls.append(
                     ft.ListTile(
@@ -614,13 +599,10 @@ def launch_app(db_path: str) -> None:
                     clear_image("이미지 없음")
 
                 card = load_card_detail(conn, pid)
-                set_detail_text(
-                    card.get("raw_text", "") if card else None,
-                    card.get("ko_text", "") if card else None,
-                )
+                set_detail_text(card.get("ko_text", "") if card else None)
 
             except Exception as ex:
-                set_detail_text(f"[ERROR] 상세 로드 실패: {ex}", None)
+                set_detail_text(f"[ERROR] 상세 로드 실패: {ex}")
                 clear_image("이미지 로딩 실패")
 
             page.update()

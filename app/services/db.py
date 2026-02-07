@@ -114,15 +114,21 @@ def query_suggest(conn: sqlite3.Connection, q: str, limit: int = 40) -> list[dic
     # 태그 JOIN 가능하면 tag까지 검색
     if joins:
         sql = f"""
-        SELECT DISTINCT p.print_id, p.card_number, COALESCE(p.name_ja,'') AS name_ja
+        SELECT DISTINCT
+            p.print_id,
+            p.card_number,
+            COALESCE(p.name_ja,'') AS name_ja,
+            COALESCE(ko.name,'') AS name_ko
         FROM prints p
+        LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
         {joins}
         WHERE
             UPPER(p.card_number) LIKE UPPER(?)
             OR COALESCE(p.name_ja,'') LIKE ?
+            OR COALESCE(ko.name,'') LIKE ?
             OR (t.tag IS NOT NULL AND (t.tag LIKE ? OR COALESCE(t.normalized,'') LIKE ?))
         """
-        params = [like, like, like, like]
+        params = [like, like, like, like, like]
 
         for alias in aliases:
             sql += " OR t.tag LIKE ? OR COALESCE(t.normalized,'') LIKE ?"
@@ -135,24 +141,28 @@ def query_suggest(conn: sqlite3.Connection, q: str, limit: int = 40) -> list[dic
 
     # 태그 JOIN 불가하면 카드번호/이름만 검색
     sql = """
-    SELECT p.print_id, p.card_number, COALESCE(p.name_ja,'') AS name_ja
+    SELECT
+        p.print_id,
+        p.card_number,
+        COALESCE(p.name_ja,'') AS name_ja,
+        COALESCE(ko.name,'') AS name_ko
     FROM prints p
+    LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
     WHERE UPPER(p.card_number) LIKE UPPER(?)
        OR COALESCE(p.name_ja,'') LIKE ?
+       OR COALESCE(ko.name,'') LIKE ?
     ORDER BY p.card_number
     LIMIT ?
     """
-    return [dict(r) for r in conn.execute(sql, (like, like, limit))]
+    return [dict(r) for r in conn.execute(sql, (like, like, like, limit))]
 
 def load_card_detail(conn: sqlite3.Connection, pid: int) -> dict | None:
     r = conn.execute(
         """
         SELECT
-            ja.raw_text AS raw_text,
             ko.effect_text AS ko_text,
             ko.name AS ko_name
         FROM prints p
-        LEFT JOIN card_texts_ja ja ON ja.print_id = p.print_id
         LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
         WHERE p.print_id=?
         """,
@@ -163,9 +173,15 @@ def load_card_detail(conn: sqlite3.Connection, pid: int) -> dict | None:
 def get_print_brief(conn: sqlite3.Connection, print_id: int) -> dict | None:
     row = conn.execute(
         """
-        SELECT print_id, card_number, COALESCE(name_ja,'') AS name_ja, COALESCE(image_url,'') AS image_url
-        FROM prints
-        WHERE print_id=?
+        SELECT
+            p.print_id,
+            p.card_number,
+            COALESCE(p.name_ja,'') AS name_ja,
+            COALESCE(ko.name,'') AS name_ko,
+            COALESCE(p.image_url,'') AS image_url
+        FROM prints p
+        LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
+        WHERE p.print_id=?
         """,
         (print_id,),
     ).fetchone()
