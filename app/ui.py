@@ -16,6 +16,7 @@ from app.services.db import (
     load_card_detail,
     get_print_brief,
     db_exists,
+    clear_conn_cache,
 )
 from app.services.pipeline import run_update_and_refine
 from app.paths import get_default_data_root, get_project_root
@@ -405,6 +406,7 @@ def launch_app(db_path: str) -> None:
             ):
                 try:
                     if conn is not None:
+                        clear_conn_cache(conn)
                         conn.close()
                 except Exception:
                     pass
@@ -418,6 +420,7 @@ def launch_app(db_path: str) -> None:
             conn = getattr(thread_local, "conn", None)
             if conn is not None:
                 try:
+                    clear_conn_cache(conn)
                     conn.close()
                 except Exception:
                     pass
@@ -742,7 +745,7 @@ def launch_app(db_path: str) -> None:
                 append_log("[WARN] DB 경로가 비어있습니다. 상단 DB 경로를 지정해주세요.")
             else:
                 append_log("[INFO] DB 파일이 없습니다.")
-                append_log("[INFO] 상단 'DB갱신'을 누르면 번들 DB를 복원하거나(모바일), 갱신을 실행합니다.")
+                append_log("[INFO] 상단 'DB갱신'을 누르면 GitHub Releases에서 최신 DB를 내려받습니다.")
 
         # --- Layout ---
         layout_state = {"mobile": None}

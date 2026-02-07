@@ -2,12 +2,19 @@
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
+import json
 from pathlib import Path
 from typing import Iterator
+from urllib.request import Request, urlopen
+from urllib.error import URLError, HTTPError
 
 CARD_NUMBER_RE = re.compile(r"\b[hH][A-Za-z]{1,5}\d{2}-\d{3}\b")
+GITHUB_REPO = "SmallTyrant/hololive_OCG_helper"
+LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+LATEST_DB_DIRECT_URL = f"https://github.com/{GITHUB_REPO}/releases/latest/download/hololive_ocg.sqlite"
 
 def _py() -> str:
     return sys.executable
@@ -20,6 +27,110 @@ def _stream_output(process: subprocess.Popen[str]) -> Iterator[str]:
         raise RuntimeError("process stdout not available")
     for line in process.stdout:
         yield _mask_card_numbers(line.rstrip("\n"))
+
+
+def _pick_release_db_asset(release: dict) -> tuple[str, str]:
+    assets = release.get("assets") or []
+    if not assets:
+        raise RuntimeError("latest release has no assets")
+
+    preferred_names = ("hololive_ocg.sqlite",)
+    db_extensions = (".sqlite", ".sqlite3", ".db")
+
+    for preferred in preferred_names:
+        for asset in assets:
+            name = str(asset.get("name") or "")
+            url = str(asset.get("browser_download_url") or "")
+            if name == preferred and url:
+                return name, url
+
+    for asset in assets:
+        name = str(asset.get("name") or "")
+        url = str(asset.get("browser_download_url") or "")
+        if url and any(name.endswith(ext) for ext in db_extensions):
+            return name, url
+
+    names = ", ".join(str(a.get("name") or "") for a in assets)
+    raise RuntimeError(f"no sqlite asset in latest release: {names}")
+
+
+def _validate_sqlite(path: Path) -> None:
+    if not path.exists() or not path.is_file() or path.stat().st_size == 0:
+        raise RuntimeError("downloaded DB file is missing or empty")
+    with open(path, "rb") as f:
+        head = f.read(16)
+    if head != b"SQLite format 3\x00":
+        raise RuntimeError("downloaded file is not a valid SQLite database")
+
+    conn = sqlite3.connect(path)
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='prints'"
+        ).fetchone()
+        if not row:
+            raise RuntimeError("downloaded DB is missing 'prints' table")
+    finally:
+        conn.close()
+
+
+def _download_latest_release_db(db_path: str) -> tuple[str, str]:
+    release = None
+    req = Request(
+        LATEST_RELEASE_API,
+        headers={
+            "User-Agent": "hOCG_H/1.0",
+            "Accept": "application/vnd.github+json",
+        },
+    )
+    try:
+        with urlopen(req, timeout=20) as response:
+            release = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        release = None
+
+    if release is not None:
+        try:
+            asset_name, asset_url = _pick_release_db_asset(release)
+            tag = str(release.get("tag_name") or "latest")
+        except Exception:
+            asset_name, asset_url = "hololive_ocg.sqlite", LATEST_DB_DIRECT_URL
+            tag = str(release.get("tag_name") or "latest")
+    else:
+        asset_name, asset_url = "hololive_ocg.sqlite", LATEST_DB_DIRECT_URL
+        tag = "latest"
+
+    target = Path(db_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(target.suffix + ".download")
+
+    dl_req = Request(
+        asset_url,
+        headers={
+            "User-Agent": "hOCG_H/1.0",
+            "Accept": "application/octet-stream",
+        },
+    )
+    try:
+        with urlopen(dl_req, timeout=120) as response, open(tmp, "wb") as f:
+            while True:
+                chunk = response.read(1024 * 256)
+                if not chunk:
+                    break
+                f.write(chunk)
+        _validate_sqlite(tmp)
+        os.replace(tmp, target)
+    except HTTPError as ex:
+        raise RuntimeError(f"DB asset HTTP {ex.code}") from ex
+    except URLError as ex:
+        raise RuntimeError(f"DB asset download failed: {ex}") from ex
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except Exception:
+                pass
+
+    return tag, asset_name
 
 
 def _find_project_root_with_tools() -> tuple[Path, Path, Path, Path] | None:
@@ -84,9 +195,19 @@ def run_update_and_refine(
     ko_sheet_gid: str | None = None,
 ):
     """
-    tools/hocg_tool2.py scrape -> tools/hocg_refine_update.py
+    1) GitHub Releases 최신 DB 다운로드
+    2) 실패 시 로컬 tools 갱신 파이프라인 fallback
     stdout 라인 단위로 yield
     """
+    try:
+        yield "[INFO] GitHub Releases에서 최신 DB 확인 중..."
+        tag, asset_name = _download_latest_release_db(db_path)
+        yield f"[INFO] 다운로드 완료: {asset_name} (release: {tag})"
+        yield "[DONE] DB 갱신 완료"
+        return
+    except Exception as ex:
+        yield f"[WARN] 릴리즈 DB 다운로드 실패: {ex}"
+
     located = _find_project_root_with_tools()
     if located is None:
         existing_db = Path(db_path)

@@ -1,11 +1,10 @@
 import sqlite3
 from pathlib import Path
-from weakref import WeakKeyDictionary
 
 from app.constants import TAG_ALIAS
 
-_COL_CACHE: "WeakKeyDictionary[sqlite3.Connection, dict[str, set[str]]]" = WeakKeyDictionary()
-_JOIN_CACHE: "WeakKeyDictionary[sqlite3.Connection, str | None]" = WeakKeyDictionary()
+_COL_CACHE: dict[int, dict[str, set[str]]] = {}
+_JOIN_CACHE: dict[int, str | None] = {}
 _MISSING = object()
 
 
@@ -33,6 +32,16 @@ def open_db(path: str) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     return conn
 
+
+def _conn_key(conn: sqlite3.Connection) -> int:
+    return id(conn)
+
+
+def clear_conn_cache(conn: sqlite3.Connection) -> None:
+    key = _conn_key(conn)
+    _COL_CACHE.pop(key, None)
+    _JOIN_CACHE.pop(key, None)
+
 def _expand_alias(q: str) -> set[str]:
     out = {q}
     for key, values in TAG_ALIAS.items():
@@ -43,14 +52,15 @@ def _expand_alias(q: str) -> set[str]:
     return out
 
 def _cols(conn: sqlite3.Connection, table: str) -> set[str]:
-    table_cache = _COL_CACHE.get(conn)
+    key = _conn_key(conn)
+    table_cache = _COL_CACHE.get(key)
     if table_cache is not None and table in table_cache:
         return table_cache[table]
     rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
     cols = {r[1] for r in rows}  # r[1] = column name
     if table_cache is None:
         table_cache = {}
-        _COL_CACHE[conn] = table_cache
+        _COL_CACHE[key] = table_cache
     table_cache[table] = cols
     return cols
 
@@ -61,7 +71,8 @@ def _build_tag_joins(conn: sqlite3.Connection) -> str | None:
       1) print_tags(print_id, tag) + tags(tag, normalized)
       2) print_tags(print_id, tag_id) + tags(tag_id, tag, normalized)
     """
-    cached = _JOIN_CACHE.get(conn, _MISSING)
+    key = _conn_key(conn)
+    cached = _JOIN_CACHE.get(key, _MISSING)
     if cached is not _MISSING:
         return cached
 
@@ -74,7 +85,7 @@ def _build_tag_joins(conn: sqlite3.Connection) -> str | None:
         LEFT JOIN print_tags pt ON pt.print_id = p.print_id
         LEFT JOIN tags t ON t.tag = pt.tag
         """
-        _JOIN_CACHE[conn] = joins
+        _JOIN_CACHE[key] = joins
         return joins
 
     # Case 2
@@ -83,11 +94,11 @@ def _build_tag_joins(conn: sqlite3.Connection) -> str | None:
         LEFT JOIN print_tags pt ON pt.print_id = p.print_id
         LEFT JOIN tags t ON t.tag_id = pt.tag_id
         """
-        _JOIN_CACHE[conn] = joins
+        _JOIN_CACHE[key] = joins
         return joins
 
     # Fallback: tags JOIN 불가 → 태그 검색 없이 카드번호/이름만
-    _JOIN_CACHE[conn] = None
+    _JOIN_CACHE[key] = None
     return None
 
 def query_suggest(conn: sqlite3.Connection, q: str, limit: int = 40) -> list[dict]:
