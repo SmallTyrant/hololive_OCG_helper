@@ -42,6 +42,9 @@ def _expand_alias(q: str) -> set[str]:
             out.add(key)
     return out
 
+def _normalize_tag_query(q: str) -> str:
+    return "".join(q.split())
+
 def _cols(conn: sqlite3.Connection, table: str) -> set[str]:
     table_cache = _COL_CACHE.get(conn)
     if table_cache is not None and table in table_cache:
@@ -97,6 +100,9 @@ def query_suggest(conn: sqlite3.Connection, q: str, limit: int = 40) -> list[dic
 
     like = f"%{q}%"
     aliases = _expand_alias(q)
+    normalized = _normalize_tag_query(q)
+    normalized_like = f"%{normalized}%"
+    use_normalized = bool(normalized)
 
     joins = _build_tag_joins(conn)
 
@@ -113,9 +119,22 @@ def query_suggest(conn: sqlite3.Connection, q: str, limit: int = 40) -> list[dic
         """
         params = [like, like, like, like]
 
+        if use_normalized:
+            sql += """
+            OR (t.tag IS NOT NULL AND (
+                REPLACE(t.tag, ' ', '') LIKE ?
+                OR REPLACE(COALESCE(t.normalized,''), ' ', '') LIKE ?
+            ))
+            """
+            params += [normalized_like, normalized_like]
+
         for alias in aliases:
             sql += " OR t.tag LIKE ? OR COALESCE(t.normalized,'') LIKE ?"
             params += [f"%{alias}%", f"%{alias}%"]
+            if use_normalized:
+                alias_normalized = _normalize_tag_query(alias)
+                sql += " OR REPLACE(t.tag, ' ', '') LIKE ? OR REPLACE(COALESCE(t.normalized,''), ' ', '') LIKE ?"
+                params += [f"%{alias_normalized}%", f"%{alias_normalized}%"]
 
         sql += " ORDER BY p.card_number LIMIT ?"
         params.append(limit)

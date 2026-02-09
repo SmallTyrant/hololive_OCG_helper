@@ -115,6 +115,7 @@ def launch_app(db_path: str) -> None:
         lv = ft.Column(spacing=2, scroll=ft.ScrollMode.AUTO, expand=True)
         detail_lv = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO, expand=True)
         detail_texts = {"ko": "", "ja": ""}
+        mobile_state = {"image_visible": True, "ko_open": True, "ja_open": False}
 
         # --- Image area ---
         def build_image_placeholder(text: str, loading: bool = False) -> ft.Control:
@@ -169,6 +170,32 @@ def launch_app(db_path: str) -> None:
             bgcolor=None,
             border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
         )
+
+        mobile_image_wrapper = ft.Container(
+            content=img_container,
+            height=460,
+            border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
+            border_radius=10,
+        )
+        mobile_image_toggle = ft.TextButton("")
+
+        mobile_ko_column = ft.Column(spacing=4)
+        mobile_ja_column = ft.Column(spacing=4)
+        mobile_ko_body = ft.Container(
+            content=mobile_ko_column,
+            padding=10,
+            border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
+            border_radius=10,
+        )
+        mobile_ja_body = ft.Container(
+            content=mobile_ja_column,
+            padding=10,
+            border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
+            border_radius=10,
+        )
+        mobile_ko_toggle = ft.TextButton("")
+        mobile_ja_toggle = ft.TextButton("")
+        mobile_empty_text = ft.Text("(본문 없음)", color=COLORS.GREY_400, visible=False)
 
         selected_print_id = {"id": None}
         selected_card_number = {"no": ""}
@@ -487,7 +514,12 @@ def launch_app(db_path: str) -> None:
                     )
             return ft.Text(line)
 
-        def append_detail_lines(text: str, apply_jp_filters: bool) -> None:
+        def build_detail_controls(
+            text: str,
+            apply_jp_filters: bool,
+            use_formatter: bool,
+        ) -> list[ft.Control]:
+            controls: list[ft.Control] = []
             lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
             for line in lines:
                 if apply_jp_filters:
@@ -495,30 +527,69 @@ def launch_app(db_path: str) -> None:
                         continue
                     if line == "バトンタッチ" or line.startswith("バトンタッチ "):
                         continue
-                    detail_lv.controls.append(build_detail_line(line))
-                else:
-                    detail_lv.controls.append(ft.Text(line))
+                controls.append(build_detail_line(line) if use_formatter else ft.Text(line))
+            return controls
+
+        def update_mobile_toggle_labels() -> None:
+            mobile_image_toggle.text = "이미지 접기" if mobile_state["image_visible"] else "이미지 펼치기"
+            mobile_ko_toggle.text = "접기" if mobile_state["ko_open"] else "펼치기"
+            mobile_ja_toggle.text = "접기" if mobile_state["ja_open"] else "펼치기"
+
+        def apply_mobile_visibility() -> None:
+            mobile_image_wrapper.visible = mobile_state["image_visible"]
+            mobile_ko_body.visible = mobile_state["ko_open"]
+            mobile_ja_body.visible = mobile_state["ja_open"]
+            update_mobile_toggle_labels()
+
+        def toggle_mobile_image(e) -> None:
+            mobile_state["image_visible"] = not mobile_state["image_visible"]
+            apply_mobile_visibility()
+            page.update()
+
+        def toggle_mobile_ko(e) -> None:
+            mobile_state["ko_open"] = not mobile_state["ko_open"]
+            apply_mobile_visibility()
+            page.update()
+
+        def toggle_mobile_ja(e) -> None:
+            mobile_state["ja_open"] = not mobile_state["ja_open"]
+            apply_mobile_visibility()
+            page.update()
+
+        mobile_image_toggle.on_click = toggle_mobile_image
+        mobile_ko_toggle.on_click = toggle_mobile_ko
+        mobile_ja_toggle.on_click = toggle_mobile_ja
 
         def render_detail() -> None:
             detail_lv.controls.clear()
             ja = (detail_texts["ja"] or "").strip()
             ko = (detail_texts["ko"] or "").strip()
             has_any = False
+            ko_controls = build_detail_controls(ko, apply_jp_filters=False, use_formatter=False) if ko else []
+            ja_controls = build_detail_controls(ja, apply_jp_filters=True, use_formatter=True) if ja else []
 
-            if ko:
+            if ko_controls:
                 detail_lv.controls.append(build_section_chip("한국어"))
-                append_detail_lines(ko, apply_jp_filters=False)
+                detail_lv.controls.extend(ko_controls)
                 has_any = True
 
-            if ja:
+            if ja_controls:
                 if has_any:
                     detail_lv.controls.append(ft.Divider(height=12))
                 detail_lv.controls.append(build_section_chip("日本語"))
-                append_detail_lines(ja, apply_jp_filters=True)
+                detail_lv.controls.extend(ja_controls)
                 has_any = True
 
             if not has_any:
                 detail_lv.controls.append(ft.Text("(본문 없음)"))
+
+            mobile_ko_column.controls.clear()
+            mobile_ja_column.controls.clear()
+            if ko_controls:
+                mobile_ko_column.controls.extend(ko_controls)
+            if ja_controls:
+                mobile_ja_column.controls.extend(ja_controls)
+            mobile_empty_text.visible = not (ko_controls or ja_controls)
 
             page.update()
 
@@ -793,20 +864,32 @@ def launch_app(db_path: str) -> None:
                             border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
                             border_radius=10,
                         ),
-                        ft.Text("이미지"),
-                        ft.Container(
-                            content=img_container,
-                            height=460,
-                            border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
-                            border_radius=10,
+                        ft.Row(
+                            [
+                                ft.Text("이미지"),
+                                mobile_image_toggle,
+                            ],
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                         ),
+                        mobile_image_wrapper,
                         ft.Text("효과"),
-                        ft.Container(
-                            content=detail_lv,
-                            padding=10,
-                            border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
-                            border_radius=10,
+                        mobile_empty_text,
+                        ft.Row(
+                            [
+                                ft.Text("한국어"),
+                                mobile_ko_toggle,
+                            ],
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                         ),
+                        mobile_ko_body,
+                        ft.Row(
+                            [
+                                ft.Text("日本語"),
+                                mobile_ja_toggle,
+                            ],
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        ),
+                        mobile_ja_body,
                     ],
                     expand=True,
                     spacing=8,
@@ -822,6 +905,7 @@ def launch_app(db_path: str) -> None:
                         expand=True,
                     )
                 )
+                apply_mobile_visibility()
                 return
 
             btn_update.width = None
