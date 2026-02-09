@@ -42,7 +42,7 @@ def download_image(url: str, dest: Path, timeout: int = 30) -> None:
 
     tmp = dest.with_suffix(dest.suffix + ".tmp")
     try:
-        req = Request(u, headers={"User-Agent": "hOCG_H/1.0"})
+        req = Request(u, headers={"User-Agent": "hOCG_H/1.1"})
         # 원자적 저장(임시→교체)
         with urlopen(req, timeout=timeout) as response, open(tmp, "wb") as f:
             while True:

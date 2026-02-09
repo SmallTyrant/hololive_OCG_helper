@@ -78,7 +78,7 @@ def _download_latest_release_db(db_path: str) -> tuple[str, str]:
     req = Request(
         LATEST_RELEASE_API,
         headers={
-            "User-Agent": "hOCG_H/1.0",
+            "User-Agent": "hOCG_H/1.1",
             "Accept": "application/vnd.github+json",
         },
     )
@@ -106,7 +106,7 @@ def _download_latest_release_db(db_path: str) -> tuple[str, str]:
     dl_req = Request(
         asset_url,
         headers={
-            "User-Agent": "hOCG_H/1.0",
+            "User-Agent": "hOCG_H/1.1",
             "Accept": "application/octet-stream",
         },
     )

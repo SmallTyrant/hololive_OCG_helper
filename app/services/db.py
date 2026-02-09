@@ -1,4 +1,5 @@
 import sqlite3
+import re
 from pathlib import Path
 
 from app.constants import TAG_ALIAS
@@ -6,6 +7,7 @@ from app.constants import TAG_ALIAS
 _COL_CACHE: dict[int, dict[str, set[str]]] = {}
 _JOIN_CACHE: dict[int, str | None] = {}
 _MISSING = object()
+_TOKEN_SPLIT_RE = re.compile(r"[\s,|/]+")
 
 
 def ensure_db(path: str) -> bool:
@@ -42,14 +44,60 @@ def clear_conn_cache(conn: sqlite3.Connection) -> None:
     _COL_CACHE.pop(key, None)
     _JOIN_CACHE.pop(key, None)
 
-def _expand_alias(q: str) -> set[str]:
-    out = {q}
-    for key, values in TAG_ALIAS.items():
-        if q == key:
-            out.update(values)
-        elif q in values:
-            out.add(key)
+def _normalize_term(text: str) -> str:
+    out = (text or "").strip().lower()
+    for ch in (" ", "\t", "\n", "\r", "#", "_", "-", "/", "|", ",", "."):
+        out = out.replace(ch, "")
     return out
+
+
+def _unique_terms(values: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        v = (value or "").strip()
+        if not v or v in seen:
+            continue
+        seen.add(v)
+        out.append(v)
+    return out
+
+
+def _is_related_term(a: str, b: str) -> bool:
+    na = _normalize_term(a)
+    nb = _normalize_term(b)
+    if not na or not nb:
+        return False
+    if na == nb:
+        return True
+    if len(na) < 2 or len(nb) < 2:
+        return False
+    return na in nb or nb in na
+
+
+def _build_search_terms(q: str) -> list[str]:
+    split_terms = [
+        term
+        for term in _TOKEN_SPLIT_RE.split(q)
+        if len(_normalize_term(term)) >= 3
+    ]
+    base_terms = _unique_terms([q, *split_terms])
+    expanded = list(base_terms)
+
+    for term in base_terms:
+        for key, values in TAG_ALIAS.items():
+            alias_terms = [key, *values]
+            if any(_is_related_term(term, alias) for alias in alias_terms):
+                expanded.extend(alias_terms)
+
+    return _unique_terms(expanded)
+
+
+def _sql_normalize_expr(column: str) -> str:
+    return (
+        f"REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(COALESCE({column},'')),"
+        " ' ', ''), '#', ''), '_', ''), '-', ''), '/', ''), ',', '')"
+    )
 
 def _cols(conn: sqlite3.Connection, table: str) -> set[str]:
     key = _conn_key(conn)
@@ -101,13 +149,14 @@ def _build_tag_joins(conn: sqlite3.Connection) -> str | None:
     _JOIN_CACHE[key] = None
     return None
 
-def query_suggest(conn: sqlite3.Connection, q: str, limit: int = 40) -> list[dict]:
+def query_suggest(conn: sqlite3.Connection, q: str, limit: int | None = None) -> list[dict]:
     q = (q or "").strip()
     if not q:
         return []
 
     like = f"%{q}%"
-    aliases = _expand_alias(q)
+    terms = _build_search_terms(q)
+    normalized_terms = _unique_terms([_normalize_term(term) for term in terms])
 
     joins = _build_tag_joins(conn)
 
@@ -126,16 +175,28 @@ def query_suggest(conn: sqlite3.Connection, q: str, limit: int = 40) -> list[dic
             UPPER(p.card_number) LIKE UPPER(?)
             OR COALESCE(p.name_ja,'') LIKE ?
             OR COALESCE(ko.name,'') LIKE ?
+            OR COALESCE(ko.effect_text,'') LIKE ?
             OR (t.tag IS NOT NULL AND (t.tag LIKE ? OR COALESCE(t.normalized,'') LIKE ?))
         """
-        params = [like, like, like, like, like]
+        params = [like, like, like, like, like, like]
 
-        for alias in aliases:
+        for term in terms:
             sql += " OR t.tag LIKE ? OR COALESCE(t.normalized,'') LIKE ?"
-            params += [f"%{alias}%", f"%{alias}%"]
+            params += [f"%{term}%", f"%{term}%"]
 
-        sql += " ORDER BY p.card_number LIMIT ?"
-        params.append(limit)
+        if normalized_terms:
+            norm_tag = _sql_normalize_expr("t.tag")
+            norm_normalized = _sql_normalize_expr("t.normalized")
+            for term in normalized_terms:
+                if not term:
+                    continue
+                sql += f" OR {norm_tag} LIKE ? OR {norm_normalized} LIKE ?"
+                params += [f"%{term}%", f"%{term}%"]
+
+        sql += " ORDER BY p.card_number"
+        if limit is not None and limit > 0:
+            sql += " LIMIT ?"
+            params.append(limit)
 
         return [dict(r) for r in conn.execute(sql, params)]
 
@@ -151,10 +212,14 @@ def query_suggest(conn: sqlite3.Connection, q: str, limit: int = 40) -> list[dic
     WHERE UPPER(p.card_number) LIKE UPPER(?)
        OR COALESCE(p.name_ja,'') LIKE ?
        OR COALESCE(ko.name,'') LIKE ?
+       OR COALESCE(ko.effect_text,'') LIKE ?
     ORDER BY p.card_number
-    LIMIT ?
     """
-    return [dict(r) for r in conn.execute(sql, (like, like, like, limit))]
+    params: list[object] = [like, like, like, like]
+    if limit is not None and limit > 0:
+        sql += " LIMIT ?"
+        params.append(limit)
+    return [dict(r) for r in conn.execute(sql, params)]
 
 def load_card_detail(conn: sqlite3.Connection, pid: int) -> dict | None:
     r = conn.execute(

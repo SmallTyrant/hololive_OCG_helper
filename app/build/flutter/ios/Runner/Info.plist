@@ -52,6 +52,10 @@
 		</dict>
 		<!-- flet: deep linking  -->
 
+		<key>CFBundleDisplayName</key>
+		<string>hOCG_H</string>
+		<key>CFBundleName</key>
+		<string>hOCG_H</string>
 		
 	</dict>
 </plist>

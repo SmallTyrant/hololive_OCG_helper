@@ -198,6 +198,7 @@ def launch_app(db_path: str) -> None:
         selected_card_number = {"no": ""}
         selected_image_url = {"url": ""}
         results_state = {"rows": []}
+        image_panel_state = {"collapsed": False}
         update_state = {"running": False}
         downloading = set()
         download_lock = threading.Lock()
@@ -628,7 +629,7 @@ def launch_app(db_path: str) -> None:
 
             try:
                 conn = get_conn()
-                results_state["rows"] = query_suggest(conn, query, limit=80)
+                results_state["rows"] = query_suggest(conn, query)
                 render_result_list()
                 if results_state["rows"]:
                     show_detail(results_state["rows"][0]["print_id"])
@@ -732,6 +733,24 @@ def launch_app(db_path: str) -> None:
         # --- Layout ---
         layout_state = {"mobile": None}
 
+        def image_toggle_label() -> str:
+            return "이미지 펼치기" if image_panel_state["collapsed"] else "이미지 접기"
+
+        def image_section_header_mobile() -> ft.Control:
+            return ft.Row(
+                [
+                    ft.Text("이미지"),
+                    ft.TextButton(image_toggle_label(), on_click=toggle_image_panel),
+                ],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            )
+
+        def toggle_image_panel(e=None) -> None:
+            image_panel_state["collapsed"] = not image_panel_state["collapsed"]
+            build_layout(force=True)
+            page.update()
+
         def is_android_tablet() -> bool:
             platform = getattr(page, "platform", None)
             is_android = False
@@ -759,9 +778,9 @@ def launch_app(db_path: str) -> None:
                 return is_mobile_platform() and not is_android_tablet()
             return bool(width) and width < 900 and not is_android_tablet()
 
-        def build_layout() -> None:
+        def build_layout(force: bool = False) -> None:
             mobile = is_mobile_layout()
-            if layout_state["mobile"] == mobile:
+            if not force and layout_state["mobile"] == mobile:
                 return
             layout_state["mobile"] = mobile
 
@@ -796,8 +815,10 @@ def launch_app(db_path: str) -> None:
                             border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
                             border_radius=10,
                         ),
-                        ft.Text("이미지"),
-                        ft.Container(
+                        image_section_header_mobile(),
+                        ft.Text("이미지를 접었습니다.", color=COLORS.GREY_400)
+                        if image_panel_state["collapsed"]
+                        else ft.Container(
                             content=img_container,
                             height=460,
                             border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
@@ -869,16 +890,16 @@ def launch_app(db_path: str) -> None:
                 spacing=0,
             )
 
-            body = ft.Row(
+            body_controls: list[ft.Control] = [ft.Container(left, expand=3)]
+            body_controls.extend(
                 [
-                    ft.Container(left, expand=3),
                     ft.VerticalDivider(width=1),
                     ft.Container(middle, expand=6),
                     ft.VerticalDivider(width=1),
                     ft.Container(right, expand=4),
-                ],
-                expand=True,
+                ]
             )
+            body = ft.Row(body_controls, expand=True)
 
             desktop_root = ft.Column(
                 [
