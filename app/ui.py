@@ -16,7 +16,7 @@ from app.services.db import (
     load_card_detail,
     get_print_brief,
     db_exists,
-    ensure_db,
+    clear_conn_cache,
 )
 from app.services.pipeline import run_update_and_refine
 from app.paths import get_default_data_root, get_project_root
@@ -100,9 +100,33 @@ def launch_app(db_path: str) -> None:
                 token in user_agent for token in ("iphone", "ipad", "android")
             )
 
+        def get_view_size() -> tuple[float, float]:
+            # Flet 0.80+에서는 page.window_width/page.window_height가 기본 속성이 아님.
+            # 모바일에서 해당 속성을 직접 읽으면 AttributeError가 날 수 있어 안전하게 조회.
+            window = getattr(page, "window", None)
+            window_width = getattr(window, "width", None) if window is not None else None
+            window_height = getattr(window, "height", None) if window is not None else None
+            legacy_width = getattr(page, "window_width", None)
+            legacy_height = getattr(page, "window_height", None)
+            width = window_width or legacy_width or getattr(page, "width", None) or 0
+            height = window_height or legacy_height or getattr(page, "height", None) or 0
+            return float(width), float(height)
+
+        def set_desktop_window_size(width: int, height: int) -> None:
+            window = getattr(page, "window", None)
+            if window is not None:
+                try:
+                    window.width = width
+                    window.height = height
+                    return
+                except Exception:
+                    pass
+            # 구버전/호환 경로
+            page.window_width = width
+            page.window_height = height
+
         if not is_mobile_platform():
-            page.window_width = 1280
-            page.window_height = 820
+            set_desktop_window_size(1280, 820)
 
         # --- Controls ---
         tf_db = ft.TextField(label="DB", value=db_path, expand=True)
@@ -114,8 +138,7 @@ def launch_app(db_path: str) -> None:
         # --- Results / Detail ---
         lv = ft.Column(spacing=2, scroll=ft.ScrollMode.AUTO, expand=True)
         detail_lv = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO, expand=True)
-        detail_texts = {"ko": "", "ja": ""}
-        mobile_state = {"image_visible": True, "ko_open": True, "ja_open": False}
+        detail_texts = {"ko": ""}
 
         # --- Image area ---
         def build_image_placeholder(text: str, loading: bool = False) -> ft.Control:
@@ -171,36 +194,11 @@ def launch_app(db_path: str) -> None:
             border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
         )
 
-        mobile_image_wrapper = ft.Container(
-            content=img_container,
-            height=460,
-            border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
-            border_radius=10,
-        )
-        mobile_image_toggle = ft.TextButton("")
-
-        mobile_ko_column = ft.Column(spacing=4)
-        mobile_ja_column = ft.Column(spacing=4)
-        mobile_ko_body = ft.Container(
-            content=mobile_ko_column,
-            padding=10,
-            border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
-            border_radius=10,
-        )
-        mobile_ja_body = ft.Container(
-            content=mobile_ja_column,
-            padding=10,
-            border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
-            border_radius=10,
-        )
-        mobile_ko_toggle = ft.TextButton("")
-        mobile_ja_toggle = ft.TextButton("")
-        mobile_empty_text = ft.Text("(본문 없음)", color=COLORS.GREY_400, visible=False)
-
         selected_print_id = {"id": None}
         selected_card_number = {"no": ""}
         selected_image_url = {"url": ""}
         results_state = {"rows": []}
+        image_panel_state = {"collapsed": False}
         update_state = {"running": False}
         downloading = set()
         download_lock = threading.Lock()
@@ -392,8 +390,10 @@ def launch_app(db_path: str) -> None:
 
         setup_window_icon()
 
-        for issue in run_startup_checks(tf_db.value, data_root):
-            append_log(f"[WARN] {issue}")
+        async def run_startup_checks_async() -> None:
+            issues = await asyncio.to_thread(run_startup_checks, tf_db.value, data_root)
+            for issue in issues:
+                append_log(f"[WARN] {issue}")
 
         def get_conn() -> sqlite3.Connection:
             path = tf_db.value
@@ -407,6 +407,7 @@ def launch_app(db_path: str) -> None:
             ):
                 try:
                     if conn is not None:
+                        clear_conn_cache(conn)
                         conn.close()
                 except Exception:
                     pass
@@ -420,6 +421,7 @@ def launch_app(db_path: str) -> None:
             conn = getattr(thread_local, "conn", None)
             if conn is not None:
                 try:
+                    clear_conn_cache(conn)
                     conn.close()
                 except Exception:
                     pass
@@ -514,87 +516,24 @@ def launch_app(db_path: str) -> None:
                     )
             return ft.Text(line)
 
-        def build_detail_controls(
-            text: str,
-            apply_jp_filters: bool,
-            use_formatter: bool,
-        ) -> list[ft.Control]:
-            controls: list[ft.Control] = []
+        def append_detail_lines(text: str) -> None:
             lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
             for line in lines:
-                if apply_jp_filters:
-                    if line == "色" or line.startswith("色 "):
-                        continue
-                    if line == "バトンタッチ" or line.startswith("バトンタッチ "):
-                        continue
-                controls.append(build_detail_line(line) if use_formatter else ft.Text(line))
-            return controls
-
-        def update_mobile_toggle_labels() -> None:
-            mobile_image_toggle.text = "이미지 접기" if mobile_state["image_visible"] else "이미지 펼치기"
-            mobile_ko_toggle.text = "접기" if mobile_state["ko_open"] else "펼치기"
-            mobile_ja_toggle.text = "접기" if mobile_state["ja_open"] else "펼치기"
-
-        def apply_mobile_visibility() -> None:
-            mobile_image_wrapper.visible = mobile_state["image_visible"]
-            mobile_ko_body.visible = mobile_state["ko_open"]
-            mobile_ja_body.visible = mobile_state["ja_open"]
-            update_mobile_toggle_labels()
-
-        def toggle_mobile_image(e) -> None:
-            mobile_state["image_visible"] = not mobile_state["image_visible"]
-            apply_mobile_visibility()
-            page.update()
-
-        def toggle_mobile_ko(e) -> None:
-            mobile_state["ko_open"] = not mobile_state["ko_open"]
-            apply_mobile_visibility()
-            page.update()
-
-        def toggle_mobile_ja(e) -> None:
-            mobile_state["ja_open"] = not mobile_state["ja_open"]
-            apply_mobile_visibility()
-            page.update()
-
-        mobile_image_toggle.on_click = toggle_mobile_image
-        mobile_ko_toggle.on_click = toggle_mobile_ko
-        mobile_ja_toggle.on_click = toggle_mobile_ja
+                detail_lv.controls.append(build_detail_line(line))
 
         def render_detail() -> None:
             detail_lv.controls.clear()
-            ja = (detail_texts["ja"] or "").strip()
             ko = (detail_texts["ko"] or "").strip()
-            has_any = False
-            ko_controls = build_detail_controls(ko, apply_jp_filters=False, use_formatter=False) if ko else []
-            ja_controls = build_detail_controls(ja, apply_jp_filters=True, use_formatter=True) if ja else []
 
-            if ko_controls:
+            if ko:
                 detail_lv.controls.append(build_section_chip("한국어"))
-                detail_lv.controls.extend(ko_controls)
-                has_any = True
-
-            if ja_controls:
-                if has_any:
-                    detail_lv.controls.append(ft.Divider(height=12))
-                detail_lv.controls.append(build_section_chip("日本語"))
-                detail_lv.controls.extend(ja_controls)
-                has_any = True
-
-            if not has_any:
-                detail_lv.controls.append(ft.Text("(본문 없음)"))
-
-            mobile_ko_column.controls.clear()
-            mobile_ja_column.controls.clear()
-            if ko_controls:
-                mobile_ko_column.controls.extend(ko_controls)
-            if ja_controls:
-                mobile_ja_column.controls.extend(ja_controls)
-            mobile_empty_text.visible = not (ko_controls or ja_controls)
+                append_detail_lines(ko)
+            else:
+                detail_lv.controls.append(ft.Text("(한국어 본문 없음)"))
 
             page.update()
 
-        def set_detail_text(ja_text: str | None, ko_text: str | None) -> None:
-            detail_texts["ja"] = (ja_text or "")
+        def set_detail_text(ko_text: str | None) -> None:
             detail_texts["ko"] = (ko_text or "")
             render_detail()
 
@@ -602,7 +541,7 @@ def launch_app(db_path: str) -> None:
             selected_print_id["id"] = None
             selected_card_number["no"] = ""
             selected_image_url["url"] = ""
-            set_detail_text("", "")
+            set_detail_text("")
             clear_image("카드를 선택하세요")
 
         def render_result_list() -> None:
@@ -619,7 +558,11 @@ def launch_app(db_path: str) -> None:
 
             for row in rows:
                 pid = row["print_id"]
-                title = f"{row.get('card_number', '')} | {row.get('name_ja', '')}"
+                card_number = (row.get("card_number") or "").strip()
+                name_ko = (row.get("name_ko") or "").strip()
+                name_ja = (row.get("name_ja") or "").strip()
+                display_name = name_ko or name_ja or "(이름 없음)"
+                title = f"{card_number} | {display_name}" if card_number else display_name
                 is_selected = selected_print_id["id"] == pid
                 lv.controls.append(
                     ft.ListTile(
@@ -657,13 +600,10 @@ def launch_app(db_path: str) -> None:
                     clear_image("이미지 없음")
 
                 card = load_card_detail(conn, pid)
-                set_detail_text(
-                    card.get("raw_text", "") if card else None,
-                    card.get("ko_text", "") if card else None,
-                )
+                set_detail_text(card.get("ko_text", "") if card else None)
 
             except Exception as ex:
-                set_detail_text(f"[ERROR] 상세 로드 실패: {ex}", None)
+                set_detail_text(f"[ERROR] 상세 로드 실패: {ex}")
                 clear_image("이미지 로딩 실패")
 
             page.update()
@@ -689,7 +629,7 @@ def launch_app(db_path: str) -> None:
 
             try:
                 conn = get_conn()
-                results_state["rows"] = query_suggest(conn, query, limit=80)
+                results_state["rows"] = query_suggest(conn, query)
                 render_result_list()
                 if results_state["rows"]:
                     show_detail(results_state["rows"][0]["print_id"])
@@ -782,25 +722,34 @@ def launch_app(db_path: str) -> None:
 
         btn_update.on_click = on_update_click
 
-        # --- first-run: DB 없으면 안내 로그만 찍고 앱은 뜨게 ---
+        # --- first-run: 초기 렌더 속도를 위해 DB open/init은 지연 ---
         if not db_exists(tf_db.value):
             if not tf_db.value or not tf_db.value.strip():
                 append_log("[WARN] DB 경로가 비어있습니다. 상단 DB 경로를 지정해주세요.")
             else:
-                created = ensure_db(tf_db.value)
-                if created:
-                    append_log("[INFO] DB 파일이 없어 빈 DB를 생성했습니다.")
-                else:
-                    append_log("[INFO] DB 파일이 없습니다.")
-                append_log("[INFO] 상단 'DB갱신'을 누르면 DB를 생성(크롤링+정제)합니다.")
-        else:
-            try:
-                get_conn()
-            except Exception as ex:
-                append_log(f"[ERROR] DB open failed: {ex}")
+                append_log("[INFO] DB 파일이 없습니다.")
+                append_log("[INFO] 상단 'DB갱신'을 누르면 GitHub Releases에서 최신 DB를 내려받습니다.")
 
         # --- Layout ---
         layout_state = {"mobile": None}
+
+        def image_toggle_label() -> str:
+            return "이미지 펼치기" if image_panel_state["collapsed"] else "이미지 접기"
+
+        def image_section_header_mobile() -> ft.Control:
+            return ft.Row(
+                [
+                    ft.Text("이미지"),
+                    ft.TextButton(image_toggle_label(), on_click=toggle_image_panel),
+                ],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            )
+
+        def toggle_image_panel(e=None) -> None:
+            image_panel_state["collapsed"] = not image_panel_state["collapsed"]
+            build_layout(force=True)
+            page.update()
 
         def is_android_tablet() -> bool:
             platform = getattr(page, "platform", None)
@@ -816,20 +765,22 @@ def launch_app(db_path: str) -> None:
             ua_mobile = "mobile" in user_agent
             ua_tablet_hint = "tablet" in user_agent or (ua_android and not ua_mobile)
 
-            width = page.window_width or page.width or 0
-            height = page.window_height or page.height or 0
+            width, height = get_view_size()
             min_dim = min([dim for dim in (width, height) if dim]) if width or height else 0
             size_tablet_hint = min_dim >= 600
 
             return (is_android or ua_android) and (ua_tablet_hint or size_tablet_hint)
 
         def is_mobile_layout() -> bool:
-            width = page.window_width or page.width or 0
+            width, _ = get_view_size()
+            if width <= 0:
+                # 초기 사이즈가 아직 확정되지 않은 모바일 환경은 플랫폼 정보로 우선 판정.
+                return is_mobile_platform() and not is_android_tablet()
             return bool(width) and width < 900 and not is_android_tablet()
 
-        def build_layout() -> None:
+        def build_layout(force: bool = False) -> None:
             mobile = is_mobile_layout()
-            if layout_state["mobile"] == mobile:
+            if not force and layout_state["mobile"] == mobile:
                 return
             layout_state["mobile"] = mobile
 
@@ -864,32 +815,22 @@ def launch_app(db_path: str) -> None:
                             border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
                             border_radius=10,
                         ),
-                        ft.Row(
-                            [
-                                ft.Text("이미지"),
-                                mobile_image_toggle,
-                            ],
-                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        image_section_header_mobile(),
+                        ft.Text("이미지를 접었습니다.", color=COLORS.GREY_400)
+                        if image_panel_state["collapsed"]
+                        else ft.Container(
+                            content=img_container,
+                            height=460,
+                            border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
+                            border_radius=10,
                         ),
-                        mobile_image_wrapper,
                         ft.Text("효과"),
-                        mobile_empty_text,
-                        ft.Row(
-                            [
-                                ft.Text("한국어"),
-                                mobile_ko_toggle,
-                            ],
-                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        ft.Container(
+                            content=detail_lv,
+                            padding=10,
+                            border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
+                            border_radius=10,
                         ),
-                        mobile_ko_body,
-                        ft.Row(
-                            [
-                                ft.Text("日本語"),
-                                mobile_ja_toggle,
-                            ],
-                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                        ),
-                        mobile_ja_body,
                     ],
                     expand=True,
                     spacing=8,
@@ -905,7 +846,6 @@ def launch_app(db_path: str) -> None:
                         expand=True,
                     )
                 )
-                apply_mobile_visibility()
                 return
 
             btn_update.width = None
@@ -950,16 +890,16 @@ def launch_app(db_path: str) -> None:
                 spacing=0,
             )
 
-            body = ft.Row(
+            body_controls: list[ft.Control] = [ft.Container(left, expand=3)]
+            body_controls.extend(
                 [
-                    ft.Container(left, expand=3),
                     ft.VerticalDivider(width=1),
                     ft.Container(middle, expand=6),
                     ft.VerticalDivider(width=1),
                     ft.Container(right, expand=4),
-                ],
-                expand=True,
+                ]
             )
+            body = ft.Row(body_controls, expand=True)
 
             desktop_root = ft.Column(
                 [
@@ -990,6 +930,7 @@ def launch_app(db_path: str) -> None:
         clear_selection()
         render_result_list()
         build_layout()
+        page.run_task(run_startup_checks_async)
         if needs_db_update():
             show_toast(DB_MISSING_TOAST, persist=True)
 

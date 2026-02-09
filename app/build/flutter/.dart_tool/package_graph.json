@@ -1,10 +1,10 @@
 {
   "roots": [
-    "app"
+    "hocg_h"
   ],
   "packages": [
     {
-      "name": "app",
+      "name": "hocg_h",
       "version": "1.0.0+1",
       "dependencies": [
         "battery_plus",

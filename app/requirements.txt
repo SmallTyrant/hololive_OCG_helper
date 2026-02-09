@@ -1,0 +1,5 @@
+flet
+pillow
+requests
+openpyxl
+beautifulsoup4

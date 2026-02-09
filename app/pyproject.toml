@@ -1,0 +1,26 @@
+[project]
+name = "hOCG_H"
+version = "1.1"
+description = "hOCG_H"
+dependencies = [
+  "flet",
+  "pillow",
+  "requests",
+  "openpyxl",
+  "beautifulsoup4",
+]
+
+[tool.flet]
+product = "hOCG_H"
+org = "com.smalltyrant"
+bundle_id = "com.smalltyrant.hocghelper"
+
+[tool.flet.ios]
+export_method = "release-testing"
+
+[tool.flet.ios.info]
+CFBundleDisplayName = "hOCG_H"
+CFBundleName = "hOCG_H"
+
+[tool.flet.splash]
+ios = false

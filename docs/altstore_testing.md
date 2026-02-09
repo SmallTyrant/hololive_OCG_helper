@@ -6,10 +6,16 @@
 
 1) iOS IPA 빌드 준비
    - DB 파일을 `data/hololive_ocg.sqlite` 경로에 둡니다.
-   - iOS 앱 아이콘으로 사용할 이미지를 `assets/icon_ios.png` (또는 공통 아이콘은 `assets/icon.png`)로 둡니다.
+   - iOS 앱 아이콘으로 사용할 이미지를 `app/assets/icon_ios.png` (또는 공통 아이콘은 `app/assets/icon.png`)로 둡니다.
 
 2) iOS IPA 빌드
 ```bash
+flet build ipa app
+```
+
+또는:
+```bash
+cd app
 flet build ipa
 ```
 

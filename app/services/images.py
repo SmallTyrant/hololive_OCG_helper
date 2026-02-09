@@ -3,8 +3,7 @@ import os
 import re
 from pathlib import Path
 from urllib.parse import urljoin
-
-import requests
+from urllib.request import Request, urlopen
 
 BASE = "https://hololive-official-cardgame.com"
 SAFE_CARD_NUMBER_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -43,13 +42,14 @@ def download_image(url: str, dest: Path, timeout: int = 30) -> None:
 
     tmp = dest.with_suffix(dest.suffix + ".tmp")
     try:
-        with requests.get(u, timeout=timeout, stream=True) as r:
-            r.raise_for_status()
-            # 원자적 저장(임시→교체)
-            with open(tmp, "wb") as f:
-                for chunk in r.iter_content(chunk_size=1024 * 256):
-                    if chunk:
-                        f.write(chunk)
+        req = Request(u, headers={"User-Agent": "hOCG_H/1.1"})
+        # 원자적 저장(임시→교체)
+        with urlopen(req, timeout=timeout) as response, open(tmp, "wb") as f:
+            while True:
+                chunk = response.read(1024 * 256)
+                if not chunk:
+                    break
+                f.write(chunk)
         os.replace(tmp, dest)
     finally:
         if tmp.exists():
