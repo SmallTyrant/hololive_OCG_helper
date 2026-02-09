@@ -43,13 +43,13 @@ def download_image(url: str, dest: Path, timeout: int = 30) -> None:
 
     tmp = dest.with_suffix(dest.suffix + ".tmp")
     try:
-        r = requests.get(u, timeout=timeout, stream=True)
-        r.raise_for_status()
-        # 원자적 저장(임시→교체)
-        with open(tmp, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1024 * 256):
-                if chunk:
-                    f.write(chunk)
+        with requests.get(u, timeout=timeout, stream=True) as r:
+            r.raise_for_status()
+            # 원자적 저장(임시→교체)
+            with open(tmp, "wb") as f:
+                for chunk in r.iter_content(chunk_size=1024 * 256):
+                    if chunk:
+                        f.write(chunk)
         os.replace(tmp, dest)
     finally:
         if tmp.exists():
