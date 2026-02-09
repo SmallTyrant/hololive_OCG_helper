@@ -28,6 +28,28 @@ def _stream_output(process: subprocess.Popen[str]) -> Iterator[str]:
     for line in process.stdout:
         yield _mask_card_numbers(line.rstrip("\n"))
 
+def _run_tool(
+    cmd: list[str],
+    root: Path,
+    env: dict[str, str],
+    label: str,
+) -> Iterator[str]:
+    process = subprocess.Popen(
+        cmd,
+        cwd=str(root),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+    )
+    for line in _stream_output(process):
+        yield line
+    rc = process.wait()
+    if rc != 0:
+        raise RuntimeError(f"{label} failed rc={rc}")
+
 
 def _pick_release_db_asset(release: dict) -> tuple[str, str]:
     assets = release.get("assets") or []
@@ -240,39 +262,11 @@ def run_update_and_refine(
         "--workers",
         str(workers),
     ]
-    p1 = subprocess.Popen(
-        cmd1,
-        cwd=str(root),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=env,
-    )
-    for line in _stream_output(p1):
-        yield line
-    rc1 = p1.wait()
-    if rc1 != 0:
-        raise RuntimeError(f"scrape failed rc={rc1}")
+    yield from _run_tool(cmd1, root, env, "scrape")
 
     # 2) refine
     cmd2 = [_py(), str(tool_refine), "--db", db_path]
-    p2 = subprocess.Popen(
-        cmd2,
-        cwd=str(root),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=env,
-    )
-    for line in _stream_output(p2):
-        yield line
-    rc2 = p2.wait()
-    if rc2 != 0:
-        raise RuntimeError(f"refine failed rc={rc2}")
+    yield from _run_tool(cmd2, root, env, "refine")
 
     sheet_url = ko_sheet_url or os.environ.get("HOCG_KO_SHEET_URL")
     sheet_gid = ko_sheet_gid or os.environ.get("HOCG_KO_SHEET_GID")
@@ -289,18 +283,4 @@ def run_update_and_refine(
             cmd3.extend(["--sheet-gid", sheet_gid])
         if ko_overwrite:
             cmd3.append("--overwrite")
-        p3 = subprocess.Popen(
-            cmd3,
-            cwd=str(root),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-        )
-        for line in _stream_output(p3):
-            yield line
-        rc3 = p3.wait()
-        if rc3 != 0:
-            raise RuntimeError(f"namuwiki import failed rc={rc3}")
+        yield from _run_tool(cmd3, root, env, "namuwiki import")
