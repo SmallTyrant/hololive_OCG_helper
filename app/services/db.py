@@ -221,6 +221,80 @@ def query_suggest(conn: sqlite3.Connection, q: str, limit: int | None = None) ->
         params.append(limit)
     return [dict(r) for r in conn.execute(sql, params)]
 
+
+def query_exact(conn: sqlite3.Connection, q: str, limit: int | None = None) -> list[dict]:
+    q = (q or "").strip()
+    if not q:
+        return []
+
+    terms = _build_search_terms(q)
+    normalized_q = _normalize_term(q)
+
+    joins = _build_tag_joins(conn)
+
+    if joins:
+        sql = f"""
+        SELECT DISTINCT
+            p.print_id,
+            p.card_number,
+            COALESCE(p.name_ja,'') AS name_ja,
+            COALESCE(ko.name,'') AS name_ko
+        FROM prints p
+        LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
+        {joins}
+        WHERE
+            UPPER(COALESCE(p.card_number,'')) = UPPER(?)
+            OR LOWER(COALESCE(p.name_ja,'')) = LOWER(?)
+            OR LOWER(COALESCE(ko.name,'')) = LOWER(?)
+            OR LOWER(COALESCE(ko.effect_text,'')) = LOWER(?)
+            OR (
+                t.tag IS NOT NULL
+                AND (
+                    LOWER(t.tag) = LOWER(?)
+                    OR LOWER(COALESCE(t.normalized,'')) = LOWER(?)
+                )
+            )
+        """
+        params: list[object] = [q, q, q, q, q, q]
+
+        for term in terms:
+            sql += " OR LOWER(t.tag) = LOWER(?) OR LOWER(COALESCE(t.normalized,'')) = LOWER(?)"
+            params += [term, term]
+
+        if normalized_q:
+            norm_tag = _sql_normalize_expr("t.tag")
+            norm_normalized = _sql_normalize_expr("t.normalized")
+            sql += f" OR {norm_tag} = ? OR {norm_normalized} = ?"
+            params += [normalized_q, normalized_q]
+
+        sql += " ORDER BY p.card_number"
+        if limit is not None and limit > 0:
+            sql += " LIMIT ?"
+            params.append(limit)
+
+        return [dict(r) for r in conn.execute(sql, params)]
+
+    sql = """
+    SELECT
+        p.print_id,
+        p.card_number,
+        COALESCE(p.name_ja,'') AS name_ja,
+        COALESCE(ko.name,'') AS name_ko
+    FROM prints p
+    LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
+    WHERE
+        UPPER(COALESCE(p.card_number,'')) = UPPER(?)
+        OR LOWER(COALESCE(p.name_ja,'')) = LOWER(?)
+        OR LOWER(COALESCE(ko.name,'')) = LOWER(?)
+        OR LOWER(COALESCE(ko.effect_text,'')) = LOWER(?)
+    ORDER BY p.card_number
+    """
+    params = [q, q, q, q]
+    if limit is not None and limit > 0:
+        sql += " LIMIT ?"
+        params.append(limit)
+    return [dict(r) for r in conn.execute(sql, params)]
+
 def load_card_detail(conn: sqlite3.Connection, pid: int) -> dict | None:
     r = conn.execute(
         """

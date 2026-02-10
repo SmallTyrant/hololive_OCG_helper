@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="980" viewBox="0 0 1800 980">
+  <defs>
+    <style>
+      .bg { fill: #eef3f8; }
+      .phone { fill: #f8fafc; stroke: #c9d3df; stroke-width: 4; }
+      .card { fill: #ffffff; stroke: #d9e2ec; stroke-width: 2; }
+      .menuCard { fill: #ffffff; stroke: #cbd5e1; stroke-width: 3; }
+      .btnPrimary { fill: #3b82f6; stroke: #2563eb; stroke-width: 2; }
+      .btnSoft { fill: #f3f4f6; stroke: #d1d5db; stroke-width: 2; }
+      .txtTitle { font: 700 32px 'Arial', sans-serif; fill: #1f2937; }
+      .txt { font: 500 24px 'Arial', sans-serif; fill: #111827; }
+      .txtSm { font: 400 20px 'Arial', sans-serif; fill: #374151; }
+      .txtHint { font: 400 20px 'Arial', sans-serif; fill: #6b7280; }
+      .line { stroke: #e5e7eb; stroke-width: 2; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1800" height="980" />
+
+  <text class="txtTitle" x="100" y="44">A. 햄버거 메뉴 + 검색 옵션</text>
+  <text class="txtTitle" x="960" y="44">B. 자동 DB 업데이트 팝업</text>
+
+  <!-- left phone -->
+  <rect class="phone" x="80" y="56" width="780" height="900" rx="42" />
+  <rect class="card" x="106" y="82" width="728" height="74" rx="18" />
+
+  <!-- hamburger icon -->
+  <rect x="122" y="98" width="28" height="4" rx="2" fill="#374151" />
+  <rect x="122" y="112" width="28" height="4" rx="2" fill="#374151" />
+  <rect x="122" y="126" width="28" height="4" rx="2" fill="#374151" />
+
+  <!-- search -->
+  <rect x="168" y="94" width="584" height="50" rx="14" fill="#f8fafc" stroke="#d0d7de" stroke-width="2" />
+  <text class="txtHint" x="186" y="125">카드번호 / 이름 / 태그 검색</text>
+  <circle cx="788" cy="119" r="18" fill="none" stroke="#9ca3af" stroke-width="3" />
+
+  <text class="txt" x="112" y="198">목록</text>
+  <rect class="card" x="106" y="214" width="728" height="220" rx="14" />
+  <text class="txtSm" x="122" y="250">hBP01-001 | ときのそら</text>
+  <line class="line" x1="118" y1="274" x2="822" y2="274" />
+  <text class="txtSm" x="122" y="314">hBP01-014 | AZKi</text>
+  <line class="line" x1="118" y1="338" x2="822" y2="338" />
+  <text class="txtSm" x="122" y="378">hBP02-006 | さくらみこ</text>
+
+  <text class="txt" x="112" y="476">이미지</text>
+  <rect class="card" x="106" y="492" width="728" height="190" rx="14" />
+  <text class="txtHint" x="415" y="596">카드 이미지</text>
+
+  <text class="txt" x="112" y="724">효과</text>
+  <rect class="card" x="106" y="740" width="728" height="190" rx="14" />
+  <text class="txtSm" x="122" y="774">한국어 효과 텍스트 미리보기...</text>
+
+  <!-- menu popup -->
+  <rect class="menuCard" x="226" y="162" width="568" height="300" rx="16" />
+  <text class="txt" x="244" y="194">메뉴</text>
+  <rect x="244" y="218" width="532" height="52" rx="12" fill="#e8f0fe" stroke="#b6ccfe" stroke-width="2" />
+  <text class="txtSm" x="272" y="251" fill="#1d4ed8">DB 수동갱신</text>
+  <text class="txtSm" x="244" y="302">DB 검색 옵션</text>
+  <circle cx="258" cy="336" r="10" fill="none" stroke="#2563eb" stroke-width="3" />
+  <circle cx="258" cy="336" r="5" fill="#2563eb" />
+  <text class="txtSm" x="282" y="342">일부 일치 검색 (기본)</text>
+  <circle cx="258" cy="378" r="10" fill="none" stroke="#6b7280" stroke-width="3" />
+  <text class="txtSm" x="282" y="384">정확한 검색</text>
+
+  <!-- right phone -->
+  <rect class="phone" x="940" y="56" width="780" height="900" rx="42" />
+  <rect class="card" x="966" y="82" width="728" height="74" rx="18" />
+
+  <rect x="982" y="98" width="28" height="4" rx="2" fill="#374151" />
+  <rect x="982" y="112" width="28" height="4" rx="2" fill="#374151" />
+  <rect x="982" y="126" width="28" height="4" rx="2" fill="#374151" />
+
+  <rect x="1028" y="94" width="584" height="50" rx="14" fill="#f8fafc" stroke="#d0d7de" stroke-width="2" />
+  <text class="txtHint" x="1046" y="125">카드번호 / 이름 / 태그 검색</text>
+  <circle cx="1648" cy="119" r="18" fill="none" stroke="#9ca3af" stroke-width="3" />
+
+  <text class="txt" x="972" y="198">목록</text>
+  <rect class="card" x="966" y="214" width="728" height="220" rx="14" />
+  <text class="txtSm" x="982" y="250">hBP01-001 | ときのそら</text>
+  <line class="line" x1="978" y1="274" x2="1682" y2="274" />
+  <text class="txtSm" x="982" y="314">hBP01-014 | AZKi</text>
+  <line class="line" x1="978" y1="338" x2="1682" y2="338" />
+  <text class="txtSm" x="982" y="378">hBP02-006 | さくらみこ</text>
+
+  <text class="txt" x="972" y="476">이미지</text>
+  <rect class="card" x="966" y="492" width="728" height="190" rx="14" />
+  <text class="txtHint" x="1275" y="596">카드 이미지</text>
+
+  <text class="txt" x="972" y="724">효과</text>
+  <rect class="card" x="966" y="740" width="728" height="190" rx="14" />
+  <text class="txtSm" x="982" y="774">한국어 효과 텍스트 미리보기...</text>
+
+  <!-- update popup -->
+  <rect class="menuCard" x="1036" y="332" width="588" height="250" rx="18" />
+  <text class="txt" x="1054" y="366">DB 업데이트</text>
+  <text class="txtSm" x="1054" y="406">DB 업데이트가 있습니다. 업데이트 하시겠습니까?</text>
+  <text class="txtHint" x="1054" y="444">로컬 DB 날짜: 2026-02-01</text>
+  <text class="txtHint" x="1054" y="472">GitHub DB 날짜: 2026-02-09</text>
+
+  <rect class="btnSoft" x="1054" y="522" width="150" height="40" rx="10" />
+  <text class="txtSm" x="1114" y="548">나중에</text>
+  <rect class="btnPrimary" x="1456" y="522" width="150" height="40" rx="10" />
+  <text class="txtSm" x="1510" y="548" fill="#ffffff">업데이트</text>
+</svg>
