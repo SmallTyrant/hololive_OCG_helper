@@ -16,6 +16,95 @@ GITHUB_REPO = "SmallTyrant/hololive_OCG_helper"
 LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 LATEST_DB_DIRECT_URL = f"https://github.com/{GITHUB_REPO}/releases/latest/download/hololive_ocg.sqlite"
 
+
+def _fetch_latest_release(timeout: int = 20) -> dict | None:
+    req = Request(
+        LATEST_RELEASE_API,
+        headers={
+            "User-Agent": "hOCG_H/1.1",
+            "Accept": "application/vnd.github+json",
+        },
+    )
+    try:
+        with urlopen(req, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+            if isinstance(payload, dict):
+                return payload
+    except Exception:
+        return None
+    return None
+
+
+def _release_db_info_from_payload(release: dict) -> dict:
+    tag = str(release.get("tag_name") or "latest")
+    published_at = str(release.get("published_at") or "")
+    created_at = str(release.get("created_at") or "")
+
+    try:
+        asset_name, asset_url = _pick_release_db_asset(release)
+    except Exception:
+        asset_name, asset_url = "hololive_ocg.sqlite", LATEST_DB_DIRECT_URL
+
+    asset_updated_at = ""
+    for asset in release.get("assets") or []:
+        name = str(asset.get("name") or "")
+        url = str(asset.get("browser_download_url") or "")
+        if (asset_name and name == asset_name) or (asset_url and url == asset_url):
+            asset_updated_at = str(asset.get("updated_at") or "")
+            break
+
+    return {
+        "tag": tag,
+        "asset_name": asset_name,
+        "asset_url": asset_url,
+        "asset_updated_at": asset_updated_at,
+        "published_at": published_at,
+        "created_at": created_at,
+    }
+
+
+def get_latest_release_db_info() -> dict | None:
+    release = _fetch_latest_release(timeout=20)
+    if release is None:
+        return None
+
+    return _release_db_info_from_payload(release)
+
+
+def _write_release_meta(db_path: Path, release_info: dict) -> None:
+    try:
+        conn = sqlite3.connect(db_path)
+    except Exception:
+        return
+
+    try:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        items = {
+            "release_tag": str(release_info.get("tag") or "").strip(),
+            "release_asset_name": str(release_info.get("asset_name") or "").strip(),
+            "release_asset_updated_at": str(release_info.get("asset_updated_at") or "").strip(),
+            "release_published_at": str(release_info.get("published_at") or "").strip(),
+            "release_created_at": str(release_info.get("created_at") or "").strip(),
+        }
+        for key, value in items.items():
+            if not value:
+                continue
+            conn.execute(
+                """
+                INSERT INTO meta(key, value)
+                VALUES(?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (key, value),
+            )
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
 def _py() -> str:
     return sys.executable
 
@@ -96,24 +185,15 @@ def _validate_sqlite(path: Path) -> None:
 
 
 def _download_latest_release_db(db_path: str) -> tuple[str, str]:
-    release = None
-    req = Request(
-        LATEST_RELEASE_API,
-        headers={
-            "User-Agent": "hOCG_H/1.1",
-            "Accept": "application/vnd.github+json",
-        },
-    )
-    try:
-        with urlopen(req, timeout=20) as response:
-            release = json.loads(response.read().decode("utf-8"))
-    except Exception:
-        release = None
+    release = _fetch_latest_release(timeout=20)
+    release_info = None
 
     if release is not None:
         try:
-            asset_name, asset_url = _pick_release_db_asset(release)
-            tag = str(release.get("tag_name") or "latest")
+            release_info = _release_db_info_from_payload(release)
+            asset_name = str(release_info.get("asset_name") or "hololive_ocg.sqlite")
+            asset_url = str(release_info.get("asset_url") or LATEST_DB_DIRECT_URL)
+            tag = str(release_info.get("tag") or "latest")
         except Exception:
             asset_name, asset_url = "hololive_ocg.sqlite", LATEST_DB_DIRECT_URL
             tag = str(release.get("tag_name") or "latest")
@@ -141,6 +221,8 @@ def _download_latest_release_db(db_path: str) -> tuple[str, str]:
                 f.write(chunk)
         _validate_sqlite(tmp)
         os.replace(tmp, target)
+        if release_info is not None:
+            _write_release_meta(target, release_info)
     except HTTPError as ex:
         raise RuntimeError(f"DB asset HTTP {ex.code}") from ex
     except URLError as ex:

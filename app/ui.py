@@ -6,6 +6,7 @@ import sqlite3
 import threading
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import flet as ft
@@ -13,12 +14,13 @@ import flet as ft
 from app.services.db import (
     open_db,
     query_suggest,
+    query_exact,
     load_card_detail,
     get_print_brief,
     db_exists,
     clear_conn_cache,
 )
-from app.services.pipeline import run_update_and_refine
+from app.services.pipeline import run_update_and_refine, get_latest_release_db_info
 from app.paths import get_default_data_root, get_project_root
 from app.services.images import local_image_path, download_image, resolve_url
 from app.services.verify import run_startup_checks
@@ -39,10 +41,12 @@ SECTION_LABELS = (
     "HP",
 )
 
-DB_MISSING_TOAST = "DB파일이 존재하지 않습니다. DB갱신을 해주세요"
+DB_MISSING_TOAST = "DB파일이 존재하지 않습니다. 메뉴에서 DB 수동갱신을 실행해주세요"
 DB_UPDATING_TOAST = "갱신중..."
 DB_UPDATED_TOAST = "갱신완료"
 APP_NAME = "hOCG_H"
+SEARCH_MODE_PARTIAL = "partial"
+SEARCH_MODE_EXACT = "exact"
 
 def with_opacity(opacity: float, color: str) -> str:
     return COLORS.with_opacity(opacity, color)
@@ -64,6 +68,7 @@ def _image_fit_contain():
     return None
 
 IMAGE_FIT_CONTAIN = _image_fit_contain()
+MENU_ICON = ICONS.MENU if hasattr(ICONS, "MENU") else ICONS.MORE_VERT
 
 def icon_dir(project_root: Path) -> Path:
     return project_root / "app"
@@ -131,7 +136,7 @@ def launch_app(db_path: str) -> None:
         # --- Controls ---
         tf_db = ft.TextField(label="DB", value=db_path, expand=True)
         tf_search = ft.TextField(label="카드번호 / 이름 / 태그 검색", expand=True)
-        btn_update = ft.ElevatedButton("DB갱신", icon=ICONS.SYNC)
+        btn_menu = ft.IconButton(icon=MENU_ICON, tooltip="메뉴")
         update_progress = ft.ProgressRing(width=18, height=18, stroke_width=2, visible=False)
         update_status = ft.Text("", size=12, color=COLORS.RED_300, visible=False)
 
@@ -199,7 +204,9 @@ def launch_app(db_path: str) -> None:
         selected_image_url = {"url": ""}
         results_state = {"rows": []}
         image_panel_state = {"collapsed": False}
+        search_mode_state = {"value": SEARCH_MODE_PARTIAL}
         update_state = {"running": False}
+        update_prompt_state = {"shown": False}
         downloading = set()
         download_lock = threading.Lock()
 
@@ -332,6 +339,70 @@ def launch_app(db_path: str) -> None:
                     restore_missing_after,
                     persist,
                 )
+
+        def format_iso_date(value: str | None) -> str | None:
+            raw = (value or "").strip()
+            if not raw:
+                return None
+            if raw.endswith("Z"):
+                raw = raw[:-1] + "+00:00"
+            try:
+                dt = datetime.fromisoformat(raw)
+            except Exception:
+                return None
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc).date().isoformat()
+
+        def local_db_date(path_value: str) -> str | None:
+            path = (path_value or "").strip()
+            if not path:
+                return None
+            try:
+                p = Path(path)
+                if not p.exists() or not p.is_file() or p.stat().st_size == 0:
+                    return None
+                conn = sqlite3.connect(str(p))
+                try:
+                    has_meta = conn.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'"
+                    ).fetchone()
+                    if has_meta:
+                        for key in (
+                            "release_asset_updated_at",
+                            "release_published_at",
+                            "release_created_at",
+                        ):
+                            row = conn.execute(
+                                "SELECT value FROM meta WHERE key=?",
+                                (key,),
+                            ).fetchone()
+                            if row and row[0]:
+                                normalized = format_iso_date(str(row[0]))
+                                if normalized:
+                                    return normalized
+
+                    for table in ("prints", "card_texts_ko", "card_texts_ja"):
+                        has_table = conn.execute(
+                            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                            (table,),
+                        ).fetchone()
+                        if not has_table:
+                            continue
+                        row = conn.execute(
+                            f"SELECT MAX(updated_at) FROM {table} WHERE updated_at IS NOT NULL AND updated_at <> ''"
+                        ).fetchone()
+                        if row and row[0]:
+                            normalized = format_iso_date(str(row[0]))
+                            if normalized:
+                                return normalized
+                finally:
+                    conn.close()
+
+                ts = p.stat().st_mtime
+                return datetime.fromtimestamp(ts, tz=timezone.utc).date().isoformat()
+            except Exception:
+                return None
 
         def setup_window_icon() -> None:
             ico_path, png_path = icon_paths(project_root)
@@ -620,7 +691,7 @@ def launch_app(db_path: str) -> None:
                 return
 
             if needs_db_update():
-                append_log("[INFO] DB가 없거나 손상되어 검색 불가. 'DB갱신'을 먼저 실행하세요.")
+                append_log("[INFO] DB가 없거나 손상되어 검색 불가. 메뉴에서 DB 수동갱신을 실행하세요.")
                 show_toast(DB_MISSING_TOAST, persist=True)
                 render_result_list()
                 clear_selection()
@@ -629,7 +700,10 @@ def launch_app(db_path: str) -> None:
 
             try:
                 conn = get_conn()
-                results_state["rows"] = query_suggest(conn, query)
+                if search_mode_state["value"] == SEARCH_MODE_EXACT:
+                    results_state["rows"] = query_exact(conn, query)
+                else:
+                    results_state["rows"] = query_suggest(conn, query)
                 render_result_list()
                 if results_state["rows"]:
                     show_detail(results_state["rows"][0]["print_id"])
@@ -652,14 +726,25 @@ def launch_app(db_path: str) -> None:
         tf_search.on_change = on_search_change
         tf_search.on_submit = on_search_change
 
+        def on_search_mode_change(e) -> None:
+            selected_mode = (search_mode_group.value or SEARCH_MODE_PARTIAL).strip()
+            if selected_mode not in (SEARCH_MODE_PARTIAL, SEARCH_MODE_EXACT):
+                selected_mode = SEARCH_MODE_PARTIAL
+            if search_mode_state["value"] == selected_mode:
+                return
+            search_mode_state["value"] = selected_mode
+            refresh_list()
+
         def on_db_change(e) -> None:
             invalidate_db_health_cache()
+            update_prompt_state["shown"] = False
 
         tf_db.on_change = on_db_change
 
         def set_update_running(running: bool) -> None:
             update_state["running"] = running
-            btn_update.disabled = running
+            btn_menu.disabled = running
+            btn_manual_update.disabled = running
             tf_search.disabled = running
             tf_db.disabled = running
             update_progress.visible = running
@@ -717,10 +802,147 @@ def launch_app(db_path: str) -> None:
                 set_update_running(False)
                 page.update()
 
-        def on_update_click(e) -> None:
+        search_mode_group = ft.RadioGroup(
+            value=search_mode_state["value"],
+            on_change=on_search_mode_change,
+            content=ft.Column(
+                [
+                    ft.Radio(
+                        value=SEARCH_MODE_PARTIAL,
+                        label="일부 일치 검색 (기본)",
+                    ),
+                    ft.Radio(
+                        value=SEARCH_MODE_EXACT,
+                        label="정확한 검색",
+                    ),
+                ],
+                tight=True,
+                spacing=4,
+            ),
+        )
+
+        db_update_dialog = ft.AlertDialog(modal=True)
+        btn_manual_update = ft.ElevatedButton(
+            "DB 수동갱신",
+            icon=ICONS.SYNC,
+        )
+        menu_panel = ft.NavigationDrawer(
+            controls=[
+                ft.Container(
+                    content=ft.Row(
+                        [
+                            ft.Text("메뉴", weight=ft.FontWeight.W_700),
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    ),
+                    padding=ft.padding.only(left=16, right=16, top=14, bottom=4),
+                ),
+                ft.Container(
+                    content=btn_manual_update,
+                    padding=ft.padding.symmetric(horizontal=12, vertical=6),
+                ),
+                ft.Divider(height=8),
+                ft.Container(
+                    content=ft.Text("DB 검색 옵션", weight=ft.FontWeight.W_600),
+                    padding=ft.padding.only(left=16, right=16, top=4, bottom=2),
+                ),
+                ft.Container(
+                    content=search_mode_group,
+                    padding=ft.padding.symmetric(horizontal=16, vertical=4),
+                ),
+            ],
+        )
+        page.end_drawer = menu_panel
+
+        async def close_menu_panel_async() -> None:
+            try:
+                await page.close_end_drawer()
+            except Exception:
+                pass
+
+        async def open_menu_panel_async() -> None:
+            if update_state["running"]:
+                return
+            search_mode_group.value = search_mode_state["value"]
+            page.update()
+            try:
+                await page.show_end_drawer()
+            except Exception as ex:
+                append_log(f"[ERROR] 메뉴 패널 열기 실패: {ex}")
+
+        async def run_manual_update_from_panel_async() -> None:
+            await close_menu_panel_async()
+            await do_update_async()
+
+        def on_manual_update_click(e=None) -> None:
+            page.run_task(run_manual_update_from_panel_async)
+
+        btn_manual_update.on_click = on_manual_update_click
+
+        def close_db_update_dialog(e=None) -> None:
+            if db_update_dialog.open:
+                page.pop_dialog()
+
+        def on_db_update_confirm(e=None) -> None:
+            close_db_update_dialog()
             page.run_task(do_update_async)
 
-        btn_update.on_click = on_update_click
+        def open_db_update_dialog(local_date_value: str | None, remote_date_value: str) -> None:
+            local_label = local_date_value or "없음"
+            db_update_dialog.title = ft.Text("DB 업데이트")
+            db_update_dialog.content = ft.Column(
+                [
+                    ft.Text("DB 업데이트가 있습니다. 업데이트 하시겠습니까?"),
+                    ft.Text(f"로컬 DB 날짜: {local_label}", size=12, color=COLORS.GREY_400),
+                    ft.Text(f"GitHub DB 날짜: {remote_date_value}", size=12, color=COLORS.GREY_400),
+                ],
+                tight=True,
+                spacing=6,
+            )
+            db_update_dialog.actions = [
+                ft.TextButton("나중에", on_click=close_db_update_dialog),
+                ft.ElevatedButton("업데이트", on_click=on_db_update_confirm),
+            ]
+            db_update_dialog.actions_alignment = ft.MainAxisAlignment.END
+            if db_update_dialog.open:
+                return
+            page.show_dialog(db_update_dialog)
+
+        async def check_remote_db_update_async() -> None:
+            if update_prompt_state["shown"]:
+                return
+
+            dbp = (tf_db.value or "").strip()
+            if not dbp:
+                return
+
+            def _resolve_dates(path_value: str) -> tuple[str | None, str | None]:
+                local_date_value = local_db_date(path_value)
+                info = get_latest_release_db_info()
+                if not info:
+                    return local_date_value, None
+                remote_date_value = format_iso_date(
+                    info.get("asset_updated_at")
+                    or info.get("published_at")
+                    or info.get("created_at")
+                )
+                return local_date_value, remote_date_value
+
+            local_date_value, remote_date_value = await asyncio.to_thread(_resolve_dates, dbp)
+            if not remote_date_value:
+                return
+            if local_date_value == remote_date_value:
+                return
+
+            update_prompt_state["shown"] = True
+            open_db_update_dialog(local_date_value, remote_date_value)
+
+        def on_menu_click(e=None) -> None:
+            if not is_mobile_layout():
+                return
+            page.run_task(open_menu_panel_async)
+
+        btn_menu.on_click = on_menu_click
 
         # --- first-run: 초기 렌더 속도를 위해 DB open/init은 지연 ---
         if not db_exists(tf_db.value):
@@ -728,10 +950,10 @@ def launch_app(db_path: str) -> None:
                 append_log("[WARN] DB 경로가 비어있습니다. 상단 DB 경로를 지정해주세요.")
             else:
                 append_log("[INFO] DB 파일이 없습니다.")
-                append_log("[INFO] 상단 'DB갱신'을 누르면 GitHub Releases에서 최신 DB를 내려받습니다.")
+                append_log("[INFO] 메뉴의 'DB 수동갱신'으로 GitHub Releases 최신 DB를 내려받습니다.")
 
         # --- Layout ---
-        layout_state = {"mobile": None}
+        layout_state = {"mobile": None, "size": (0, 0)}
 
         def image_toggle_label() -> str:
             return "이미지 펼치기" if image_panel_state["collapsed"] else "이미지 접기"
@@ -778,25 +1000,40 @@ def launch_app(db_path: str) -> None:
                 return is_mobile_platform() and not is_android_tablet()
             return bool(width) and width < 900 and not is_android_tablet()
 
+        def mobile_scaled_height(ratio: float, min_px: int, max_px: int) -> int:
+            _, height = get_view_size()
+            if height <= 0:
+                height = 844.0  # iPhone 기준 fallback
+            scaled = int(height * ratio)
+            return max(min_px, min(max_px, scaled))
+
         def build_layout(force: bool = False) -> None:
             mobile = is_mobile_layout()
-            if not force and layout_state["mobile"] == mobile:
+            width, height = get_view_size()
+            size_key = (int(width or 0), int(height or 0))
+            if (
+                not force
+                and layout_state["mobile"] == mobile
+                and layout_state["size"] == size_key
+            ):
                 return
             layout_state["mobile"] = mobile
+            layout_state["size"] = size_key
 
             page.controls.clear()
 
             if mobile:
-                btn_update.width = 100
                 lv.expand = True
                 lv.scroll = ft.ScrollMode.AUTO
                 detail_lv.expand = False
                 detail_lv.scroll = None
+                list_height = mobile_scaled_height(0.30, 190, 360)
+                image_height = mobile_scaled_height(0.45, 240, 560)
 
                 top_row = ft.Row(
                     [
                         tf_search,
-                        ft.Row([update_progress, btn_update], tight=True, spacing=8),
+                        btn_menu,
                     ],
                     spacing=8,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -810,7 +1047,7 @@ def launch_app(db_path: str) -> None:
                         ft.Text("목록"),
                         ft.Container(
                             content=lv,
-                            height=260,
+                            height=list_height,
                             padding=10,
                             border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
                             border_radius=10,
@@ -820,7 +1057,7 @@ def launch_app(db_path: str) -> None:
                         if image_panel_state["collapsed"]
                         else ft.Container(
                             content=img_container,
-                            height=460,
+                            height=image_height,
                             border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
                             border_radius=10,
                         ),
@@ -848,7 +1085,6 @@ def launch_app(db_path: str) -> None:
                 )
                 return
 
-            btn_update.width = None
             lv.expand = True
             lv.scroll = ft.ScrollMode.AUTO
             detail_lv.expand = True
@@ -857,7 +1093,7 @@ def launch_app(db_path: str) -> None:
             top = ft.Row(
                 [
                     tf_db,
-                    ft.Row([update_progress, btn_update], tight=True, spacing=8),
+                    update_progress,
                 ],
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             )
@@ -931,6 +1167,8 @@ def launch_app(db_path: str) -> None:
         render_result_list()
         build_layout()
         page.run_task(run_startup_checks_async)
+        if not is_mobile_layout():
+            page.run_task(check_remote_db_update_async)
         if needs_db_update():
             show_toast(DB_MISSING_TOAST, persist=True)
 
