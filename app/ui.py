@@ -1167,8 +1167,7 @@ def launch_app(db_path: str) -> None:
         render_result_list()
         build_layout()
         page.run_task(run_startup_checks_async)
-        if not is_mobile_layout():
-            page.run_task(check_remote_db_update_async)
+        page.run_task(check_remote_db_update_async)
         if needs_db_update():
             show_toast(DB_MISSING_TOAST, persist=True)
 
