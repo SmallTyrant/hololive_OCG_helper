@@ -47,6 +47,7 @@ DB_UPDATED_TOAST = "갱신완료"
 APP_NAME = "hOCG_H"
 SEARCH_MODE_PARTIAL = "partial"
 SEARCH_MODE_EXACT = "exact"
+MOBILE_SAFE_BOTTOM_PADDING = 34
 
 def with_opacity(opacity: float, color: str) -> str:
     return COLORS.with_opacity(opacity, color)
@@ -727,12 +728,23 @@ def launch_app(db_path: str) -> None:
         tf_search.on_submit = on_search_change
 
         def on_search_mode_change(e) -> None:
-            selected_mode = (search_mode_group.value or SEARCH_MODE_PARTIAL).strip()
+            selected_mode = (
+                (getattr(e, "data", None) if e is not None else None)
+                or (getattr(getattr(e, "control", None), "value", None) if e is not None else None)
+                or search_mode_group.value
+                or SEARCH_MODE_PARTIAL
+            ).strip()
             if selected_mode not in (SEARCH_MODE_PARTIAL, SEARCH_MODE_EXACT):
                 selected_mode = SEARCH_MODE_PARTIAL
             if search_mode_state["value"] == selected_mode:
                 return
             search_mode_state["value"] = selected_mode
+            show_toast(
+                "검색 모드: 정확 일치(태그/카드번호/이름)"
+                if selected_mode == SEARCH_MODE_EXACT
+                else "검색 모드: 일부 일치",
+                duration_ms=1300,
+            )
             refresh_list()
 
         def on_db_change(e) -> None:
@@ -813,7 +825,7 @@ def launch_app(db_path: str) -> None:
                     ),
                     ft.Radio(
                         value=SEARCH_MODE_EXACT,
-                        label="정확한 검색",
+                        label="정확 검색",
                     ),
                 ],
                 tight=True,
@@ -1078,7 +1090,12 @@ def launch_app(db_path: str) -> None:
                     ft.SafeArea(
                         content=ft.Container(
                             content=mobile_root,
-                            padding=ft.padding.only(left=10, right=10, top=6, bottom=10),
+                            padding=ft.padding.only(
+                                left=10,
+                                right=10,
+                                top=6,
+                                bottom=MOBILE_SAFE_BOTTOM_PADDING,
+                            ),
                         ),
                         expand=True,
                     )

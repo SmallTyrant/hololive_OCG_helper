@@ -1,0 +1,59 @@
+name: HocgNative
+options:
+  minimumXcodeGenVersion: 2.39.0
+configs:
+  Debug: debug
+  Release: release
+settings:
+  base:
+    SWIFT_VERSION: 5.10
+    PRODUCT_BUNDLE_IDENTIFIER: com.smalltyrant.hocg.native
+    MARKETING_VERSION: 1.0.0
+    CURRENT_PROJECT_VERSION: 1
+    TARGETED_DEVICE_FAMILY: "1,2"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    GENERATE_INFOPLIST_FILE: YES
+    INFOPLIST_KEY_CFBundleDisplayName: hOCG_H
+    INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+    INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+    INFOPLIST_KEY_UILaunchScreen_Generation: YES
+    INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
+    INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    OTHER_LDFLAGS:
+      - "$(inherited)"
+      - "-lsqlite3"
+
+targets:
+  HocgNative:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: ../native/Sources/HocgNative
+      - path: Resources
+    preBuildScripts:
+      - name: Copy Bundled DB
+        basedOnDependencyAnalysis: false
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Data/hololive_ocg.sqlite
+        script: |
+          set -euo pipefail
+          SRC_DB="$PROJECT_DIR/../../../data/hololive_ocg.sqlite"
+          LEGACY_DB="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/hololive_ocg.sqlite"
+          DST_DIR="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Data"
+          DST_DB="$DST_DIR/hololive_ocg.sqlite"
+          rm -f "$LEGACY_DB"
+          if [ -f "$SRC_DB" ] && [ -s "$SRC_DB" ]; then
+            mkdir -p "$DST_DIR"
+            cp "$SRC_DB" "$DST_DB"
+            chmod 0644 "$DST_DB"
+            echo "Copied DB to bundle: $DST_DB"
+          else
+            echo "DB not found at $SRC_DB (skipped)"
+          fi
+    settings:
+      base:
+        PRODUCT_NAME: HocgNative
+        DEVELOPMENT_TEAM: ""

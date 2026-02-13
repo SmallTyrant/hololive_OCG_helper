@@ -64,3 +64,10 @@ final class DatabaseProvider {
 - 스키마 변경 금지
 - 읽기 전용 접근
 - 검색/필터는 SQL에서 처리하는 것을 우선
+
+## Flet 동작 대응 네이티브 소스
+`app/ui.py`와 기능을 맞춘 최신 Swift 레퍼런스는 아래 경로에 있습니다.
+- `/Users/perlihite/Desktop/hololive_OCG_helper/mobile/ios/native`
+
+## 실행 가능한 iOS 프로젝트
+- `/Users/perlihite/Desktop/hololive_OCG_helper/mobile/ios/native-app`

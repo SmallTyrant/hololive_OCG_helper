@@ -38,3 +38,11 @@
 플랫폼별 상세 안내는 아래 문서를 참고하세요.
 - [Android 안내](./android/README.md)
 - [iOS 안내](./ios/README.md)
+
+## 네이티브 소스 레퍼런스
+- Android Kotlin: [./android/native](./android/native)
+- iOS Swift: [./ios/native](./ios/native)
+
+## 실행 가능한 네이티브 프로젝트
+- Android app project: [./android/native-app](./android/native-app)
+- iOS app project: [./ios/native-app](./ios/native-app)

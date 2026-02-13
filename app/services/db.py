@@ -185,13 +185,20 @@ def query_suggest(conn: sqlite3.Connection, q: str, limit: int | None = None) ->
             params += [f"%{term}%", f"%{term}%"]
 
         if normalized_terms:
+            norm_card_number = _sql_normalize_expr("p.card_number")
             norm_tag = _sql_normalize_expr("t.tag")
             norm_normalized = _sql_normalize_expr("t.normalized")
+            norm_name_ja = _sql_normalize_expr("p.name_ja")
+            norm_name_ko = _sql_normalize_expr("ko.name")
+            norm_effect_text = _sql_normalize_expr("ko.effect_text")
             for term in normalized_terms:
                 if not term:
                     continue
-                sql += f" OR {norm_tag} LIKE ? OR {norm_normalized} LIKE ?"
-                params += [f"%{term}%", f"%{term}%"]
+                sql += (
+                    f" OR {norm_card_number} LIKE ? OR {norm_tag} LIKE ? OR {norm_normalized} LIKE ?"
+                    f" OR {norm_name_ja} LIKE ? OR {norm_name_ko} LIKE ? OR {norm_effect_text} LIKE ?"
+                )
+                params += [f"%{term}%", f"%{term}%", f"%{term}%", f"%{term}%", f"%{term}%", f"%{term}%"]
 
         sql += " ORDER BY p.card_number"
         if limit is not None and limit > 0:
@@ -213,9 +220,19 @@ def query_suggest(conn: sqlite3.Connection, q: str, limit: int | None = None) ->
        OR COALESCE(p.name_ja,'') LIKE ?
        OR COALESCE(ko.name,'') LIKE ?
        OR COALESCE(ko.effect_text,'') LIKE ?
-    ORDER BY p.card_number
     """
     params: list[object] = [like, like, like, like]
+    if normalized_terms:
+        norm_card_number = _sql_normalize_expr("p.card_number")
+        norm_name_ja = _sql_normalize_expr("p.name_ja")
+        norm_name_ko = _sql_normalize_expr("ko.name")
+        norm_effect_text = _sql_normalize_expr("ko.effect_text")
+        for term in normalized_terms:
+            if not term:
+                continue
+            sql += f" OR {norm_card_number} LIKE ? OR {norm_name_ja} LIKE ? OR {norm_name_ko} LIKE ? OR {norm_effect_text} LIKE ?"
+            params += [f"%{term}%", f"%{term}%", f"%{term}%", f"%{term}%"]
+    sql += " ORDER BY p.card_number"
     if limit is not None and limit > 0:
         sql += " LIMIT ?"
         params.append(limit)
@@ -223,15 +240,17 @@ def query_suggest(conn: sqlite3.Connection, q: str, limit: int | None = None) ->
 
 
 def query_exact(conn: sqlite3.Connection, q: str, limit: int | None = None) -> list[dict]:
+    """
+    정확 검색 모드:
+    - 태그(tag/normalized), 카드번호, 이름(일/한) "정확 일치"만 반환
+    - LIKE/부분 일치, 효과문 전문 검색은 수행하지 않음
+    """
     q = (q or "").strip()
     if not q:
         return []
 
-    terms = _build_search_terms(q)
     normalized_q = _normalize_term(q)
-
     joins = _build_tag_joins(conn)
-
     if joins:
         sql = f"""
         SELECT DISTINCT
@@ -246,20 +265,13 @@ def query_exact(conn: sqlite3.Connection, q: str, limit: int | None = None) -> l
             UPPER(COALESCE(p.card_number,'')) = UPPER(?)
             OR LOWER(COALESCE(p.name_ja,'')) = LOWER(?)
             OR LOWER(COALESCE(ko.name,'')) = LOWER(?)
-            OR LOWER(COALESCE(ko.effect_text,'')) = LOWER(?)
             OR (
                 t.tag IS NOT NULL
                 AND (
-                    LOWER(t.tag) = LOWER(?)
+                    LOWER(COALESCE(t.tag,'')) = LOWER(?)
                     OR LOWER(COALESCE(t.normalized,'')) = LOWER(?)
-                )
-            )
         """
-        params: list[object] = [q, q, q, q, q, q]
-
-        for term in terms:
-            sql += " OR LOWER(t.tag) = LOWER(?) OR LOWER(COALESCE(t.normalized,'')) = LOWER(?)"
-            params += [term, term]
+        params: list[object] = [q, q, q, q, q]
 
         if normalized_q:
             norm_tag = _sql_normalize_expr("t.tag")
@@ -267,6 +279,16 @@ def query_exact(conn: sqlite3.Connection, q: str, limit: int | None = None) -> l
             sql += f" OR {norm_tag} = ? OR {norm_normalized} = ?"
             params += [normalized_q, normalized_q]
 
+        sql += """
+                )
+            )
+        """
+        if normalized_q:
+            norm_card_number = _sql_normalize_expr("p.card_number")
+            norm_name_ja = _sql_normalize_expr("p.name_ja")
+            norm_name_ko = _sql_normalize_expr("ko.name")
+            sql += f" OR {norm_card_number} = ? OR {norm_name_ja} = ? OR {norm_name_ko} = ?"
+            params += [normalized_q, normalized_q, normalized_q]
         sql += " ORDER BY p.card_number"
         if limit is not None and limit > 0:
             sql += " LIMIT ?"
@@ -274,6 +296,7 @@ def query_exact(conn: sqlite3.Connection, q: str, limit: int | None = None) -> l
 
         return [dict(r) for r in conn.execute(sql, params)]
 
+    # 태그 JOIN이 안 되는 스키마에서는 카드번호/이름 정확 검색만 수행
     sql = """
     SELECT
         p.print_id,
@@ -286,10 +309,15 @@ def query_exact(conn: sqlite3.Connection, q: str, limit: int | None = None) -> l
         UPPER(COALESCE(p.card_number,'')) = UPPER(?)
         OR LOWER(COALESCE(p.name_ja,'')) = LOWER(?)
         OR LOWER(COALESCE(ko.name,'')) = LOWER(?)
-        OR LOWER(COALESCE(ko.effect_text,'')) = LOWER(?)
-    ORDER BY p.card_number
     """
-    params = [q, q, q, q]
+    params: list[object] = [q, q, q]
+    if normalized_q:
+        norm_card_number = _sql_normalize_expr("p.card_number")
+        norm_name_ja = _sql_normalize_expr("p.name_ja")
+        norm_name_ko = _sql_normalize_expr("ko.name")
+        sql += f" OR {norm_card_number} = ? OR {norm_name_ja} = ? OR {norm_name_ko} = ?"
+        params += [normalized_q, normalized_q, normalized_q]
+    sql += " ORDER BY p.card_number"
     if limit is not None and limit > 0:
         sql += " LIMIT ?"
         params.append(limit)
