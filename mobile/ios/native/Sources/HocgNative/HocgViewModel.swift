@@ -4,9 +4,18 @@ private let dbMissingToast = "DB파일이 존재하지 않습니다. 메뉴에�
 private let dbUpdatingToast = "갱신중..."
 private let dbUpdatedToast = "갱신완료"
 private let dbRestoredToast = "번들 DB 복원완료"
+private let bulkImageMaxConcurrency = 10
+private let bulkImageRetryCount = 1
 
 @MainActor
 final class HocgViewModel: ObservableObject {
+    private struct BulkImageOutcome {
+        let downloaded: Int
+        let cached: Int
+        let failed: Int
+        let skipped: Int
+    }
+
     @Published private(set) var state: HocgUiState
     @Published var toastMessage: String?
 
@@ -150,28 +159,35 @@ final class HocgViewModel: ObservableObject {
             var alreadyCached = 0
             var failed = 0
             var skipped = 0
-            let fm = FileManager.default
+            var completed = 0
 
-            for (index, target) in targets.enumerated() {
-                state.updateStatus = "이미지 다운로드 중... (\(index + 1)/\(targets.count))"
-
-                let localURL = paths.localImageURL(cardNumber: target.cardNumber)
-                let existedBefore = fm.fileExists(atPath: localURL.path)
-                let imageState = await imageRepository.downloadIfNeeded(
-                    cardNumber: target.cardNumber,
-                    imageURL: target.imageURL,
-                )
-                switch imageState {
-                case .local:
-                    if existedBefore {
-                        alreadyCached += 1
-                    } else {
-                        downloaded += 1
+            state.updateStatus = "이미지 다운로드 중... (0/\(targets.count))"
+            await withTaskGroup(of: BulkImageOutcome.self) { group in
+                let initial = min(bulkImageMaxConcurrency, targets.count)
+                var nextIndex = 0
+                for _ in 0..<initial {
+                    let target = targets[nextIndex]
+                    group.addTask {
+                        await self.downloadBulkImageTarget(target)
                     }
-                case .error:
-                    failed += 1
-                case .placeholder, .remote, .loading:
-                    skipped += 1
+                    nextIndex += 1
+                }
+
+                while let outcome = await group.next() {
+                    completed += 1
+                    downloaded += outcome.downloaded
+                    alreadyCached += outcome.cached
+                    failed += outcome.failed
+                    skipped += outcome.skipped
+                    state.updateStatus = "이미지 다운로드 중... (\(completed)/\(targets.count))"
+
+                    if nextIndex < targets.count {
+                        let target = targets[nextIndex]
+                        group.addTask {
+                            await self.downloadBulkImageTarget(target)
+                        }
+                        nextIndex += 1
+                    }
                 }
             }
 
@@ -315,6 +331,39 @@ final class HocgViewModel: ObservableObject {
             if self.toastMessage == message {
                 self.toastMessage = nil
             }
+        }
+    }
+
+    private func downloadBulkImageTarget(_ target: (cardNumber: String, imageURL: String)) async -> BulkImageOutcome {
+        let localURL = paths.localImageURL(cardNumber: target.cardNumber)
+        let existedBefore = FileManager.default.fileExists(atPath: localURL.path)
+
+        var imageState = await imageRepository.downloadIfNeeded(
+            cardNumber: target.cardNumber,
+            imageURL: target.imageURL,
+        )
+        var retryCount = 0
+        while retryCount < bulkImageRetryCount {
+            guard case .error = imageState else {
+                break
+            }
+            retryCount += 1
+            imageState = await imageRepository.downloadIfNeeded(
+                cardNumber: target.cardNumber,
+                imageURL: target.imageURL,
+            )
+        }
+
+        switch imageState {
+        case .local:
+            if existedBefore {
+                return BulkImageOutcome(downloaded: 0, cached: 1, failed: 0, skipped: 0)
+            }
+            return BulkImageOutcome(downloaded: 1, cached: 0, failed: 0, skipped: 0)
+        case .error:
+            return BulkImageOutcome(downloaded: 0, cached: 0, failed: 1, skipped: 0)
+        case .placeholder, .remote, .loading:
+            return BulkImageOutcome(downloaded: 0, cached: 0, failed: 0, skipped: 1)
         }
     }
 

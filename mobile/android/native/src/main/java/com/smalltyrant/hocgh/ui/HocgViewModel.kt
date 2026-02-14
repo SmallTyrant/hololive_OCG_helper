@@ -16,17 +16,30 @@ import com.smalltyrant.hocgh.model.UpdateDialogState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 private const val DB_MISSING_TOAST = "DB파일이 존재하지 않습니다. 메뉴에서 DB 수동갱신을 실행해주세요"
 private const val DB_UPDATING_TOAST = "갱신중..."
 private const val DB_UPDATED_TOAST = "갱신완료"
 private const val DB_RESTORED_TOAST = "번들 DB 복원완료"
+private const val BULK_IMAGE_MAX_CONCURRENCY = 10
+private const val BULK_IMAGE_RETRY_COUNT = 1
 
 class HocgViewModel(application: Application) : AndroidViewModel(application) {
+
+    private data class BulkImageOutcome(
+        val downloaded: Int,
+        val cached: Int,
+        val failed: Int,
+        val skipped: Int,
+    )
 
     private val paths = AppPaths(application)
     private val dbRepository = DbRepository(paths)
@@ -167,25 +180,27 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
                 var alreadyCached = 0
                 var failed = 0
                 var skipped = 0
+                var completed = 0
 
-                targets.forEachIndexed { index, target ->
-                    state = state.copy(updateStatus = "이미지 다운로드 중... (${index + 1}/${targets.size})")
-                    val (existedBefore, imageState) = withContext(Dispatchers.IO) {
-                        val localFile = paths.localImageFile(target.cardNumber)
-                        val existed = localFile.exists()
-                        val downloadedState = imageRepository.downloadIfNeeded(target.cardNumber, target.imageUrl)
-                        existed to downloadedState
-                    }
-                    when (imageState) {
-                        is ImageState.Local -> {
-                            if (existedBefore) {
-                                alreadyCached += 1
-                            } else {
-                                downloaded += 1
+                state = state.copy(updateStatus = "이미지 다운로드 중... (0/${targets.size})")
+                val semaphore = Semaphore(BULK_IMAGE_MAX_CONCURRENCY)
+                coroutineScope {
+                    val jobs = targets.map { target ->
+                        async(Dispatchers.IO) {
+                            semaphore.withPermit {
+                                downloadBulkImageTarget(target)
                             }
                         }
-                        is ImageState.Error -> failed += 1
-                        else -> skipped += 1
+                    }
+
+                    jobs.forEach { job ->
+                        val outcome = job.await()
+                        completed += 1
+                        downloaded += outcome.downloaded
+                        alreadyCached += outcome.cached
+                        failed += outcome.failed
+                        skipped += outcome.skipped
+                        state = state.copy(updateStatus = "이미지 다운로드 중... (${completed}/${targets.size})")
                     }
                 }
 
@@ -354,6 +369,31 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
     private fun applyMissingDbState() {
         state = state.copy(persistentMessage = DB_MISSING_TOAST)
         pushToast(DB_MISSING_TOAST)
+    }
+
+    private suspend fun downloadBulkImageTarget(target: DbRepository.ImageTarget): BulkImageOutcome {
+        val localFile = paths.localImageFile(target.cardNumber)
+        val existedBefore = localFile.exists()
+
+        var imageState = imageRepository.downloadIfNeeded(target.cardNumber, target.imageUrl)
+        var retryCount = 0
+        while (imageState is ImageState.Error && retryCount < BULK_IMAGE_RETRY_COUNT) {
+            retryCount += 1
+            delay(120)
+            imageState = imageRepository.downloadIfNeeded(target.cardNumber, target.imageUrl)
+        }
+
+        return when (imageState) {
+            is ImageState.Local -> {
+                if (existedBefore) {
+                    BulkImageOutcome(downloaded = 0, cached = 1, failed = 0, skipped = 0)
+                } else {
+                    BulkImageOutcome(downloaded = 1, cached = 0, failed = 0, skipped = 0)
+                }
+            }
+            is ImageState.Error -> BulkImageOutcome(downloaded = 0, cached = 0, failed = 1, skipped = 0)
+            else -> BulkImageOutcome(downloaded = 0, cached = 0, failed = 0, skipped = 1)
+        }
     }
 
     private fun pushToast(message: String) {
