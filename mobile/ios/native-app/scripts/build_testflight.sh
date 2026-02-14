@@ -11,13 +11,22 @@ BUILD_NUMBER="${BUILD_NUMBER:-}"
 ARCHIVE_PATH="${ARCHIVE_PATH:-$PROJECT_DIR/build/HocgNative-TestFlight.xcarchive}"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/build/ipa_testflight}"
 UPLOAD="${UPLOAD:-0}"
+AUTO_EXTERNAL="${AUTO_EXTERNAL:-0}"
+EXTERNAL_GROUPS="${EXTERNAL_GROUPS:-}"
+TESTFLIGHT_WHATS_NEW="${TESTFLIGHT_WHATS_NEW:-Automated upload}"
 
 # Upload auth options (used only when UPLOAD=1)
 ASC_API_KEY_ID="${ASC_API_KEY_ID:-}"
 ASC_API_ISSUER_ID="${ASC_API_ISSUER_ID:-}"
+ASC_API_KEY_FILE="${ASC_API_KEY_FILE:-}"
 ASC_APPLE_ID="${ASC_APPLE_ID:-}"
 ASC_APP_PASSWORD="${ASC_APP_PASSWORD:-}"
 ASC_PROVIDER_PUBLIC_ID="${ASC_PROVIDER_PUBLIC_ID:-}"
+
+if [[ "$AUTO_EXTERNAL" == "1" && "$UPLOAD" != "1" ]]; then
+  echo "AUTO_EXTERNAL=1 requires UPLOAD=1"
+  exit 1
+fi
 
 if [[ -z "$TEAM_ID" ]]; then
   echo "TEAM_ID is required. Example:"
@@ -98,32 +107,105 @@ echo "IPA: $IPA_PATH"
 
 if [[ "$UPLOAD" == "1" ]]; then
   echo "[3/3] Upload to App Store Connect"
-  upload_cmd=(
-    xcrun altool
-    --upload-app
-    -f "$IPA_PATH"
-    --type ios
-    --show-progress
-  )
-
-  if [[ -n "$ASC_API_KEY_ID" && -n "$ASC_API_ISSUER_ID" ]]; then
-    upload_cmd+=(--apiKey "$ASC_API_KEY_ID" --apiIssuer "$ASC_API_ISSUER_ID")
-  else
-    if [[ -z "$ASC_APPLE_ID" || -z "$ASC_APP_PASSWORD" ]]; then
-      echo "UPLOAD=1 requires auth settings."
-      echo "Use API key auth:"
-      echo "  ASC_API_KEY_ID=<KEY_ID> ASC_API_ISSUER_ID=<ISSUER_ID>"
-      echo "or Apple ID auth:"
-      echo "  ASC_APPLE_ID=<APPLE_ID_EMAIL> ASC_APP_PASSWORD=<APP_SPECIFIC_PASSWORD>"
+  if [[ "$AUTO_EXTERNAL" == "1" ]]; then
+    if ! command -v fastlane >/dev/null 2>&1; then
+      echo "AUTO_EXTERNAL=1 requires fastlane. Install it first:"
+      echo "  gem install fastlane"
       exit 1
     fi
-    upload_cmd+=(-u "$ASC_APPLE_ID" -p "$ASC_APP_PASSWORD")
-    if [[ -n "$ASC_PROVIDER_PUBLIC_ID" ]]; then
-      upload_cmd+=(--provider-public-id "$ASC_PROVIDER_PUBLIC_ID")
+    if [[ -z "$EXTERNAL_GROUPS" ]]; then
+      echo "AUTO_EXTERNAL=1 requires EXTERNAL_GROUPS (comma-separated)."
+      echo "Example: EXTERNAL_GROUPS='Public Testers'"
+      exit 1
     fi
-  fi
 
-  "${upload_cmd[@]}"
+    pilot_cmd=(
+      fastlane
+      pilot
+      upload
+      --ipa "$IPA_PATH"
+      --app_identifier "$BUNDLE_ID"
+      --skip_waiting_for_build_processing false
+      --distribute_external true
+      --groups "$EXTERNAL_GROUPS"
+      --notify_external_testers true
+      --submit_beta_review true
+      --changelog "$TESTFLIGHT_WHATS_NEW"
+    )
+
+    temp_api_key_json=""
+    cleanup() {
+      if [[ -n "$temp_api_key_json" && -f "$temp_api_key_json" ]]; then
+        rm -f "$temp_api_key_json"
+      fi
+    }
+    trap cleanup EXIT
+
+    if [[ -n "$ASC_API_KEY_ID" && -n "$ASC_API_ISSUER_ID" ]]; then
+      if [[ -z "$ASC_API_KEY_FILE" ]]; then
+        ASC_API_KEY_FILE="$HOME/Desktop/AuthKey_${ASC_API_KEY_ID}.p8"
+      fi
+      if [[ ! -f "$ASC_API_KEY_FILE" ]]; then
+        echo "AUTO_EXTERNAL API key mode requires ASC_API_KEY_FILE (or Desktop/AuthKey_<KEY_ID>.p8)."
+        echo "Missing file: $ASC_API_KEY_FILE"
+        exit 1
+      fi
+      temp_api_key_json="$(mktemp)"
+      python3 - <<PY > "$temp_api_key_json"
+import json
+from pathlib import Path
+print(json.dumps({
+    "key_id": "$ASC_API_KEY_ID",
+    "issuer_id": "$ASC_API_ISSUER_ID",
+    "key": Path(r"$ASC_API_KEY_FILE").read_text()
+}))
+PY
+      pilot_cmd+=(--api_key_path "$temp_api_key_json")
+    else
+      if [[ -z "$ASC_APPLE_ID" || -z "$ASC_APP_PASSWORD" ]]; then
+        echo "AUTO_EXTERNAL=1 requires auth settings."
+        echo "Use API key auth:"
+        echo "  ASC_API_KEY_ID=<KEY_ID> ASC_API_ISSUER_ID=<ISSUER_ID> [ASC_API_KEY_FILE=<.p8 path>]"
+        echo "or Apple ID auth:"
+        echo "  ASC_APPLE_ID=<APPLE_ID_EMAIL> ASC_APP_PASSWORD=<APP_SPECIFIC_PASSWORD>"
+        exit 1
+      fi
+      export FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD="$ASC_APP_PASSWORD"
+      pilot_cmd+=(--username "$ASC_APPLE_ID")
+    fi
+
+    if [[ -n "$ASC_PROVIDER_PUBLIC_ID" ]]; then
+      pilot_cmd+=(--itc_provider "$ASC_PROVIDER_PUBLIC_ID")
+    fi
+    "${pilot_cmd[@]}"
+  else
+    upload_cmd=(
+      xcrun altool
+      --upload-app
+      -f "$IPA_PATH"
+      --type ios
+      --show-progress
+    )
+
+    if [[ -n "$ASC_API_KEY_ID" && -n "$ASC_API_ISSUER_ID" ]]; then
+      upload_cmd+=(--apiKey "$ASC_API_KEY_ID" --apiIssuer "$ASC_API_ISSUER_ID")
+    else
+      if [[ -z "$ASC_APPLE_ID" || -z "$ASC_APP_PASSWORD" ]]; then
+        echo "UPLOAD=1 requires auth settings."
+        echo "Use API key auth:"
+        echo "  ASC_API_KEY_ID=<KEY_ID> ASC_API_ISSUER_ID=<ISSUER_ID>"
+        echo "or Apple ID auth:"
+        echo "  ASC_APPLE_ID=<APPLE_ID_EMAIL> ASC_APP_PASSWORD=<APP_SPECIFIC_PASSWORD>"
+        exit 1
+      fi
+      upload_cmd+=(-u "$ASC_APPLE_ID" -p "$ASC_APP_PASSWORD")
+      if [[ -n "$ASC_PROVIDER_PUBLIC_ID" ]]; then
+        upload_cmd+=(--provider-public-id "$ASC_PROVIDER_PUBLIC_ID")
+      fi
+    fi
+
+    "${upload_cmd[@]}"
+  fi
 else
   echo "[3/3] Skip upload (set UPLOAD=1 to upload to TestFlight)"
 fi
