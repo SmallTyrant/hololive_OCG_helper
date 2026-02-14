@@ -3,3 +3,5 @@ __pycache__/
 data/images/
 .DS_Store
 app/build/
+mobile/ios/native-app/build/DerivedDataAltStore/
+mobile/ios/native-app/build/ipa_altstore/
