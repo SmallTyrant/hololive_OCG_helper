@@ -534,6 +534,6 @@ final class DatabaseRepository {
     }
 
     private func sqlNormalizeExpr(_ column: String) -> String {
-        "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(COALESCE(\(column),'')), ' ', ''), '#', ''), '_', ''), '-', ''), '/', ''), ',', '')"
+        "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(COALESCE(\(column),'')), ' ', ''), char(9), ''), char(10), ''), char(13), ''), '#', ''), '_', ''), '-', ''), '/', ''), '|', ''), ',', ''), '.', '')"
     }
 }

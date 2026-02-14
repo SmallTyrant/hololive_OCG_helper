@@ -480,7 +480,7 @@ class DbRepository(private val paths: AppPaths) {
     }
 
     private fun sqlNormalizeExpr(column: String): String {
-        return "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(COALESCE($column,'')), ' ', ''), '#', ''), '_', ''), '-', ''), '/', ''), ',', '')"
+        return "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(COALESCE($column,'')), ' ', ''), char(9), ''), char(10), ''), char(13), ''), '#', ''), '_', ''), '-', ''), '/', ''), '|', ''), ',', ''), '.', '')"
     }
 
     private fun openReadOnly(): SQLiteDatabase {

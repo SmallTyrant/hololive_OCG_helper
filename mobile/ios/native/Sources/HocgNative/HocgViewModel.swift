@@ -204,15 +204,15 @@ final class HocgViewModel: ObservableObject {
         searchTask?.cancel()
         let query = state.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        searchTask = Task {
-            if query.isEmpty {
-                state.results = []
-                state.selectedPrintId = nil
-                state.detailKoText = ""
-                state.imageState = .placeholder("카드를 선택하세요")
-                return
-            }
+        if query.isEmpty {
+            state.results = []
+            state.selectedPrintId = nil
+            state.detailKoText = ""
+            state.imageState = .placeholder("카드를 선택하세요")
+            return
+        }
 
+        searchTask = Task {
             let needsUpdate = await runIO {
                 self.dbRepository.needsDbUpdate()
             }
@@ -246,13 +246,15 @@ final class HocgViewModel: ObservableObject {
         detailTask?.cancel()
         detailTask = Task {
             state.selectedPrintId = printId
+            let repository = dbRepository
 
-            let brief = await runIO {
-                self.dbRepository.getPrintBrief(printId: printId)
+            async let briefValue = runIO {
+                repository.getPrintBrief(printId: printId)
             }
-            let detail = await runIO {
-                self.dbRepository.loadCardDetail(printId: printId)
+            async let detailValue = runIO {
+                repository.loadCardDetail(printId: printId)
             }
+            let (brief, detail) = await (briefValue, detailValue)
 
             guard let brief else {
                 state.detailKoText = "[ERROR] 상세 로드 실패"

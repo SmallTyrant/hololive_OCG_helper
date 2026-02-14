@@ -15,6 +15,7 @@ import com.smalltyrant.hocgh.model.ImageState
 import com.smalltyrant.hocgh.model.UpdateDialogState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
@@ -169,12 +170,11 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
 
                 targets.forEachIndexed { index, target ->
                     state = state.copy(updateStatus = "이미지 다운로드 중... (${index + 1}/${targets.size})")
-                    val localFile = paths.localImageFile(target.cardNumber)
-                    val existedBefore = withContext(Dispatchers.IO) {
-                        localFile.exists()
-                    }
-                    val imageState = withContext(Dispatchers.IO) {
-                        imageRepository.downloadIfNeeded(target.cardNumber, target.imageUrl)
+                    val (existedBefore, imageState) = withContext(Dispatchers.IO) {
+                        val localFile = paths.localImageFile(target.cardNumber)
+                        val existed = localFile.exists()
+                        val downloadedState = imageRepository.downloadIfNeeded(target.cardNumber, target.imageUrl)
+                        existed to downloadedState
                     }
                     when (imageState) {
                         is ImageState.Local -> {
@@ -276,12 +276,14 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
         detailJob = viewModelScope.launch {
             state = state.copy(selectedPrintId = printId)
 
-            val brief = withContext(Dispatchers.IO) {
+            val briefDeferred = async(Dispatchers.IO) {
                 dbRepository.getPrintBrief(printId)
             }
-            val detail = withContext(Dispatchers.IO) {
+            val detailDeferred = async(Dispatchers.IO) {
                 dbRepository.loadCardDetail(printId)
             }
+            val brief = briefDeferred.await()
+            val detail = detailDeferred.await()
 
             if (brief == null) {
                 state = state.copy(
