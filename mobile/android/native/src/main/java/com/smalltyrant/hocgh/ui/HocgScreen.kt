@@ -649,9 +649,12 @@ private fun scaledHeightDp(ratio: Float, minPx: Int, maxPx: Int): Dp {
 private fun Modifier.clearFocusOnTap(focusManager: FocusManager): Modifier {
     return pointerInput(focusManager) {
         awaitEachGesture {
-            awaitFirstDown(pass = PointerEventPass.Final)
-            focusManager.clearFocus()
-            waitForUpOrCancellation(pass = PointerEventPass.Final)
+            awaitFirstDown(
+                requireUnconsumed = false,
+                pass = PointerEventPass.Initial,
+            )
+            focusManager.clearFocus(force = true)
+            waitForUpOrCancellation(pass = PointerEventPass.Initial)
         }
     }
 }
