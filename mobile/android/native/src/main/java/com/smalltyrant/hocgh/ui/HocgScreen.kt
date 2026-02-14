@@ -4,6 +4,9 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -35,24 +38,31 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.ImeAction
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.smalltyrant.hocgh.model.HocgUiState
@@ -60,6 +70,8 @@ import com.smalltyrant.hocgh.model.ImageState
 import com.smalltyrant.hocgh.model.PrintRow
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 
 private val SECTION_LABELS = listOf(
     "カードタイプ",
@@ -78,10 +90,13 @@ private val SECTION_LABELS = listOf(
 @Composable
 fun HocgScreen(
     viewModel: HocgViewModel = viewModel(),
+    themeMode: AppThemeMode,
+    onThemeModeChange: (AppThemeMode) -> Unit,
 ) {
     val state = viewModel.state
     val config = androidx.compose.ui.platform.LocalConfiguration.current
     val isMobileLayout = config.screenWidthDp < 900
+    val focusManager = LocalFocusManager.current
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val snackbarHostState = remember { SnackbarHostState() }
@@ -124,6 +139,9 @@ fun HocgScreen(
     }
 
     ModalNavigationDrawer(
+        modifier = Modifier
+            .fillMaxSize()
+            .clearFocusOnTap(focusManager),
         drawerState = drawerState,
         gesturesEnabled = isMobileLayout,
         drawerContent = {
@@ -158,12 +176,14 @@ fun HocgScreen(
                         Text("DB 수동갱신")
                     }
                     HorizontalDivider()
-                    Text(
-                        text = "DB: ${state.dbPath}",
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Text("테마", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    AppThemeMode.entries.forEach { mode ->
+                        ThemeModeItem(
+                            mode = mode,
+                            selectedMode = themeMode,
+                            onSelected = onThemeModeChange,
+                        )
+                    }
                 }
             }
         },
@@ -177,6 +197,7 @@ fun HocgScreen(
                     innerPadding = innerPadding,
                     onSearchQueryChanged = viewModel::onSearchQueryChanged,
                     onOpenMenu = { scope.launch { drawerState.open() } },
+                    onDismissKeyboard = { focusManager.clearFocus() },
                     onSelectPrint = viewModel::onSelectPrint,
                     onToggleImagePanel = viewModel::onToggleImagePanel,
                 )
@@ -185,6 +206,7 @@ fun HocgScreen(
                     state = state,
                     innerPadding = innerPadding,
                     onSearchQueryChanged = viewModel::onSearchQueryChanged,
+                    onDismissKeyboard = { focusManager.clearFocus() },
                     onSelectPrint = viewModel::onSelectPrint,
                 )
             }
@@ -198,6 +220,7 @@ private fun MobileLayout(
     innerPadding: androidx.compose.foundation.layout.PaddingValues,
     onSearchQueryChanged: (String) -> Unit,
     onOpenMenu: () -> Unit,
+    onDismissKeyboard: () -> Unit,
     onSelectPrint: (Long) -> Unit,
     onToggleImagePanel: () -> Unit,
 ) {
@@ -223,9 +246,14 @@ private fun MobileLayout(
                 label = { Text("카드번호 / 이름 / 태그 / 한국어 본문 검색") },
                 enabled = !state.updateRunning,
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { onDismissKeyboard() }),
             )
             IconButton(
-                onClick = onOpenMenu,
+                onClick = {
+                    onDismissKeyboard()
+                    onOpenMenu()
+                },
                 enabled = !state.updateRunning,
             ) {
                 Icon(Icons.Default.Menu, contentDescription = "메뉴")
@@ -283,6 +311,7 @@ private fun DesktopLayout(
     state: HocgUiState,
     innerPadding: androidx.compose.foundation.layout.PaddingValues,
     onSearchQueryChanged: (String) -> Unit,
+    onDismissKeyboard: () -> Unit,
     onSelectPrint: (Long) -> Unit,
 ) {
     Column(
@@ -320,6 +349,8 @@ private fun DesktopLayout(
             label = { Text("카드번호 / 이름 / 태그 / 한국어 본문 검색") },
             enabled = !state.updateRunning,
             singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { onDismissKeyboard() }),
         )
 
         UpdateStatusBlock(state)
@@ -585,8 +616,42 @@ private fun DetailLine(line: String) {
 }
 
 @Composable
+private fun ThemeModeItem(
+    mode: AppThemeMode,
+    selectedMode: AppThemeMode,
+    onSelected: (AppThemeMode) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onSelected(mode) }
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(
+            selected = selectedMode == mode,
+            onClick = { onSelected(mode) },
+        )
+        Text(
+            text = mode.label,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}
+
+@Composable
 private fun scaledHeightDp(ratio: Float, minPx: Int, maxPx: Int): Dp {
     val config = androidx.compose.ui.platform.LocalConfiguration.current
     val scaled = (config.screenHeightDp * ratio).roundToInt()
     return scaled.coerceIn(minPx, maxPx).dp
+}
+
+private fun Modifier.clearFocusOnTap(focusManager: FocusManager): Modifier {
+    return pointerInput(focusManager) {
+        awaitEachGesture {
+            awaitFirstDown(pass = PointerEventPass.Final)
+            focusManager.clearFocus()
+            waitForUpOrCancellation(pass = PointerEventPass.Final)
+        }
+    }
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 private let sectionLabels: [String] = [
     "カードタイプ",
@@ -14,9 +15,40 @@ private let sectionLabels: [String] = [
     "HP",
 ]
 
+private enum AppThemeMode: String, CaseIterable, Identifiable {
+    case system
+    case light
+    case dark
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .system:
+            "시스템 기본"
+        case .light:
+            "라이트 모드"
+        case .dark:
+            "다크 모드"
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system:
+            nil
+        case .light:
+            .light
+        case .dark:
+            .dark
+        }
+    }
+}
+
 struct ContentView: View {
     @StateObject private var viewModel = HocgViewModel()
     @State private var showingMenu = false
+    @AppStorage("theme_mode") private var themeModeRawValue: String = AppThemeMode.system.rawValue
 
     var body: some View {
         GeometryReader { geo in
@@ -40,12 +72,25 @@ struct ContentView: View {
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    dismissKeyboard()
+                },
+                including: .all
+            )
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0).onChanged { _ in
+                    dismissKeyboard()
+                },
+                including: .all
+            )
             .sheet(isPresented: Binding(
                 get: { showingMenu && isMobileLayout },
                 set: { showingMenu = $0 }
             )) {
                 MenuSheet(
                     state: viewModel.state,
+                    themeMode: selectedThemeModeBinding,
                     onBulkImageDownload: {
                         showingMenu = false
                         viewModel.onBulkImageDownload()
@@ -78,7 +123,19 @@ struct ContentView: View {
                 Text("DB 업데이트가 있습니다. 업데이트 하시겠습니까?\n로컬 DB 날짜: \(dialog.localDate ?? "없음")\nGitHub DB 날짜: \(dialog.remoteDate)")
             }
             .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
+            .preferredColorScheme(selectedThemeMode.colorScheme)
         }
+    }
+
+    private var selectedThemeMode: AppThemeMode {
+        AppThemeMode(rawValue: themeModeRawValue) ?? .system
+    }
+
+    private var selectedThemeModeBinding: Binding<AppThemeMode> {
+        Binding(
+            get: { selectedThemeMode },
+            set: { themeModeRawValue = $0.rawValue }
+        )
     }
 
     private func mobileLayout(screenHeight: CGFloat) -> some View {
@@ -435,10 +492,15 @@ struct ContentView: View {
         }
         return displayName
     }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
 }
 
 private struct MenuSheet: View {
     let state: HocgUiState
+    @Binding var themeMode: AppThemeMode
     let onBulkImageDownload: () -> Void
     let onManualUpdate: () -> Void
 
@@ -455,11 +517,16 @@ private struct MenuSheet: View {
                         .disabled(state.updateRunning)
                 }
 
-                Section("DB") {
-                    Text(state.dbPath)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
+                Section("테마") {
+                    Picker(selection: $themeMode) {
+                        ForEach(AppThemeMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    } label: {
+                        EmptyView()
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.inline)
                 }
             }
             .navigationTitle("메뉴")

@@ -18,3 +18,33 @@ JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew assembleDebug
 
 ## APK 산출물
 - `app/build/outputs/apk/debug/app-debug.apk`
+
+## Release APK 서명
+1. 키스토어 생성 (최초 1회):
+```bash
+cd /Users/perlihite/Desktop/hololive_OCG_helper/mobile/android/native-app
+keytool -genkeypair -v \
+  -keystore hocg-release.jks \
+  -alias hocg \
+  -keyalg RSA -keysize 2048 -validity 10000
+```
+
+2. `keystore.properties` 생성:
+```properties
+storeFile=hocg-release.jks
+storePassword=YOUR_STORE_PASSWORD
+keyAlias=hocg
+keyPassword=YOUR_KEY_PASSWORD
+```
+
+3. 서명된 release APK 빌드:
+```bash
+cd /Users/perlihite/Desktop/hololive_OCG_helper/mobile/android/native-app
+JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew clean assembleRelease
+```
+
+4. 산출물:
+- `app/build/outputs/apk/release/app-release.apk`
+
+참고:
+- `keystore.properties` 또는 `ANDROID_KEYSTORE_PATH/ANDROID_KEYSTORE_PASSWORD/ANDROID_KEY_ALIAS/ANDROID_KEY_PASSWORD` 환경변수가 있으면 release 서명이 적용됩니다.
