@@ -648,6 +648,10 @@ def launch_app(db_path: str) -> None:
             image_zoom_state["enabled"] = False
             set_detail_text("")
             clear_image("카드를 선택하세요")
+            try:
+                build_layout(force=True)
+            except Exception:
+                pass
 
         def render_result_list() -> None:
             lv.controls.clear()
@@ -690,6 +694,7 @@ def launch_app(db_path: str) -> None:
                 selected_card_number["no"] = (brief.get("card_number") or "").strip()
                 selected_image_url["url"] = resolve_url((brief.get("image_url") or "").strip())
                 image_zoom_state["enabled"] = False
+                build_layout(force=True)
 
                 if selected_card_number["no"]:
                     set_image_for_card(
