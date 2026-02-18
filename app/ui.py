@@ -1030,6 +1030,9 @@ def launch_app(db_path: str) -> None:
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             )
 
+        def has_selected_card() -> bool:
+            return bool((selected_card_number["no"] or "").strip())
+
         def toggle_image_panel(e=None) -> None:
             image_panel_state["collapsed"] = not image_panel_state["collapsed"]
             if image_panel_state["collapsed"]:
@@ -1121,34 +1124,38 @@ def launch_app(db_path: str) -> None:
                     expand=list_expand,
                 )
 
-                image_content: ft.Control
-                if image_panel_state["collapsed"]:
-                    image_content = ft.Container(
-                        content=ft.Text("이미지를 접었습니다.", color=COLORS.GREY_400),
-                        alignment=ALIGN_CENTER,
-                        expand=True,
-                        border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
-                        border_radius=10,
+                image_section: ft.Control
+                if has_selected_card():
+                    image_content: ft.Control
+                    if image_panel_state["collapsed"]:
+                        image_content = ft.Container(
+                            content=ft.Text("이미지를 접었습니다.", color=COLORS.GREY_400),
+                            alignment=ALIGN_CENTER,
+                            expand=True,
+                            border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
+                            border_radius=10,
+                        )
+                    else:
+                        image_content = ft.Container(
+                            content=img_container,
+                            expand=True,
+                            border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
+                            border_radius=10,
+                        )
+
+                    image_section = ft.Container(
+                        content=ft.Column(
+                            [
+                                image_section_header_mobile(),
+                                image_content,
+                            ],
+                            spacing=6,
+                            expand=True,
+                        ),
+                        expand=12 if image_panel_state["collapsed"] else image_expand,
                     )
                 else:
-                    image_content = ft.Container(
-                        content=img_container,
-                        expand=True,
-                        border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
-                        border_radius=10,
-                    )
-
-                image_section = ft.Container(
-                    content=ft.Column(
-                        [
-                            image_section_header_mobile(),
-                            image_content,
-                        ],
-                        spacing=6,
-                        expand=True,
-                    ),
-                    expand=12 if image_panel_state["collapsed"] else image_expand,
-                )
+                    image_section = ft.Container(content=ft.Column([], spacing=0), expand=0)
 
                 detail_section = ft.Container(
                     content=ft.Column(
@@ -1168,15 +1175,12 @@ def launch_app(db_path: str) -> None:
                     expand=detail_expand if not image_panel_state["collapsed"] else 54,
                 )
 
-                mobile_sections = ft.Column(
-                    [
-                        list_section,
-                        image_section,
-                        detail_section,
-                    ],
-                    expand=True,
-                    spacing=8,
-                )
+                mobile_controls = [list_section]
+                if has_selected_card():
+                    mobile_controls.append(image_section)
+                mobile_controls.append(detail_section)
+
+                mobile_sections = ft.Column(mobile_controls, expand=True, spacing=8)
 
                 mobile_root = ft.Column(
                     [
@@ -1247,14 +1251,22 @@ def launch_app(db_path: str) -> None:
             )
 
             body_controls: list[ft.Control] = [ft.Container(left, expand=3)]
-            body_controls.extend(
-                [
-                    ft.VerticalDivider(width=1),
-                    ft.Container(middle, expand=6),
-                    ft.VerticalDivider(width=1),
-                    ft.Container(right, expand=4),
-                ]
-            )
+            if has_selected_card():
+                body_controls.extend(
+                    [
+                        ft.VerticalDivider(width=1),
+                        ft.Container(middle, expand=6),
+                        ft.VerticalDivider(width=1),
+                        ft.Container(right, expand=4),
+                    ]
+                )
+            else:
+                body_controls.extend(
+                    [
+                        ft.VerticalDivider(width=1),
+                        ft.Container(right, expand=7),
+                    ]
+                )
             body = ft.Row(body_controls, expand=True)
 
             desktop_root = ft.Column(
