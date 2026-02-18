@@ -726,10 +726,7 @@ def launch_app(db_path: str) -> None:
                     conn = get_conn()
                     results_state["rows"] = list_cards(conn, limit=180)
                     render_result_list()
-                    if results_state["rows"]:
-                        show_detail(results_state["rows"][0]["print_id"])
-                    else:
-                        clear_selection()
+                    clear_selection()
                 except Exception as ex:
                     message = f"초기 목록 로드 실패: {ex}"
                     append_log(f"[ERROR] {message}")
