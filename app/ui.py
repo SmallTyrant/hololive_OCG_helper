@@ -647,7 +647,7 @@ def launch_app(db_path: str) -> None:
             selected_image_url["url"] = ""
             image_zoom_state["enabled"] = False
             set_detail_text("")
-            clear_image("카드를 선택하세요")
+            clear_image("카드를 검색 후 선택하면 이미지가 표시됩니다.")
             try:
                 build_layout(force=True)
             except Exception:
