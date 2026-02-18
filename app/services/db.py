@@ -170,15 +170,17 @@ def query_suggest(conn: sqlite3.Connection, q: str, limit: int | None = None) ->
             COALESCE(ko.name,'') AS name_ko
         FROM prints p
         LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
+        LEFT JOIN card_texts_ja ja ON ja.print_id = p.print_id
         {joins}
         WHERE
             UPPER(p.card_number) LIKE UPPER(?)
             OR COALESCE(p.name_ja,'') LIKE ?
             OR COALESCE(ko.name,'') LIKE ?
             OR COALESCE(ko.effect_text,'') LIKE ?
+            OR COALESCE(ja.effect_text,'') LIKE ?
             OR (t.tag IS NOT NULL AND (t.tag LIKE ? OR COALESCE(t.normalized,'') LIKE ?))
         """
-        params = [like, like, like, like, like, like]
+        params = [like, like, like, like, like, like, like]
 
         for term in terms:
             sql += " OR t.tag LIKE ? OR COALESCE(t.normalized,'') LIKE ?"
@@ -191,14 +193,16 @@ def query_suggest(conn: sqlite3.Connection, q: str, limit: int | None = None) ->
             norm_name_ja = _sql_normalize_expr("p.name_ja")
             norm_name_ko = _sql_normalize_expr("ko.name")
             norm_effect_text = _sql_normalize_expr("ko.effect_text")
+            norm_effect_text_ja = _sql_normalize_expr("ja.effect_text")
             for term in normalized_terms:
                 if not term:
                     continue
                 sql += (
                     f" OR {norm_card_number} LIKE ? OR {norm_tag} LIKE ? OR {norm_normalized} LIKE ?"
                     f" OR {norm_name_ja} LIKE ? OR {norm_name_ko} LIKE ? OR {norm_effect_text} LIKE ?"
+                    f" OR {norm_effect_text_ja} LIKE ?"
                 )
-                params += [f"%{term}%", f"%{term}%", f"%{term}%", f"%{term}%", f"%{term}%", f"%{term}%"]
+                params += [f"%{term}%", f"%{term}%", f"%{term}%", f"%{term}%", f"%{term}%", f"%{term}%", f"%{term}%"]
 
         sql += " ORDER BY p.card_number"
         if limit is not None and limit > 0:
@@ -216,22 +220,28 @@ def query_suggest(conn: sqlite3.Connection, q: str, limit: int | None = None) ->
         COALESCE(ko.name,'') AS name_ko
     FROM prints p
     LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
+    LEFT JOIN card_texts_ja ja ON ja.print_id = p.print_id
     WHERE UPPER(p.card_number) LIKE UPPER(?)
        OR COALESCE(p.name_ja,'') LIKE ?
        OR COALESCE(ko.name,'') LIKE ?
        OR COALESCE(ko.effect_text,'') LIKE ?
+       OR COALESCE(ja.effect_text,'') LIKE ?
     """
-    params: list[object] = [like, like, like, like]
+    params: list[object] = [like, like, like, like, like]
     if normalized_terms:
         norm_card_number = _sql_normalize_expr("p.card_number")
         norm_name_ja = _sql_normalize_expr("p.name_ja")
         norm_name_ko = _sql_normalize_expr("ko.name")
         norm_effect_text = _sql_normalize_expr("ko.effect_text")
+        norm_effect_text_ja = _sql_normalize_expr("ja.effect_text")
         for term in normalized_terms:
             if not term:
                 continue
-            sql += f" OR {norm_card_number} LIKE ? OR {norm_name_ja} LIKE ? OR {norm_name_ko} LIKE ? OR {norm_effect_text} LIKE ?"
-            params += [f"%{term}%", f"%{term}%", f"%{term}%", f"%{term}%"]
+            sql += (
+                f" OR {norm_card_number} LIKE ? OR {norm_name_ja} LIKE ? OR {norm_name_ko} LIKE ?"
+                f" OR {norm_effect_text} LIKE ? OR {norm_effect_text_ja} LIKE ?"
+            )
+            params += [f"%{term}%", f"%{term}%", f"%{term}%", f"%{term}%", f"%{term}%"]
     sql += " ORDER BY p.card_number"
     if limit is not None and limit > 0:
         sql += " LIMIT ?"
@@ -323,19 +333,44 @@ def query_exact(conn: sqlite3.Connection, q: str, limit: int | None = None) -> l
         params.append(limit)
     return [dict(r) for r in conn.execute(sql, params)]
 
+
+def list_cards(conn: sqlite3.Connection, limit: int = 120) -> list[dict]:
+    row_limit = max(1, int(limit or 120))
+    return [
+        dict(r)
+        for r in conn.execute(
+            """
+            SELECT
+                p.print_id,
+                p.card_number,
+                COALESCE(p.name_ja,'') AS name_ja,
+                COALESCE(ko.name,'') AS name_ko
+            FROM prints p
+            LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
+            ORDER BY p.card_number
+            LIMIT ?
+            """,
+            (row_limit,),
+        )
+    ]
+
 def load_card_detail(conn: sqlite3.Connection, pid: int) -> dict | None:
     r = conn.execute(
         """
         SELECT
             ko.effect_text AS ko_text,
-            ko.name AS ko_name
+            ko.name AS ko_name,
+            ja.effect_text AS ja_text,
+            ja.name AS ja_name
         FROM prints p
         LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
+        LEFT JOIN card_texts_ja ja ON ja.print_id = p.print_id
         WHERE p.print_id=?
         """,
         (pid,),
     ).fetchone()
     return dict(r) if r else None
+
 
 def get_print_brief(conn: sqlite3.Connection, print_id: int) -> dict | None:
     row = conn.execute(

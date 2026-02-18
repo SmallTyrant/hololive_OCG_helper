@@ -15,6 +15,7 @@ from app.services.db import (
     open_db,
     query_suggest,
     query_exact,
+    list_cards,
     load_card_detail,
     get_print_brief,
     db_exists,
@@ -144,7 +145,7 @@ def launch_app(db_path: str) -> None:
         # --- Results / Detail ---
         lv = ft.Column(spacing=2, scroll=ft.ScrollMode.AUTO, expand=True)
         detail_lv = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO, expand=True)
-        detail_texts = {"ko": ""}
+        detail_texts = {"ko": "", "ja": ""}
 
         # --- Image area ---
         def build_image_placeholder(text: str, loading: bool = False) -> ft.Control:
@@ -596,17 +597,22 @@ def launch_app(db_path: str) -> None:
         def render_detail() -> None:
             detail_lv.controls.clear()
             ko = (detail_texts["ko"] or "").strip()
+            ja = (detail_texts["ja"] or "").strip()
 
             if ko:
                 detail_lv.controls.append(build_section_chip("한국어"))
                 append_detail_lines(ko)
+            elif ja:
+                detail_lv.controls.append(build_section_chip("일본어 원문"))
+                append_detail_lines(ja)
             else:
-                detail_lv.controls.append(ft.Text("(한국어 본문 없음)"))
+                detail_lv.controls.append(ft.Text("(본문 없음)"))
 
             page.update()
 
-        def set_detail_text(ko_text: str | None) -> None:
+        def set_detail_text(ko_text: str | None, ja_text: str | None = None) -> None:
             detail_texts["ko"] = (ko_text or "")
+            detail_texts["ja"] = (ja_text or "")
             render_detail()
 
         def clear_selection() -> None:
@@ -672,7 +678,9 @@ def launch_app(db_path: str) -> None:
                     clear_image("이미지 없음")
 
                 card = load_card_detail(conn, pid)
-                set_detail_text(card.get("ko_text", "") if card else None)
+                ko_text = (card.get("ko_text", "") if card else "")
+                ja_text = (card.get("ja_text", "") if card else "")
+                set_detail_text(ko_text, ja_text)
 
             except Exception as ex:
                 set_detail_text(f"[ERROR] 상세 로드 실패: {ex}")
@@ -686,8 +694,22 @@ def launch_app(db_path: str) -> None:
             selected_print_id["id"] = None
 
             if not query:
-                render_result_list()
-                clear_selection()
+                try:
+                    conn = get_conn()
+                    results_state["rows"] = list_cards(conn, limit=180)
+                    render_result_list()
+                    if results_state["rows"]:
+                        show_detail(results_state["rows"][0]["print_id"])
+                    else:
+                        clear_selection()
+                except Exception as ex:
+                    message = f"초기 목록 로드 실패: {ex}"
+                    append_log(f"[ERROR] {message}")
+                    update_status.value = message
+                    update_status.visible = True
+                    update_status.color = COLORS.RED_300
+                    render_result_list()
+                    clear_selection()
                 page.update()
                 return
 
@@ -1181,8 +1203,8 @@ def launch_app(db_path: str) -> None:
 
         page.on_resize = on_resize
         clear_selection()
-        render_result_list()
         build_layout()
+        refresh_list()
         page.run_task(run_startup_checks_async)
         page.run_task(check_remote_db_update_async)
         if needs_db_update():
