@@ -26,12 +26,49 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 NAMU_BASE = "https://namu.wiki"
-CARDNO_RE = re.compile(r"\b[hH][A-Za-z]{1,5}\d{2}-\d{3}\b")
+CARDNO_RE = re.compile(r"(?<![A-Za-z0-9_])[hH][A-Za-z]{1,5}\d{2}-\d{3}(?![A-Za-z0-9_])")
+HANGUL_RE = re.compile(r"[가-힣]")
 
-EFFECT_HEADER_KEYWORDS = ("효과", "텍스트", "능력", "카드 효과", "효과 텍스트")
-NAME_HEADER_KEYWORDS = ("카드명", "카드 이름", "이름", "카드명(한)")
-CARDNO_HEADER_KEYWORDS = ("카드번호", "카드 번호", "card number", "card no", "card_no", "print", "카드넘버")
+EFFECT_HEADER_KEYWORDS = (
+    "효과",
+    "텍스트",
+    "능력",
+    "카드 효과",
+    "효과 텍스트",
+    "effect",
+    "text",
+    "ability",
+    "card effect",
+    "effect text",
+)
+NAME_HEADER_KEYWORDS = (
+    "카드명",
+    "카드 이름",
+    "이름",
+    "카드명(한)",
+    "name",
+    "card name",
+    "card_name",
+    "english name",
+    "eng name",
+    "en name",
+    "영문명",
+    "영문 이름",
+    "영문",
+)
+CARDNO_HEADER_KEYWORDS = (
+    "카드번호",
+    "카드 번호",
+    "카드 넘버",
+    "card number",
+    "card no",
+    "card_no",
+    "card #",
+    "print",
+    "카드넘버",
+)
 
+BULLET_MARKERS = ("■", "●", "◆", "◇", "•", "·")
 
 def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
@@ -140,12 +177,61 @@ def pick_effect(cells: list[str], header_map: dict[str, int]) -> str:
 
 
 def pick_name(cells: list[str], header_map: dict[str, int]) -> str:
+    def _clean_name_line(line: str) -> str:
+        cleaned = re.split(r"\b(?:LIFE|HP)\b", line)[0].strip()
+        cleaned = re.split(
+            r"(레벨|속성|오시 스킬|SP 오시 스킬|SP오시스킬|아츠|배턴 터치|레어도|코스트|에너지|카드 넘버|카드번호|카드 번호|카드넘버)",
+            cleaned,
+        )[0].strip()
+        cleaned = re.sub(r"\s+\d+.*$", "", cleaned).strip()
+        if not cleaned:
+            cleaned = line.strip()
+        if CARDNO_RE.search(cleaned):
+            return ""
+        return cleaned
+
     if "name" in header_map:
         idx = header_map["name"]
         if 0 <= idx < len(cells):
-            return normalize_ws(cells[idx])
-    return ""
+            named = normalize_ws(cells[idx])
+            if named:
+                return named
 
+    lines: list[str] = []
+    for cell in cells:
+        for line in cell.splitlines():
+            normalized = normalize_ws(line)
+            if normalized:
+                lines.append(normalized)
+
+    for line in lines:
+        if line.startswith("#"):
+            continue
+        if not HANGUL_RE.search(line):
+            continue
+        cleaned = _clean_name_line(line)
+        if cleaned:
+            return cleaned
+
+    for line in lines:
+        if line.startswith("#"):
+            continue
+        if HANGUL_RE.search(line):
+            continue
+        if not re.search(r"[A-Za-z]", line):
+            continue
+        if any(marker in line for marker in BULLET_MARKERS):
+            continue
+        if "[" in line or "]" in line:
+            continue
+        cleaned = _clean_name_line(line)
+        if not cleaned:
+            continue
+        if len(cleaned) > 50:
+            continue
+        return cleaned
+
+    return ""
 
 def pick_card_number(cells: list[str], header_map: dict[str, int]) -> str:
     if "card_number" in header_map:
