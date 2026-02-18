@@ -224,7 +224,7 @@ final class HocgViewModel: ObservableObject {
             state.results = []
             state.selectedPrintId = nil
             state.detailKoText = ""
-            state.imageState = .placeholder("카드를 선택하세요")
+            state.imageState = .placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다.")
             return
         }
 
@@ -237,7 +237,7 @@ final class HocgViewModel: ObservableObject {
                 state.results = []
                 state.selectedPrintId = nil
                 state.detailKoText = ""
-                state.imageState = .placeholder("카드를 선택하세요")
+                state.imageState = .placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다.")
                 return
             }
 
@@ -253,7 +253,7 @@ final class HocgViewModel: ObservableObject {
             } else {
                 state.selectedPrintId = nil
                 state.detailKoText = ""
-                state.imageState = .placeholder("카드를 선택하세요")
+                state.imageState = .placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다.")
             }
         }
     }

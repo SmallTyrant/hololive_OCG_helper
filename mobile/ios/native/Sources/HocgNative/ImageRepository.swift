@@ -1,4 +1,5 @@
 import Foundation
+import Network
 
 actor ImageDownloadTracker {
     private var running: Set<String> = []
@@ -19,9 +20,23 @@ actor ImageDownloadTracker {
 final class ImageRepository {
     private let paths: AppPaths
     private let tracker = ImageDownloadTracker()
+    private let monitor = NWPathMonitor()
+    private let monitorQueue = DispatchQueue(label: "hocg.network.monitor")
+    private let offlineImageMessage = "네트워크 연결이 필요합니다.\n또는 캐시된 이미지가 없습니다."
+    private let session: URLSession
 
     init(paths: AppPaths) {
         self.paths = paths
+        let config = URLSessionConfiguration.ephemeral
+        config.waitsForConnectivity = false
+        config.timeoutIntervalForRequest = 20
+        config.timeoutIntervalForResource = 25
+        self.session = URLSession(configuration: config)
+        monitor.start(queue: monitorQueue)
+    }
+
+    deinit {
+        monitor.cancel()
     }
 
     func downloadIfNeeded(cardNumber: String, imageURL: String) async -> CardImageState {
@@ -39,6 +54,10 @@ final class ImageRepository {
             return .placeholder("이미지 URL 없음")
         }
 
+        if monitor.currentPath.status == .unsatisfied {
+            return .error(offlineImageMessage)
+        }
+
         let shouldDownload = await tracker.start(trimmedCard)
         if !shouldDownload {
             return .remote(resolved)
@@ -52,9 +71,9 @@ final class ImageRepository {
 
         do {
             var request = URLRequest(url: resolved)
-            request.timeoutInterval = 30
+            request.timeoutInterval = 20
             request.setValue("hOCG_H/1.1", forHTTPHeaderField: "User-Agent")
-            let (tempFile, response) = try await URLSession.shared.download(for: request)
+            let (tempFile, response) = try await session.download(for: request)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                 return .error("이미지 로딩 실패")
             }
@@ -72,6 +91,22 @@ final class ImageRepository {
             try fm.moveItem(at: tempDestination, to: destination)
             return .local(destination)
         } catch {
+            if let urlError = error as? URLError {
+                switch urlError.code {
+                case .notConnectedToInternet,
+                        .networkConnectionLost,
+                        .cannotConnectToHost,
+                        .cannotFindHost,
+                        .dnsLookupFailed,
+                        .timedOut:
+                    return .error(offlineImageMessage)
+                default:
+                    break
+                }
+            }
+            if monitor.currentPath.status == .unsatisfied {
+                return .error(offlineImageMessage)
+            }
             return .error("이미지 로딩 실패")
         }
     }

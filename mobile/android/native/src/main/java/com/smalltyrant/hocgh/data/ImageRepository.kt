@@ -11,6 +11,7 @@ class ImageRepository(private val paths: AppPaths) {
     private val http = OkHttpClient.Builder()
         .callTimeout(Duration.ofSeconds(30))
         .build()
+    private val offlineImageMessage = "네트워크 연결이 필요합니다.\n또는 캐시된 이미지가 없습니다."
 
     private val lock = Any()
     private val downloading = mutableSetOf<String>()
@@ -26,6 +27,10 @@ class ImageRepository(private val paths: AppPaths) {
         val resolved = paths.resolveImageUrl(imageUrl)
         if (resolved.isBlank()) {
             return ImageState.Placeholder("이미지 URL 없음")
+        }
+
+        if (!paths.hasNetworkConnection()) {
+            return ImageState.Error(offlineImageMessage)
         }
         return ImageState.Remote(resolved)
     }
@@ -62,7 +67,11 @@ class ImageRepository(private val paths: AppPaths) {
             download(resolved, local)
             ImageState.Local(local)
         } catch (_: Throwable) {
-            ImageState.Error("이미지 로딩 실패")
+            if (!paths.hasNetworkConnection()) {
+                ImageState.Error(offlineImageMessage)
+            } else {
+                ImageState.Error("이미지 로딩 실패")
+            }
         } finally {
             synchronized(lock) {
                 downloading -= cardNumber

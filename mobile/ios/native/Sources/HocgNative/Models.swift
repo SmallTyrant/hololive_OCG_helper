@@ -46,7 +46,7 @@ struct HocgUiState {
     var results: [PrintRow] = []
     var selectedPrintId: Int64?
     var detailKoText: String = ""
-    var imageState: CardImageState = .placeholder("카드를 선택하세요")
+    var imageState: CardImageState = .placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다.")
     var imageCollapsed: Bool = false
     var updateRunning: Bool = false
     var updateStatus: String = ""

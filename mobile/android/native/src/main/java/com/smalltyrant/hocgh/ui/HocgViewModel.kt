@@ -245,7 +245,7 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
                     results = emptyList(),
                     selectedPrintId = null,
                     detailKoText = "",
-                    imageState = ImageState.Placeholder("카드를 선택하세요"),
+                    imageState = ImageState.Placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다."),
                 )
                 return@launch
             }
@@ -259,7 +259,7 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
                     results = emptyList(),
                     selectedPrintId = null,
                     detailKoText = "",
-                    imageState = ImageState.Placeholder("카드를 선택하세요"),
+                    imageState = ImageState.Placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다."),
                 )
                 return@launch
             }
@@ -278,7 +278,7 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
                 state = state.copy(
                     selectedPrintId = null,
                     detailKoText = "",
-                    imageState = ImageState.Placeholder("카드를 선택하세요"),
+                    imageState = ImageState.Placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다."),
                 )
             } else {
                 showDetail(first.printId)

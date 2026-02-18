@@ -1,6 +1,8 @@
 package com.smalltyrant.hocgh.data
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import java.io.File
 
 private const val APP_NAME = "hOCG_H"
@@ -36,6 +38,14 @@ class AppPaths(private val context: Context) {
 
     fun restoreBundledDb(): Boolean {
         return copyBundledDb(forceReplace = true)
+    }
+
+    fun hasNetworkConnection(): Boolean {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return true
+        val network = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(network) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
     private fun copyBundledDb(forceReplace: Boolean): Boolean {

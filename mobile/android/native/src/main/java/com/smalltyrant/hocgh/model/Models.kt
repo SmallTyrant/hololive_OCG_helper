@@ -46,7 +46,7 @@ data class HocgUiState(
     val results: List<PrintRow> = emptyList(),
     val selectedPrintId: Long? = null,
     val detailKoText: String = "",
-    val imageState: ImageState = ImageState.Placeholder("카드를 선택하세요"),
+    val imageState: ImageState = ImageState.Placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다."),
     val imageCollapsed: Boolean = false,
     val updateRunning: Boolean = false,
     val updateStatus: String = "",
