@@ -17,9 +17,44 @@ from urllib3.util.retry import Retry
 CARDNO_RE = re.compile(r"\b[hH][A-Za-z]{1,5}\d{2}-\d{3}\b")
 HANGUL_RE = re.compile(r"[가-힣]")
 
-EFFECT_HEADER_KEYWORDS = ("효과", "텍스트", "능력", "카드 효과", "효과 텍스트")
-NAME_HEADER_KEYWORDS = ("카드명", "카드 이름", "이름", "카드명(한)")
-CARDNO_HEADER_KEYWORDS = ("카드번호", "카드 번호", "카드 넘버", "card number", "card no", "card_no", "print", "카드넘버")
+EFFECT_HEADER_KEYWORDS = (
+    "효과",
+    "텍스트",
+    "능력",
+    "카드 효과",
+    "효과 텍스트",
+    "effect",
+    "text",
+    "ability",
+    "card effect",
+    "effect text",
+)
+NAME_HEADER_KEYWORDS = (
+    "카드명",
+    "카드 이름",
+    "이름",
+    "카드명(한)",
+    "name",
+    "card name",
+    "card_name",
+    "english name",
+    "eng name",
+    "en name",
+    "영문명",
+    "영문 이름",
+    "영문",
+)
+CARDNO_HEADER_KEYWORDS = (
+    "카드번호",
+    "카드 번호",
+    "카드 넘버",
+    "card number",
+    "card no",
+    "card_no",
+    "card #",
+    "print",
+    "카드넘버",
+)
 
 
 def now_iso() -> str:
@@ -107,11 +142,8 @@ def is_label_cell(cell: str) -> bool:
 
 def extract_korean_name(text: str) -> str:
     lines = [normalize_ws(l) for l in text.splitlines() if normalize_ws(l)]
-    for line in lines:
-        if line.startswith("#"):
-            continue
-        if not HANGUL_RE.search(line):
-            continue
+
+    def _clean_name_line(line: str) -> str:
         cleaned = re.split(r"\b(?:LIFE|HP)\b", line)[0].strip()
         cleaned = re.split(
             r"(레벨|속성|오시 스킬|SP 오시 스킬|SP오시스킬|아츠|배턴 터치|레어도|코스트|에너지|카드 넘버|카드번호|카드 번호|카드넘버)",
@@ -121,6 +153,33 @@ def extract_korean_name(text: str) -> str:
         if not cleaned:
             cleaned = line.strip()
         if CARDNO_RE.search(cleaned):
+            return ""
+        return cleaned
+
+    for line in lines:
+        if line.startswith("#"):
+            continue
+        if not HANGUL_RE.search(line):
+            continue
+        cleaned = _clean_name_line(line)
+        if cleaned:
+            return cleaned
+
+    for line in lines:
+        if line.startswith("#"):
+            continue
+        if HANGUL_RE.search(line):
+            continue
+        if not re.search(r"[A-Za-z]", line):
+            continue
+        if any(marker in line for marker in BULLET_MARKERS):
+            continue
+        if "[" in line or "]" in line:
+            continue
+        cleaned = _clean_name_line(line)
+        if not cleaned:
+            continue
+        if len(cleaned) > 50:
             continue
         return cleaned
     return ""
