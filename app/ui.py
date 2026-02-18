@@ -1034,13 +1034,6 @@ def launch_app(db_path: str) -> None:
                 return is_mobile_platform() and not is_android_tablet()
             return bool(width) and width < 900 and not is_android_tablet()
 
-        def mobile_scaled_height(ratio: float, min_px: int, max_px: int) -> int:
-            _, height = get_view_size()
-            if height <= 0:
-                height = 844.0  # iPhone 기준 fallback
-            scaled = int(height * ratio)
-            return max(min_px, min(max_px, scaled))
-
         def build_layout(force: bool = False) -> None:
             mobile = is_mobile_layout()
             width, height = get_view_size()
@@ -1059,10 +1052,8 @@ def launch_app(db_path: str) -> None:
             if mobile:
                 lv.expand = True
                 lv.scroll = ft.ScrollMode.AUTO
-                detail_lv.expand = False
-                detail_lv.scroll = None
-                list_height = mobile_scaled_height(0.30, 190, 360)
-                image_height = mobile_scaled_height(0.45, 240, 560)
+                detail_lv.expand = True
+                detail_lv.scroll = ft.ScrollMode.AUTO
 
                 top_row = ft.Row(
                     [
@@ -1073,39 +1064,94 @@ def launch_app(db_path: str) -> None:
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 )
 
+                list_expand = 34
+                image_expand = 38
+                detail_expand = 28
+
+                list_section = ft.Container(
+                    content=ft.Column(
+                        [
+                            ft.Text("목록"),
+                            ft.Container(
+                                content=lv,
+                                expand=True,
+                                padding=10,
+                                border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
+                                border_radius=10,
+                            ),
+                        ],
+                        spacing=6,
+                        expand=True,
+                    ),
+                    expand=list_expand,
+                )
+
+                image_content: ft.Control
+                if image_panel_state["collapsed"]:
+                    image_content = ft.Container(
+                        content=ft.Text("이미지를 접었습니다.", color=COLORS.GREY_400),
+                        alignment=ALIGN_CENTER,
+                        expand=True,
+                        border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
+                        border_radius=10,
+                    )
+                else:
+                    image_content = ft.Container(
+                        content=img_container,
+                        expand=True,
+                        border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
+                        border_radius=10,
+                    )
+
+                image_section = ft.Container(
+                    content=ft.Column(
+                        [
+                            image_section_header_mobile(),
+                            image_content,
+                        ],
+                        spacing=6,
+                        expand=True,
+                    ),
+                    expand=12 if image_panel_state["collapsed"] else image_expand,
+                )
+
+                detail_section = ft.Container(
+                    content=ft.Column(
+                        [
+                            ft.Text("효과"),
+                            ft.Container(
+                                content=detail_lv,
+                                expand=True,
+                                padding=10,
+                                border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
+                                border_radius=10,
+                            ),
+                        ],
+                        spacing=6,
+                        expand=True,
+                    ),
+                    expand=detail_expand if not image_panel_state["collapsed"] else 54,
+                )
+
+                mobile_sections = ft.Column(
+                    [
+                        list_section,
+                        image_section,
+                        detail_section,
+                    ],
+                    expand=True,
+                    spacing=8,
+                )
+
                 mobile_root = ft.Column(
                     [
                         top_row,
                         update_status,
                         ft.Divider(height=1),
-                        ft.Text("목록"),
-                        ft.Container(
-                            content=lv,
-                            height=list_height,
-                            padding=10,
-                            border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
-                            border_radius=10,
-                        ),
-                        image_section_header_mobile(),
-                        ft.Text("이미지를 접었습니다.", color=COLORS.GREY_400)
-                        if image_panel_state["collapsed"]
-                        else ft.Container(
-                            content=img_container,
-                            height=image_height,
-                            border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
-                            border_radius=10,
-                        ),
-                        ft.Text("효과"),
-                        ft.Container(
-                            content=detail_lv,
-                            padding=10,
-                            border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
-                            border_radius=10,
-                        ),
+                        mobile_sections,
                     ],
                     expand=True,
                     spacing=8,
-                    scroll=ft.ScrollMode.AUTO,
                 )
 
                 page.add(
