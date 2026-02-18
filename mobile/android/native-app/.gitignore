@@ -1,0 +1,8 @@
+.gradle/
+build/
+**/build/
+local.properties
+app/src/main/assets/*.sqlite
+keystore.properties
+*.jks
+*.keystore

@@ -1,65 +1,64 @@
-Running `(cd /Users/perlihite/.pub-cache/hosted/pub.dev/objective_c-9.3.0/; HOME=/Users/perlihite TMPDIR=/var/folders/mg/855nc5lj7wq5vkmqxnwmd__r0000gn/T/ ANDROID_HOME=/Users/perlihite/Library/Android/sdk PATH=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home/bin:/Users/perlihite/.codex/tmp/arg0/codex-arg0yerOtE:/opt/homebrew/lib/ruby/gems/4.0.0/bin:/opt/homebrew/opt/ruby/bin:/Users/perlihite/flutter/3.38.7/flutter/bin:/Users/perlihite/flutter/3.38.7/flutter/bin:/opt/homebrew/bin:/Users/perlihite/.nvm/versions/node/v24.12.0/bin:/Users/perlihite/.pyenv/shims:/Library/Frameworks/Python.framework/Versions/3.11/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/opt/pmk/env/global/bin:/Library/Apple/usr/bin:/Library/TeX/texbin:/Users/perlihite/.orbstack/bin:/Applications/Codex.app/Contents/Resources /Users/perlihite/flutter/3.38.7/bin/cache/dart-sdk/bin/dart --packages=/Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/package_config.json /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/objective_c/9fb02c5622aea66c3a53a942a16bf409/hook.dill --config=/Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/objective_c/9fb02c5622aea66c3a53a942a16bf409/input.json )`.
-INFO: 2026-02-10 10:40:53.573934: Running `which clang`.
+Running `(cd /Users/perlihite/.pub-cache/hosted/pub.dev/objective_c-9.3.0/; HOME=/Users/perlihite TMPDIR=/var/folders/mg/855nc5lj7wq5vkmqxnwmd__r0000gn/T/ ANDROID_HOME=/Users/perlihite/Library/Android/sdk PATH=/Library/Frameworks/Python.framework/Versions/3.11/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/opt/pmk/env/global/bin:/Library/Apple/usr/bin:/Library/TeX/texbin:/Library/Frameworks/Python.framework/Versions/3.11/bin:/Users/perlihite/.codex/tmp/arg0/codex-arg0JRpMTd:/opt/homebrew/lib/node_modules/@openai/codex/vendor/aarch64-apple-darwin/path:/opt/homebrew/lib/ruby/gems/4.0.0/bin:/opt/homebrew/opt/ruby/bin:/Users/perlihite/flutter/3.38.7/flutter/bin:/Users/perlihite/.nvm/versions/node/v24.12.0/bin:/Users/perlihite/.pyenv/shims:/Users/perlihite/.orbstack/bin:/Users/perlihite/.vscode/extensions/ms-python.debugpy-2025.18.0-darwin-arm64/bundled/scripts/noConfigScripts:/Users/perlihite/.orbstack/bin /Users/perlihite/flutter/3.38.7/bin/cache/dart-sdk/bin/dart --packages=/Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/package_config.json /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/objective_c/9fb02c5622aea66c3a53a942a16bf409/hook.dill --config=/Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/objective_c/9fb02c5622aea66c3a53a942a16bf409/input.json )`.
+INFO: 2026-02-11 19:01:01.175853: Running `which clang`.
 
-INFO: 2026-02-10 10:40:53.585405: Running `/usr/bin/clang --version`.
+INFO: 2026-02-11 19:01:01.185356: Running `/usr/bin/clang --version`.
 
-INFO: 2026-02-10 10:40:53.597307: Running `/usr/bin/clang --version`.
+INFO: 2026-02-11 19:01:01.257675: Running `/usr/bin/clang --version`.
 
-INFO: 2026-02-10 10:40:53.611617: Running: /usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=12 -c /Users/perlihite/.pub-cache/hosted/pub.dev/objective_c-9.3.0/src/include/dart_api_dl.c -fpic -I src -o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/include/dart_api_dl.c.o
+INFO: 2026-02-11 19:01:01.270591: Running: /usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=12 -c /Users/perlihite/.pub-cache/hosted/pub.dev/objective_c-9.3.0/src/include/dart_api_dl.c -fpic -I src -o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/include/dart_api_dl.c.o
 
-INFO: 2026-02-10 10:40:53.611857: Running: /usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=12 -c /Users/perlihite/.pub-cache/hosted/pub.dev/objective_c-9.3.0/src/objective_c.c -fpic -I src -o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/objective_c.c.o
+INFO: 2026-02-11 19:01:01.270853: Running: /usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=12 -c /Users/perlihite/.pub-cache/hosted/pub.dev/objective_c-9.3.0/src/objective_c.c -fpic -I src -o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/objective_c.c.o
 
-INFO: 2026-02-10 10:40:53.611955: Running: /usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=12 -c /Users/perlihite/.pub-cache/hosted/pub.dev/objective_c-9.3.0/test/util.c -fpic -I src -o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/test/util.c.o
+INFO: 2026-02-11 19:01:01.270957: Running: /usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=12 -c /Users/perlihite/.pub-cache/hosted/pub.dev/objective_c-9.3.0/test/util.c -fpic -I src -o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/test/util.c.o
 
-INFO: 2026-02-10 10:40:53.612046: Running: /usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=12 -x objective-c -fobjc-arc -c /Users/perlihite/.pub-cache/hosted/pub.dev/objective_c-9.3.0/src/input_stream_adapter.m -fpic -I src -o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/input_stream_adapter.m.o
+INFO: 2026-02-11 19:01:01.271041: Running: /usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=12 -x objective-c -fobjc-arc -c /Users/perlihite/.pub-cache/hosted/pub.dev/objective_c-9.3.0/src/input_stream_adapter.m -fpic -I src -o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/input_stream_adapter.m.o
 
-INFO: 2026-02-10 10:40:53.612125: Running: /usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=12 -x objective-c -fobjc-arc -c /Users/perlihite/.pub-cache/hosted/pub.dev/objective_c-9.3.0/src/objective_c.m -fpic -I src -o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/objective_c.m.o
+INFO: 2026-02-11 19:01:01.271124: Running: /usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=12 -x objective-c -fobjc-arc -c /Users/perlihite/.pub-cache/hosted/pub.dev/objective_c-9.3.0/src/objective_c.m -fpic -I src -o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/objective_c.m.o
 
-INFO: 2026-02-10 10:40:53.612199: Running: /usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=12 -x objective-c -fobjc-arc -c /Users/perlihite/.pub-cache/hosted/pub.dev/objective_c-9.3.0/src/observer.m -fpic -I src -o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/observer.m.o
+INFO: 2026-02-11 19:01:01.271200: Running: /usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=12 -x objective-c -fobjc-arc -c /Users/perlihite/.pub-cache/hosted/pub.dev/objective_c-9.3.0/src/observer.m -fpic -I src -o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/observer.m.o
 
-INFO: 2026-02-10 10:40:53.612442: Running: /usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=12 -x objective-c -fobjc-arc -c /Users/perlihite/.pub-cache/hosted/pub.dev/objective_c-9.3.0/src/ns_number.m -fpic -I src -o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/ns_number.m.o
+INFO: 2026-02-11 19:01:01.271327: Running: /usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=12 -x objective-c -fobjc-arc -c /Users/perlihite/.pub-cache/hosted/pub.dev/objective_c-9.3.0/src/ns_number.m -fpic -I src -o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/ns_number.m.o
 
-INFO: 2026-02-10 10:40:53.612538: Running: /usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=12 -x objective-c -fobjc-arc -c /Users/perlihite/.pub-cache/hosted/pub.dev/objective_c-9.3.0/src/protocol.m -fpic -I src -o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/protocol.m.o
+INFO: 2026-02-11 19:01:01.271452: Running: /usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=12 -x objective-c -fobjc-arc -c /Users/perlihite/.pub-cache/hosted/pub.dev/objective_c-9.3.0/src/protocol.m -fpic -I src -o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/protocol.m.o
 
-INFO: 2026-02-10 10:40:53.612618: Running: /usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=12 -x objective-c -fobjc-arc -c /Users/perlihite/.pub-cache/hosted/pub.dev/objective_c-9.3.0/src/objective_c_bindings_generated.m -fpic -I src -o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/objective_c_bindings_generated.m.o
+INFO: 2026-02-11 19:01:01.271535: Running: /usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=12 -x objective-c -fobjc-arc -c /Users/perlihite/.pub-cache/hosted/pub.dev/objective_c-9.3.0/src/objective_c_bindings_generated.m -fpic -I src -o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/objective_c_bindings_generated.m.o
 
-INFO: 2026-02-10 10:40:53.660744: 
-INFO: 2026-02-10 10:40:53.660869: 
-INFO: 2026-02-10 10:40:53.660908: Generated /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/include/dart_api_dl.c.o
+INFO: 2026-02-11 19:01:01.394112: 
+INFO: 2026-02-11 19:01:01.394179: 
+INFO: 2026-02-11 19:01:01.394199: Generated /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/objective_c.c.o
+INFO: 2026-02-11 19:01:01.394260: 
+INFO: 2026-02-11 19:01:01.394268: 
+INFO: 2026-02-11 19:01:01.394273: Generated /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/include/dart_api_dl.c.o
 
-INFO: 2026-02-10 10:40:53.661843: 
-INFO: 2026-02-10 10:40:53.661865: 
-INFO: 2026-02-10 10:40:53.661872: Generated /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/objective_c.c.o
+INFO: 2026-02-11 19:01:01.397871: 
+INFO: 2026-02-11 19:01:01.397891: 
+INFO: 2026-02-11 19:01:01.397898: Generated /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/test/util.c.o
 
-INFO: 2026-02-10 10:40:53.677691: 
-INFO: 2026-02-10 10:40:53.677739: 
+INFO: 2026-02-11 19:01:01.401689: 
+INFO: 2026-02-11 19:01:01.401741: 
+INFO: 2026-02-11 19:01:01.401755: Generated /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/protocol.m.o
 
-INFO: 2026-02-10 10:40:53.677807: Generated /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/test/util.c.o
+INFO: 2026-02-11 19:01:01.401920: Generated /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/observer.m.o
 
-INFO: 2026-02-10 10:40:53.680348: Generated /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/observer.m.o
+INFO: 2026-02-11 19:01:01.596705: 
+INFO: 2026-02-11 19:01:01.596738: 
+INFO: 2026-02-11 19:01:01.596746: Generated /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/ns_number.m.o
 
-INFO: 2026-02-10 10:40:53.682081: Generated /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/protocol.m.o
+INFO: 2026-02-11 19:01:01.606487: 
+INFO: 2026-02-11 19:01:01.606518: 
+INFO: 2026-02-11 19:01:01.606527: Generated /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/objective_c.m.o
 
-INFO: 2026-02-10 10:40:53.847049: 
-INFO: 2026-02-10 10:40:53.847079: 
-INFO: 2026-02-10 10:40:53.847088: Generated /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/ns_number.m.o
+INFO: 2026-02-11 19:01:01.607466: 
+INFO: 2026-02-11 19:01:01.607485: 
+INFO: 2026-02-11 19:01:01.607493: Generated /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/input_stream_adapter.m.o
 
-INFO: 2026-02-10 10:40:53.850578: 
-INFO: 2026-02-10 10:40:53.850606: 
-INFO: 2026-02-10 10:40:53.850614: Generated /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/objective_c.m.o
+INFO: 2026-02-11 19:01:01.619191: 
+INFO: 2026-02-11 19:01:01.619214: 
+INFO: 2026-02-11 19:01:01.619221: Generated /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/objective_c_bindings_generated.m.o
 
-INFO: 2026-02-10 10:40:53.853439: 
-INFO: 2026-02-10 10:40:53.853460: 
-INFO: 2026-02-10 10:40:53.853468: Generated /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/input_stream_adapter.m.o
+INFO: 2026-02-11 19:01:01.619427: Running: /usr/bin/clang -shared -Wl,-encryptable -undefined dynamic_lookup -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=12 /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/include/dart_api_dl.c.o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/objective_c.c.o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/test/util.c.o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/input_stream_adapter.m.o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/objective_c.m.o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/observer.m.o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/ns_number.m.o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/protocol.m.o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/objective_c_bindings_generated.m.o -o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/objective_c.dylib
 
-INFO: 2026-02-10 10:40:53.863913: 
-INFO: 2026-02-10 10:40:53.863936: 
-INFO: 2026-02-10 10:40:53.863952: Generated /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/objective_c_bindings_generated.m.o
-
-INFO: 2026-02-10 10:40:53.864126: Running: /usr/bin/clang -shared -Wl,-encryptable -undefined dynamic_lookup -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=12 /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/include/dart_api_dl.c.o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/objective_c.c.o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/test/util.c.o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/input_stream_adapter.m.o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/objective_c.m.o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/observer.m.o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/ns_number.m.o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/protocol.m.o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/obj/src/objective_c_bindings_generated.m.o -o /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/objective_c.dylib
-
-INFO: 2026-02-10 10:40:53.896766: 
-INFO: 2026-02-10 10:40:53.896838: 
-
-lolive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/objective_c.dylib
+INFO: 2026-02-11 19:01:01.725083: 
+INFO: 2026-02-11 19:01:01.725117: 
+INFO: 2026-02-11 19:01:01.725123: Generated /Users/perlihite/Desktop/hololive_OCG_helper/app/build/flutter/.dart_tool/hooks_runner/shared/objective_c/build/9fb02c5622/objective_c.dylib
 

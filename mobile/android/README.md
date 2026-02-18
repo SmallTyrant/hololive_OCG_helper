@@ -73,3 +73,10 @@ gradle assembleDebug
 
 - 빌드 시 `data/hololive_ocg.sqlite`가 존재하면 자동으로 `assets`에 복사됩니다.
 - 저장소 정책에 따라 DB 파일은 커밋하지 않습니다.
+
+## Flet 동작 대응 네이티브 소스
+`app/ui.py`와 기능을 맞춘 최신 Kotlin 레퍼런스는 아래 경로에 있습니다.
+- `/Users/perlihite/Desktop/hololive_OCG_helper/mobile/android/native`
+
+## 실행 가능한 Android 프로젝트
+- `/Users/perlihite/Desktop/hololive_OCG_helper/mobile/android/native-app`
