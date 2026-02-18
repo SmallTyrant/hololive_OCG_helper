@@ -70,6 +70,17 @@ def _image_fit_contain():
     return None
 
 IMAGE_FIT_CONTAIN = _image_fit_contain()
+
+
+def _image_fit_cover():
+    if hasattr(ft, "ImageFit"):
+        return ft.ImageFit.COVER
+    if hasattr(ft, "BoxFit"):
+        return ft.BoxFit.COVER
+    return None
+
+
+IMAGE_FIT_COVER = _image_fit_cover()
 MENU_ICON = ICONS.MENU if hasattr(ICONS, "MENU") else ICONS.MORE_VERT
 
 def icon_dir(project_root: Path) -> Path:
@@ -146,6 +157,7 @@ def launch_app(db_path: str) -> None:
         lv = ft.Column(spacing=2, scroll=ft.ScrollMode.AUTO, expand=True)
         detail_lv = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO, expand=True)
         detail_texts = {"ko": "", "ja": ""}
+        image_zoom_state = {"enabled": False}
 
         # --- Image area ---
         def build_image_placeholder(text: str, loading: bool = False) -> ft.Control:
@@ -178,19 +190,21 @@ def launch_app(db_path: str) -> None:
 
             error_content = build_image_placeholder("이미지 로딩 실패")
             if image_path and image_path.exists():
-                return ft.Image(
+                image_control = ft.Image(
                     src=str(image_path),
-                    fit=IMAGE_FIT_CONTAIN,
+                    fit=IMAGE_FIT_COVER if image_zoom_state["enabled"] else IMAGE_FIT_CONTAIN,
                     expand=True,
                     error_content=error_content,
                 )
+                return ft.GestureDetector(content=image_control, on_tap=lambda e: on_image_tap(e))
             if image_url:
-                return ft.Image(
+                image_control = ft.Image(
                     src=image_url,
-                    fit=IMAGE_FIT_CONTAIN,
+                    fit=IMAGE_FIT_COVER if image_zoom_state["enabled"] else IMAGE_FIT_CONTAIN,
                     expand=True,
                     error_content=error_content,
                 )
+                return ft.GestureDetector(content=image_control, on_tap=lambda e: on_image_tap(e))
             return build_image_placeholder(placeholder_text)
 
         img_container = ft.Container(
@@ -519,6 +533,18 @@ def launch_app(db_path: str) -> None:
             )
             page.update()
 
+        def on_image_tap(e=None) -> None:
+            if not selected_card_number["no"] and not (selected_image_url["url"] or "").strip():
+                return
+            image_zoom_state["enabled"] = not image_zoom_state["enabled"]
+            set_image_for_card(
+                selected_card_number["no"],
+                selected_image_url["url"],
+                placeholder_text="이미지 없음",
+            )
+            build_layout(force=True)
+            page.update()
+
         def clear_image(placeholder_text: str = "이미지 없음") -> None:
             img_container.content = build_image_widget(None, placeholder_text=placeholder_text)
             page.update()
@@ -619,6 +645,7 @@ def launch_app(db_path: str) -> None:
             selected_print_id["id"] = None
             selected_card_number["no"] = ""
             selected_image_url["url"] = ""
+            image_zoom_state["enabled"] = False
             set_detail_text("")
             clear_image("카드를 선택하세요")
 
@@ -662,6 +689,7 @@ def launch_app(db_path: str) -> None:
                 brief = get_print_brief(conn, pid) or {}
                 selected_card_number["no"] = (brief.get("card_number") or "").strip()
                 selected_image_url["url"] = resolve_url((brief.get("image_url") or "").strip())
+                image_zoom_state["enabled"] = False
 
                 if selected_card_number["no"]:
                     set_image_for_card(
@@ -1004,6 +1032,8 @@ def launch_app(db_path: str) -> None:
 
         def toggle_image_panel(e=None) -> None:
             image_panel_state["collapsed"] = not image_panel_state["collapsed"]
+            if image_panel_state["collapsed"]:
+                image_zoom_state["enabled"] = False
             build_layout(force=True)
             page.update()
 
@@ -1064,9 +1094,14 @@ def launch_app(db_path: str) -> None:
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 )
 
-                list_expand = 34
-                image_expand = 38
-                detail_expand = 28
+                if image_zoom_state["enabled"] and not image_panel_state["collapsed"]:
+                    list_expand = 18
+                    image_expand = 64
+                    detail_expand = 18
+                else:
+                    list_expand = 34
+                    image_expand = 38
+                    detail_expand = 28
 
                 list_section = ft.Container(
                     content=ft.Column(
