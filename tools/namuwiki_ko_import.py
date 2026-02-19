@@ -18,7 +18,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, urlparse, urlunparse
 
 import requests
 from bs4 import BeautifulSoup, FeatureNotFound
@@ -34,6 +34,9 @@ DEFAULT_SOURCE_PAGES: tuple[str, ...] = (
     "https://namu.wiki/w/%EC%98%A4%EC%8B%9C%20%EC%BD%94%EA%B0%80%EB%84%A4%EC%9D%B4%20%EB%8B%88%EC%BD%94",
     "https://namu.wiki/w/%EC%98%A4%EC%8B%9C%20Advent",
     "https://namu.wiki/w/%EC%98%A4%EC%8B%9C%20Justice",
+    "https://namu.wiki/w/%EC%98%A4%EC%8B%9C%20Justice/%EC%B9%B4%EB%93%9C",
+    "https://namu.wiki/w/%EC%98%A4%EC%8B%9C%20Advent/%EC%B9%B4%EB%93%9C",
+    "https://namu.wiki/w/%EC%8A%A4%ED%83%80%ED%8A%B8%20%EB%8D%B1%20FLOW%20GLOW/%EC%B9%B4%EB%93%9C",
 )
 
 EFFECT_HEADER_KEYWORDS = (
@@ -403,6 +406,9 @@ def dedupe_pages(pages: Iterable[str]) -> list[str]:
     result: list[str] = []
     for page in pages:
         normalized = (page or "").strip()
+        if normalized.startswith("http://") or normalized.startswith("https://"):
+            parsed = urlparse(normalized)
+            normalized = urlunparse(parsed._replace(fragment=""))
         if not normalized or normalized in seen:
             continue
         seen.add(normalized)
