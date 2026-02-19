@@ -29,6 +29,13 @@ NAMU_BASE = "https://namu.wiki"
 CARDNO_RE = re.compile(r"(?<![A-Za-z0-9_])[hH][A-Za-z]{1,5}\d{2}-\d{3}(?![A-Za-z0-9_])")
 HANGUL_RE = re.compile(r"[가-힣]")
 
+DEFAULT_SOURCE_PAGES: tuple[str, ...] = (
+    "https://namu.wiki/w/%EC%98%A4%EC%8B%9C%20%EB%A6%B0%EB%8F%84%20%EC%B9%98%ED%95%98%EC%95%BC",
+    "https://namu.wiki/w/%EC%98%A4%EC%8B%9C%20%EC%BD%94%EA%B0%80%EB%84%A4%EC%9D%B4%20%EB%8B%88%EC%BD%94",
+    "https://namu.wiki/w/%EC%98%A4%EC%8B%9C%20Advent",
+    "https://namu.wiki/w/%EC%98%A4%EC%8B%9C%20Justice",
+)
+
 EFFECT_HEADER_KEYWORDS = (
     "효과",
     "텍스트",
@@ -391,6 +398,18 @@ def iter_pages(pages: list[str], page_file: str | None) -> Iterable[str]:
                 yield line
 
 
+def dedupe_pages(pages: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for page in pages:
+        normalized = (page or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
+
+
 def iter_card_numbers_for_search(
     print_map: dict[str, int],
     existing_ko: dict[int, tuple[str, str, int]],
@@ -687,6 +706,11 @@ def main() -> int:
     ap.add_argument("--db", required=True, help="SQLite DB path")
     ap.add_argument("--page", action="append", default=[], help="NamuWiki page title or full URL")
     ap.add_argument("--page-file", help="Text file containing page titles/URLs")
+    ap.add_argument(
+        "--skip-default-pages",
+        action="store_true",
+        help="Do not include built-in NamuWiki source pages",
+    )
     ap.add_argument("--sheet-url", help="Google Sheets URL (share or export CSV)")
     ap.add_argument("--sheet-gid", help="Google Sheets gid (optional)")
     ap.add_argument("--timeout", type=float, default=15.0, help="HTTP timeout seconds")
@@ -701,17 +725,20 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    if not args.page and not args.page_file and not args.sheet_url:
+    default_pages = [] if args.skip_default_pages else list(DEFAULT_SOURCE_PAGES)
+    page_sources = dedupe_pages([*args.page, *default_pages])
+
+    if not page_sources and not args.page_file and not args.sheet_url and not args.search_card_numbers:
         print("No sources provided. Use --page/--page-file or --sheet-url.")
         return 1
 
     updated = 0
-    if args.page or args.page_file:
+    if page_sources or args.page_file or args.search_card_numbers:
         link_include = re.compile(args.link_include) if args.link_include else None
         link_exclude = re.compile(args.link_exclude) if args.link_exclude else None
         updated += import_from_pages(
             args.db,
-            args.page,
+            page_sources,
             args.page_file,
             timeout=args.timeout,
             overwrite=args.overwrite,
@@ -719,18 +746,6 @@ def main() -> int:
             crawl_linked=args.crawl_linked,
             link_include=link_include,
             link_exclude=link_exclude,
-        )
-    elif args.search_card_numbers:
-        updated += import_from_pages(
-            args.db,
-            [],
-            None,
-            timeout=args.timeout,
-            overwrite=args.overwrite,
-            search_card_numbers=True,
-            crawl_linked=False,
-            link_include=None,
-            link_exclude=None,
         )
     if args.sheet_url:
         updated += import_from_sheet(
