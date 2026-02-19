@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import sys
 import json
+import hashlib
 from pathlib import Path
 from typing import Iterator
 from urllib.request import Request, urlopen
@@ -46,11 +47,17 @@ def _release_db_info_from_payload(release: dict) -> dict:
         asset_name, asset_url = "hololive_ocg.sqlite", LATEST_DB_DIRECT_URL
 
     asset_updated_at = ""
+    asset_digest = ""
     for asset in release.get("assets") or []:
         name = str(asset.get("name") or "")
         url = str(asset.get("browser_download_url") or "")
         if (asset_name and name == asset_name) or (asset_url and url == asset_url):
             asset_updated_at = str(asset.get("updated_at") or "")
+            raw_digest = str(asset.get("digest") or "").strip()
+            if raw_digest.lower().startswith("sha256:"):
+                asset_digest = raw_digest.split(":", 1)[1].strip().lower()
+            elif raw_digest:
+                asset_digest = raw_digest.lower()
             break
 
     return {
@@ -58,8 +65,72 @@ def _release_db_info_from_payload(release: dict) -> dict:
         "asset_name": asset_name,
         "asset_url": asset_url,
         "asset_updated_at": asset_updated_at,
+        "asset_digest": asset_digest,
         "published_at": published_at,
         "created_at": created_at,
+    }
+
+
+def file_sha256(path: str | Path, *, chunk_size: int = 1024 * 256) -> str | None:
+    target = Path(path)
+    if not target.exists() or not target.is_file() or target.stat().st_size == 0:
+        return None
+    hasher = hashlib.sha256()
+    with open(target, "rb") as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def check_db_hash_update_needed(db_path: str) -> dict:
+    local_hash = file_sha256(db_path)
+    if not local_hash:
+        return {
+            "status": "missing_local",
+            "needs_update": True,
+            "local_hash": None,
+            "remote_hash": None,
+            "reason": "local DB is missing",
+        }
+
+    info = get_latest_release_db_info()
+    if not info:
+        return {
+            "status": "remote_unavailable",
+            "needs_update": False,
+            "local_hash": local_hash,
+            "remote_hash": None,
+            "reason": "failed to fetch latest release info",
+        }
+
+    remote_hash = str(info.get("asset_digest") or "").strip().lower()
+    if not remote_hash:
+        return {
+            "status": "remote_hash_unavailable",
+            "needs_update": False,
+            "local_hash": local_hash,
+            "remote_hash": None,
+            "reason": "latest release digest is unavailable",
+        }
+
+    if local_hash != remote_hash:
+        return {
+            "status": "mismatch",
+            "needs_update": True,
+            "local_hash": local_hash,
+            "remote_hash": remote_hash,
+            "reason": "hash mismatch",
+        }
+
+    return {
+        "status": "up_to_date",
+        "needs_update": False,
+        "local_hash": local_hash,
+        "remote_hash": remote_hash,
+        "reason": "hash matched",
     }
 
 
@@ -85,6 +156,7 @@ def _write_release_meta(db_path: Path, release_info: dict) -> None:
             "release_tag": str(release_info.get("tag") or "").strip(),
             "release_asset_name": str(release_info.get("asset_name") or "").strip(),
             "release_asset_updated_at": str(release_info.get("asset_updated_at") or "").strip(),
+            "release_asset_digest": str(release_info.get("asset_digest") or "").strip(),
             "release_published_at": str(release_info.get("published_at") or "").strip(),
             "release_created_at": str(release_info.get("created_at") or "").strip(),
         }
