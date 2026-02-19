@@ -45,7 +45,6 @@ private enum AppThemeMode: String, CaseIterable, Identifiable {
     }
 }
 
-
 private enum PreferredLanguage: String, CaseIterable, Identifiable {
     case korean = "ko"
     case japanese = "ja"
@@ -149,12 +148,13 @@ struct ContentView: View {
                 Text("DB 업데이트가 있습니다. 업데이트 하시겠습니까?\n로컬 DB 날짜: \(dialog.localDate ?? "없음")\nGitHub DB 날짜: \(dialog.remoteDate)")
             }
             .onChange(of: viewModel.state.detailKoText) { _ in
-                koExpanded = true
-                jaExpanded = false
+                resetDetailExpansion()
             }
             .onChange(of: viewModel.state.detailJaText) { _ in
-                koExpanded = true
-                jaExpanded = false
+                resetDetailExpansion()
+            }
+            .onChange(of: preferredLanguageRawValue) { _ in
+                resetDetailExpansion()
             }
             .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
             .preferredColorScheme(selectedThemeMode.colorScheme)
@@ -181,6 +181,25 @@ struct ContentView: View {
             get: { selectedPreferredLanguage },
             set: { preferredLanguageRawValue = $0.rawValue }
         )
+    }
+
+    private func resetDetailExpansion() {
+        let hasKo = !splitDetailLines(viewModel.state.detailKoText).isEmpty
+        let hasJa = !splitDetailLines(viewModel.state.detailJaText).isEmpty
+
+        guard hasKo || hasJa else {
+            koExpanded = false
+            jaExpanded = false
+            return
+        }
+
+        if hasKo && hasJa {
+            koExpanded = selectedPreferredLanguage == .korean
+            jaExpanded = selectedPreferredLanguage == .japanese
+        } else {
+            koExpanded = hasKo
+            jaExpanded = hasJa
+        }
     }
 
     private func mobileLayout(screenHeight: CGFloat) -> some View {

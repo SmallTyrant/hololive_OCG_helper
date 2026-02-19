@@ -9,10 +9,8 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-
 def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
-
 
 def ensure_tags_ko(conn: sqlite3.Connection) -> None:
     conn.execute(
@@ -25,6 +23,9 @@ def ensure_tags_ko(conn: sqlite3.Connection) -> None:
         """
     )
 
+def has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any((r[1] or "") == column for r in rows)
 
 def normalize(tag: str) -> str:
     t = (tag or "").strip()
@@ -32,11 +33,11 @@ def normalize(tag: str) -> str:
         t = t[1:]
     return "".join(t.split()).lower()
 
-
 def import_csv(db_path: str, csv_path: str) -> None:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     ensure_tags_ko(conn)
+    has_product_column = has_column(conn, "prints", "product")
 
     p = Path(csv_path)
     if not p.exists():
@@ -61,6 +62,13 @@ def import_csv(db_path: str, csv_path: str) -> None:
                 ko_name = (row.get("ko_name") or "").strip()
                 ko_text = (row.get("ko_text") or "").strip()
                 ko_memo = (row.get("ko_memo") or "").strip()
+                product = (row.get("product") or "").strip()
+
+                if has_product_column and product:
+                    conn.execute(
+                        "UPDATE prints SET product=?, updated_at=? WHERE print_id=?",
+                        (product, now_iso(), pid),
+                    )
 
                 if not (ko_name or ko_text or ko_memo):
                     continue
@@ -108,7 +116,6 @@ def import_csv(db_path: str, csv_path: str) -> None:
     conn.close()
     print(f"[DONE] import cards={updated_cards} tags={updated_tags}")
 
-
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", required=True, help="SQLite DB path")
@@ -117,7 +124,6 @@ def main() -> int:
 
     import_csv(args.db, args.csv)
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

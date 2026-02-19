@@ -599,10 +599,14 @@ private fun DetailPanel(
 
     val hasKo = koLines.isNotEmpty()
     val hasJa = jaLines.isNotEmpty()
-    val showJaFirst = !hasKo || (preferredLanguage == PreferredLanguage.JAPANESE && !hasKo)
+    val showJaFirst = !hasKo
 
-    var koExpanded by rememberSaveable(koText, jaText) { mutableStateOf(hasKo && hasJa) }
-    var jaExpanded by rememberSaveable(koText, jaText) { mutableStateOf(!hasKo && hasJa) }
+    var koExpanded by rememberSaveable(koText, jaText, preferredLanguage) {
+        mutableStateOf(hasKo && (!hasJa || preferredLanguage == PreferredLanguage.KOREAN))
+    }
+    var jaExpanded by rememberSaveable(koText, jaText, preferredLanguage) {
+        mutableStateOf(hasJa && (!hasKo || preferredLanguage == PreferredLanguage.JAPANESE))
+    }
 
     val contentModifier = if (scrollable) {
         Modifier
