@@ -78,11 +78,23 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 
 private val SECTION_LABELS = listOf(
+    "SP 오시 스킬",
+    "오시 스킬",
+    "카드 타입",
+    "카드타입",
+    "레어리티",
+    "아츠",
+    "엑스트라",
+    "Bloom 레벨",
+    "키워드",
+    "속성",
+    "레벨",
+    "배턴 터치",
+    "SP推しスキル",
+    "推しスキル",
     "カードタイプ",
     "タグ",
     "レアリティ",
-    "推しスキル",
-    "SP推しスキル",
     "アーツ",
     "エクストラ",
     "Bloomレベル",
@@ -694,28 +706,40 @@ private fun SectionChip(text: String) {
 
 @Composable
 private fun DetailLine(line: String) {
-    if (SECTION_LABELS.contains(line)) {
-        SectionChip(line)
+    splitSectionLabel(line)?.let { (label, rest) ->
+        if (rest.isBlank()) {
+            SectionChip(label)
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                SectionChip(label)
+                Text(rest, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
         return
     }
 
+    Text(line, style = MaterialTheme.typography.bodyMedium)
+}
+
+private fun splitSectionLabel(line: String): Pair<String, String>? {
+    val trimmed = line.trim()
+    val separators = listOf(" ", ":", "：", "[", "(", "【")
     for (label in SECTION_LABELS) {
-        val prefix = "$label "
-        if (line.startsWith(prefix)) {
-            Text(
-                text = buildAnnotatedString {
-                    pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
-                    append(label)
-                    pop()
-                    append(line.removePrefix(label))
-                },
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            return
+        if (trimmed == label) {
+            return label to ""
+        }
+        if (!trimmed.startsWith(label)) {
+            continue
+        }
+        val rest = trimmed.removePrefix(label).trim()
+        if (rest.isEmpty()) {
+            return label to ""
+        }
+        if (separators.any { rest.startsWith(it) }) {
+            return label to rest
         }
     }
-
-    Text(line, style = MaterialTheme.typography.bodyMedium)
+    return null
 }
 
 @Composable

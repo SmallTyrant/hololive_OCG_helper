@@ -2,11 +2,23 @@ import SwiftUI
 import UIKit
 
 private let sectionLabels: [String] = [
+    "SP 오시 스킬",
+    "오시 스킬",
+    "카드 타입",
+    "카드타입",
+    "레어리티",
+    "아츠",
+    "엑스트라",
+    "Bloom 레벨",
+    "키워드",
+    "속성",
+    "레벨",
+    "배턴 터치",
+    "SP推しスキル",
+    "推しスキル",
     "カードタイプ",
     "タグ",
     "レアリティ",
-    "推しスキル",
-    "SP推しスキル",
     "アーツ",
     "エクストラ",
     "Bloomレベル",
@@ -533,15 +545,16 @@ struct ContentView: View {
     }
 
     private func detailLine(_ line: String) -> AnyView {
-        if sectionLabels.contains(line) {
-            return AnyView(sectionChip(line))
-        }
-
-        if let label = sectionLabels.first(where: { line.hasPrefix("\($0) ") }) {
-            let rest = String(line.dropFirst(label.count))
+        if let (label, rest) = splitSectionLabel(line) {
+            if rest.isEmpty {
+                return AnyView(sectionChip(label))
+            }
             return AnyView(
-                (Text(label).bold() + Text(rest))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 4) {
+                    sectionChip(label)
+                    Text(rest)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             )
         }
 
@@ -549,6 +562,27 @@ struct ContentView: View {
             Text(line)
                 .frame(maxWidth: .infinity, alignment: .leading)
         )
+    }
+
+    private func splitSectionLabel(_ line: String) -> (String, String)? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        let separators = [" ", ":", "：", "[", "(", "【"]
+        for label in sectionLabels {
+            if trimmed == label {
+                return (label, "")
+            }
+            guard trimmed.hasPrefix(label) else {
+                continue
+            }
+            let rest = String(trimmed.dropFirst(label.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if rest.isEmpty {
+                return (label, "")
+            }
+            if separators.contains(where: { rest.hasPrefix($0) }) {
+                return (label, rest)
+            }
+        }
+        return nil
     }
 
     private func sectionChip(_ text: String) -> some View {
