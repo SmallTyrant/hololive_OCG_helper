@@ -49,7 +49,11 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.Modifier
@@ -92,6 +96,8 @@ fun HocgScreen(
     viewModel: HocgViewModel = viewModel(),
     themeMode: AppThemeMode,
     onThemeModeChange: (AppThemeMode) -> Unit,
+    preferredLanguage: PreferredLanguage,
+    onPreferredLanguageChange: (PreferredLanguage) -> Unit,
 ) {
     val state = viewModel.state
     val config = androidx.compose.ui.platform.LocalConfiguration.current
@@ -184,6 +190,15 @@ fun HocgScreen(
                             onSelected = onThemeModeChange,
                         )
                     }
+                    HorizontalDivider()
+                    Text("선호 언어", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    PreferredLanguage.entries.forEach { language ->
+                        PreferredLanguageItem(
+                            language = language,
+                            selectedLanguage = preferredLanguage,
+                            onSelected = onPreferredLanguageChange,
+                        )
+                    }
                 }
             }
         },
@@ -200,6 +215,7 @@ fun HocgScreen(
                     onDismissKeyboard = { focusManager.clearFocus() },
                     onSelectPrint = viewModel::onSelectPrint,
                     onToggleImagePanel = viewModel::onToggleImagePanel,
+                    preferredLanguage = preferredLanguage,
                 )
             } else {
                 DesktopLayout(
@@ -208,6 +224,7 @@ fun HocgScreen(
                     onSearchQueryChanged = viewModel::onSearchQueryChanged,
                     onDismissKeyboard = { focusManager.clearFocus() },
                     onSelectPrint = viewModel::onSelectPrint,
+                    preferredLanguage = preferredLanguage,
                 )
             }
         }
@@ -223,6 +240,7 @@ private fun MobileLayout(
     onDismissKeyboard: () -> Unit,
     onSelectPrint: (Long) -> Unit,
     onToggleImagePanel: () -> Unit,
+    preferredLanguage: PreferredLanguage,
 ) {
     val listHeight = scaledHeightDp(ratio = 0.30f, minPx = 190, maxPx = 360)
     val imageHeight = scaledHeightDp(ratio = 0.45f, minPx = 240, maxPx = 560)
@@ -273,6 +291,7 @@ private fun MobileLayout(
             ResultsList(
                 state = state,
                 onSelect = onSelectPrint,
+                preferredLanguage = preferredLanguage,
             )
         }
 
@@ -301,7 +320,12 @@ private fun MobileLayout(
 
         Text("효과", style = MaterialTheme.typography.titleSmall)
         Panel(modifier = Modifier.fillMaxWidth()) {
-            DetailPanel(koText = state.detailKoText, scrollable = false)
+            DetailPanel(
+                koText = state.detailKoText,
+                jaText = state.detailJaText,
+                preferredLanguage = preferredLanguage,
+                scrollable = false,
+            )
         }
     }
 }
@@ -313,6 +337,7 @@ private fun DesktopLayout(
     onSearchQueryChanged: (String) -> Unit,
     onDismissKeyboard: () -> Unit,
     onSelectPrint: (Long) -> Unit,
+    preferredLanguage: PreferredLanguage,
 ) {
     Column(
         modifier = Modifier
@@ -360,7 +385,7 @@ private fun DesktopLayout(
             Column(modifier = Modifier.weight(3f)) {
                 Text("목록", modifier = Modifier.padding(start = 10.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall)
                 Panel(modifier = Modifier.fillMaxSize()) {
-                    ResultsList(state = state, onSelect = onSelectPrint)
+                    ResultsList(state = state, onSelect = onSelectPrint, preferredLanguage = preferredLanguage)
                 }
             }
 
@@ -378,7 +403,12 @@ private fun DesktopLayout(
             Column(modifier = Modifier.weight(4f)) {
                 Text("효과", modifier = Modifier.padding(start = 10.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall)
                 Panel(modifier = Modifier.fillMaxSize()) {
-                    DetailPanel(koText = state.detailKoText, scrollable = true)
+                    DetailPanel(
+                        koText = state.detailKoText,
+                        jaText = state.detailJaText,
+                        preferredLanguage = preferredLanguage,
+                        scrollable = true,
+                    )
                 }
             }
         }
@@ -435,6 +465,7 @@ private fun Panel(
 private fun ResultsList(
     state: HocgUiState,
     onSelect: (Long) -> Unit,
+    preferredLanguage: PreferredLanguage,
 ) {
     if (state.results.isEmpty()) {
         Text(
@@ -454,16 +485,18 @@ private fun ResultsList(
                 row = row,
                 selected = state.selectedPrintId == row.printId,
                 onClick = { onSelect(row.printId) },
+                preferredLanguage = preferredLanguage,
             )
         }
     }
 }
 
 @Composable
-private fun ResultItem(row: PrintRow, selected: Boolean, onClick: () -> Unit) {
-    val displayName = row.nameKo.ifBlank {
-        row.nameJa.ifBlank { "(이름 없음)" }
-    }
+private fun ResultItem(row: PrintRow, selected: Boolean, onClick: () -> Unit, preferredLanguage: PreferredLanguage) {
+    val displayName = when (preferredLanguage) {
+        PreferredLanguage.KOREAN -> row.nameKo.ifBlank { row.nameJa }
+        PreferredLanguage.JAPANESE -> row.nameJa.ifBlank { row.nameKo }
+    }.ifBlank { "(이름 없음)" }
     val title = if (row.cardNumber.isNotBlank()) {
         "${row.cardNumber} | $displayName"
     } else {
@@ -547,12 +580,29 @@ private fun Placeholder(message: String, error: Boolean) {
 }
 
 @Composable
-private fun DetailPanel(koText: String, scrollable: Boolean) {
-    val lines = remember(koText) {
+private fun DetailPanel(
+    koText: String,
+    jaText: String,
+    preferredLanguage: PreferredLanguage,
+    scrollable: Boolean,
+) {
+    val koLines = remember(koText) {
         koText.lines()
             .map { it.trim() }
             .filter { it.isNotEmpty() }
     }
+    val jaLines = remember(jaText) {
+        jaText.lines()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+    }
+
+    val hasKo = koLines.isNotEmpty()
+    val hasJa = jaLines.isNotEmpty()
+    val showJaFirst = !hasKo || (preferredLanguage == PreferredLanguage.JAPANESE && !hasKo)
+
+    var koExpanded by rememberSaveable(koText, jaText) { mutableStateOf(hasKo && hasJa) }
+    var jaExpanded by rememberSaveable(koText, jaText) { mutableStateOf(!hasKo && hasJa) }
 
     val contentModifier = if (scrollable) {
         Modifier
@@ -566,15 +616,64 @@ private fun DetailPanel(koText: String, scrollable: Boolean) {
         modifier = contentModifier,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        if (lines.isEmpty()) {
-            Text("(한국어 본문 없음)", style = MaterialTheme.typography.bodyMedium)
+        if (!hasKo && !hasJa) {
+            Text("(본문 없음)", style = MaterialTheme.typography.bodyMedium)
             return@Column
         }
 
-        SectionChip("한국어")
-        for (line in lines) {
+        if (hasKo && hasJa) {
+            ExpandableDetailSection(
+                title = "한국어",
+                lines = koLines,
+                expanded = koExpanded,
+                onToggle = { koExpanded = !koExpanded },
+            )
+            ExpandableDetailSection(
+                title = "일본어",
+                lines = jaLines,
+                expanded = jaExpanded,
+                onToggle = { jaExpanded = !jaExpanded },
+            )
+            return@Column
+        }
+
+        val singleTitle = if (hasKo) "한국어" else "일본어"
+        val singleLines = if (showJaFirst) jaLines else koLines
+        SectionChip(singleTitle)
+        for (line in singleLines) {
             DetailLine(line)
         }
+    }
+}
+
+@Composable
+private fun ExpandableDetailSection(
+    title: String,
+    lines: List<String>,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        SectionChip(title)
+        Text(
+            text = if (expanded) "접기" else "펼치기",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+
+    if (!expanded) {
+        return
+    }
+
+    for (line in lines) {
+        DetailLine(line)
     }
 }
 
@@ -634,6 +733,30 @@ private fun ThemeModeItem(
         )
         Text(
             text = mode.label,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}
+
+@Composable
+private fun PreferredLanguageItem(
+    language: PreferredLanguage,
+    selectedLanguage: PreferredLanguage,
+    onSelected: (PreferredLanguage) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onSelected(language) }
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(
+            selected = selectedLanguage == language,
+            onClick = { onSelected(language) },
+        )
+        Text(
+            text = language.label,
             style = MaterialTheme.typography.bodyMedium,
         )
     }

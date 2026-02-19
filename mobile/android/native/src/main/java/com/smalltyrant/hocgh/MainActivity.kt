@@ -14,9 +14,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.smalltyrant.hocgh.ui.AppThemeMode
 import com.smalltyrant.hocgh.ui.HocgScreen
+import com.smalltyrant.hocgh.ui.PreferredLanguage
 
 private const val PREFS_NAME = "hocg_settings"
 private const val PREF_THEME_MODE = "theme_mode"
+private const val PREF_PREFERRED_LANGUAGE = "preferred_language"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -27,6 +29,16 @@ class MainActivity : ComponentActivity() {
                 mutableStateOf(
                     AppThemeMode.fromValue(
                         prefs.getString(PREF_THEME_MODE, AppThemeMode.SYSTEM.value),
+                    ),
+                )
+            }
+            var preferredLanguage by remember {
+                mutableStateOf(
+                    PreferredLanguage.fromValue(
+                        prefs.getString(
+                            PREF_PREFERRED_LANGUAGE,
+                            PreferredLanguage.fromSystemLocale().value,
+                        ),
                     ),
                 )
             }
@@ -45,6 +57,11 @@ class MainActivity : ComponentActivity() {
                         onThemeModeChange = { nextMode ->
                             themeMode = nextMode
                             prefs.edit().putString(PREF_THEME_MODE, nextMode.value).apply()
+                        },
+                        preferredLanguage = preferredLanguage,
+                        onPreferredLanguageChange = { nextLanguage ->
+                            preferredLanguage = nextLanguage
+                            prefs.edit().putString(PREF_PREFERRED_LANGUAGE, nextLanguage.value).apply()
                         },
                     )
                 }
