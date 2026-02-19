@@ -285,13 +285,25 @@ final class DatabaseRepository {
     func loadCardDetail(printId: Int64) -> CardDetail? {
         do {
             return try withSQLite(path: paths.dbURL.path, readOnly: true) { db in
-                let sql = """
+                let jaColumns = try tableColumns(db: db, table: "card_texts_ja")
+                let hasJaEffectText = jaColumns.contains("effect_text")
+                let sql = hasJaEffectText ?
+                """
                 SELECT
                     COALESCE(ko.effect_text,'') AS ko_text,
                     COALESCE(ja.effect_text,'') AS ja_text
                 FROM prints p
                 LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
                 LEFT JOIN card_texts_ja ja ON ja.print_id = p.print_id
+                WHERE p.print_id=?
+                """
+                :
+                """
+                SELECT
+                    COALESCE(ko.effect_text,'') AS ko_text,
+                    '' AS ja_text
+                FROM prints p
+                LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
                 WHERE p.print_id=?
                 """
                 let stmt = try sqlitePrepare(db: db, sql: sql)
