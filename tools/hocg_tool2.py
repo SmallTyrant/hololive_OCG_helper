@@ -30,7 +30,6 @@ import requests
 from requests.adapters import HTTPAdapter
 from bs4 import BeautifulSoup
 
-
 BASE = "https://hololive-official-cardgame.com"
 CARDSEARCH_BASE = f"{BASE}/cardlist/cardsearch/"
 
@@ -40,10 +39,8 @@ CARDNO_RE = re.compile(r"\b[hH][A-Za-z]{1,5}\d{2}-\d{3}\b")
 # list page links: /cardlist/?id=123&view=text
 DETAIL_ID_RE = re.compile(r"/cardlist/\?id=(\d+)")
 
-
 def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
-
 
 def sha256_text(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
@@ -51,14 +48,11 @@ def sha256_text(s: str) -> str:
 def mask_card_numbers(text: str) -> str:
     return CARDNO_RE.sub("[REDACTED]", text)
 
-
 def log(msg: str, verbose: bool) -> None:
     if verbose:
         print(mask_card_numbers(msg), flush=True)
 
-
 _thread_local = threading.local()
-
 
 def _get_thread_session() -> requests.Session:
     sess = getattr(_thread_local, "session", None)
@@ -70,7 +64,6 @@ def _get_thread_session() -> requests.Session:
         sess.mount("http://", adapter)
         _thread_local.session = sess
     return sess
-
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA foreign_keys=ON;")
@@ -180,7 +173,6 @@ def init_db(conn: sqlite3.Connection) -> None:
     )
     conn.commit()
 
-
 def normalize_tag(tag: str) -> str:
     t = (tag or "").strip()
     if t.startswith("#"):
@@ -188,14 +180,12 @@ def normalize_tag(tag: str) -> str:
     t = re.sub(r"\s+", "", t).lower()
     return t
 
-
 def _has_table(conn: sqlite3.Connection, table: str) -> bool:
     row = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
         (table,),
     ).fetchone()
     return row is not None
-
 
 def upsert_tag(conn: sqlite3.Connection, tag: str) -> int:
     norm = normalize_tag(tag)
@@ -232,7 +222,6 @@ def upsert_tag(conn: sqlite3.Connection, tag: str) -> int:
         raise RuntimeError("No tags table available")
     return tag_id
 
-
 def replace_print_tags(conn: sqlite3.Connection, print_id: int, tags: List[str]) -> None:
     conn.execute("DELETE FROM print_tags WHERE print_id=?", (print_id,))
     for t in tags:
@@ -241,7 +230,6 @@ def replace_print_tags(conn: sqlite3.Connection, print_id: int, tags: List[str])
             "INSERT OR IGNORE INTO print_tags(print_id, tag_id) VALUES(?, ?)",
             (print_id, tid),
         )
-
 
 def upsert_print(conn: sqlite3.Connection, card_number: str, detail: dict) -> int:
     card_number = card_number.strip()
@@ -292,7 +280,6 @@ def upsert_print(conn: sqlite3.Connection, card_number: str, detail: dict) -> in
     row = conn.execute("SELECT print_id FROM prints WHERE card_number=?", (card_number,)).fetchone()
     return int(row[0])
 
-
 def upsert_text_ja(conn: sqlite3.Connection, print_id: int, name: str, raw_text: str) -> None:
     # effect_text는 raw_text 기반으로 일단 동일값(뷰어에서 사용)
     conn.execute(
@@ -308,9 +295,7 @@ def upsert_text_ja(conn: sqlite3.Connection, print_id: int, name: str, raw_text:
         (print_id, name, raw_text, raw_text, now_iso()),
     )
 
-
 EXP_RE = re.compile(r"expansion=([A-Za-z0-9]+)")
-
 
 def parse_expansion_codes(html: bytes) -> Set[str]:
     text = html.decode("utf-8", errors="ignore")
@@ -319,12 +304,10 @@ def parse_expansion_codes(html: bytes) -> Set[str]:
         exps.add(m.group(1))
     return exps
 
-
 @dataclass
 class ListItem:
     card_id: str
     card_number: str
-
 
 def parse_list_page(html: bytes) -> List[ListItem]:
     """
@@ -350,7 +333,6 @@ def parse_list_page(html: bytes) -> List[ListItem]:
         items.append(ListItem(card_id=card_id, card_number=card_no))
     return items
 
-
 def _extract_field_by_label(text: str, label: str) -> str:
     pat = re.compile(rf"{re.escape(label)}\s*[：:]\s*(.+)")
     for line in text.splitlines():
@@ -359,7 +341,6 @@ def _extract_field_by_label(text: str, label: str) -> str:
         if m:
             return m.group(1).strip()
     return ""
-
 
 def normalize_raw_text(text: str, *, remove_private: bool = False) -> str:
     """Normalize raw page text for stable downstream parsing/UI.
@@ -459,7 +440,6 @@ def normalize_raw_text(text: str, *, remove_private: bool = False) -> str:
 
     return "\n".join(out)
 
-
 def extract_detail_text(soup: BeautifulSoup) -> str:
     """
     Prefer the card detail container to avoid navigation/menu noise.
@@ -469,6 +449,48 @@ def extract_detail_text(soup: BeautifulSoup) -> str:
         return soup.get_text("\n", strip=True)
     return detail_root.get_text("\n", strip=True)
 
+def extract_product_info(raw_full: str) -> str:
+    lines = [line.strip() for line in raw_full.splitlines() if line.strip()]
+    if not lines:
+        return ""
+
+    labels = {
+        "カードタイプ", "レアリティ", "色", "LIFE", "HP", "タグ",
+        "推しスキル", "SP推しスキル", "Bloomレベル", "アーツ",
+        "バトンタッチ", "エクストラ", "イラストレーター名",
+        "カードナンバー", "キーワード", "収録商品", "カード名",
+    }
+
+    def _normalize(line: str) -> str:
+        return line.replace("：", "").replace(":", "").strip()
+
+    for idx, line in enumerate(lines):
+        if _normalize(line) != "収録商品":
+            continue
+
+        products: list[str] = []
+        j = idx + 1
+        while j < len(lines):
+            candidate = lines[j].strip()
+            if not candidate:
+                j += 1
+                continue
+
+            normalized = _normalize(candidate)
+            if normalized in labels:
+                break
+
+            if candidate.startswith("【使用可能カード】"):
+                break
+
+            if candidate not in products:
+                products.append(candidate)
+            j += 1
+
+        if products:
+            return " | ".join(products)
+
+    return ""
 
 def parse_detail(detail_html: bytes, fallback_card_no: str, verbose: bool) -> Optional[dict]:
     soup = BeautifulSoup(detail_html, "html.parser")
@@ -505,7 +527,7 @@ def parse_detail(detail_html: bytes, fallback_card_no: str, verbose: bool) -> Op
     rarity = _extract_field_by_label(raw_full, "レアリティ")
     color = _extract_field_by_label(raw_full, "色")
     card_type = _extract_field_by_label(raw_full, "カードタイプ")
-    product = _extract_field_by_label(raw_full, "収録商品")
+    product = extract_product_info(raw_full) or _extract_field_by_label(raw_full, "収録商品")
 
     tags: List[str] = []
     for a in soup.select("a"):
@@ -531,7 +553,6 @@ def parse_detail(detail_html: bytes, fallback_card_no: str, verbose: bool) -> Op
         "image_url": image_url,
         "raw_text": normalize_raw_text(raw_full, remove_private=True),
     }
-
 
 def detect_pagination_param(html: bytes) -> str:
     # Try to detect 'page' param from links, fallback to 'page'
@@ -560,7 +581,6 @@ def detect_total_count(html: bytes) -> int | None:
             return None
     return None
 
-
 def detect_max_page(html: bytes, page_param: str) -> int | None:
     soup = BeautifulSoup(html, "html.parser")
     max_page = 0
@@ -577,7 +597,6 @@ def detect_max_page(html: bytes, page_param: str) -> int | None:
             max_page = n
     return max_page or None
 
-
 def build_list_url(expansion: str | None, page: int, page_param: str) -> str:
     # always use view=text so card numbers appear in anchor text reliably
     if expansion:
@@ -587,7 +606,6 @@ def build_list_url(expansion: str | None, page: int, page_param: str) -> str:
     if page <= 1:
         return base
     return f"{base}&{page_param}={page}"
-
 
 def fetch(
     session: requests.Session,
@@ -613,7 +631,6 @@ def fetch(
                 time.sleep(0.5 * (attempt + 1))
                 continue
             raise last_err
-
 
 def _fetch_detail_worker(
     detail_url: str,
@@ -645,7 +662,6 @@ def _fetch_detail_worker(
         "card_number": card_number,
         "card_id": card_id,
     }
-
 
 def process_list_page(expansion: str | None, page: int, html: bytes, args, session: requests.Session, conn: sqlite3.Connection) -> Tuple[int, int]:
     items = parse_list_page(html)
@@ -806,7 +822,6 @@ def process_list_page(expansion: str | None, page: int, html: bytes, args, sessi
     conn.commit()
     return new_items, 0
 
-
 def scrape_expansion(conn: sqlite3.Connection, session: requests.Session, expansion: str | None, args) -> int:
     first_url = build_list_url(expansion, 1, "page")
     first_html = fetch(
@@ -847,7 +862,6 @@ def scrape_expansion(conn: sqlite3.Connection, session: requests.Session, expans
             log(f"[DONE] exp={expansion} no new items on page {page}", args.verbose)
             break
     return 0
-
 
 def cmd_scrape(args) -> int:
     conn = sqlite3.connect(args.db)
@@ -893,7 +907,6 @@ def cmd_scrape(args) -> int:
     conn.close()
     return 0
 
-
 def cmd_list_exps(args) -> int:
     session = requests.Session()
     html = fetch(
@@ -908,7 +921,6 @@ def cmd_list_exps(args) -> int:
     for e in exps:
         print(e)
     return 0
-
 
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -946,7 +958,6 @@ def main() -> int:
         pass
 
     return args.func(args)
-
 
 if __name__ == "__main__":
     sys.exit(main())

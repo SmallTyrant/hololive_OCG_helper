@@ -16,7 +16,7 @@ def export_csv(db_path: str, out_path: str) -> None:
     # card list
     card_rows = conn.execute(
         """
-        SELECT p.print_id, p.card_number, COALESCE(p.name_ja,'') AS name_ja
+        SELECT p.print_id, p.card_number, COALESCE(p.name_ja,'') AS name_ja, COALESCE(p.product,'') AS product
         FROM prints p
         ORDER BY p.card_number
         """
@@ -55,6 +55,7 @@ def export_csv(db_path: str, out_path: str) -> None:
             "print_id",
             "card_number",
             "name_ja",
+            "product",
             "tags_ja",
             "ko_name",
             "ko_text",
@@ -73,6 +74,7 @@ def export_csv(db_path: str, out_path: str) -> None:
                 pid,
                 r["card_number"],
                 r["name_ja"],
+                r["product"],
                 tags_ja,
                 "",
                 "",
@@ -86,6 +88,7 @@ def export_csv(db_path: str, out_path: str) -> None:
         for r in tag_rows:
             w.writerow([
                 "tag",
+                "",
                 "",
                 "",
                 "",

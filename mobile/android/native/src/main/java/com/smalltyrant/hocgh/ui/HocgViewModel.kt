@@ -245,6 +245,7 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
                     results = emptyList(),
                     selectedPrintId = null,
                     detailKoText = "",
+                    detailJaText = "",
                     imageState = ImageState.Placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다."),
                 )
                 return@launch
@@ -259,6 +260,7 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
                     results = emptyList(),
                     selectedPrintId = null,
                     detailKoText = "",
+                    detailJaText = "",
                     imageState = ImageState.Placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다."),
                 )
                 return@launch
@@ -278,6 +280,7 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
                 state = state.copy(
                     selectedPrintId = null,
                     detailKoText = "",
+                    detailJaText = "",
                     imageState = ImageState.Placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다."),
                 )
             } else {
@@ -303,6 +306,7 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
             if (brief == null) {
                 state = state.copy(
                     detailKoText = "[ERROR] 상세 로드 실패",
+                    detailJaText = "",
                     imageState = ImageState.Error("이미지 로딩 실패"),
                 )
                 return@launch
@@ -310,6 +314,7 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
 
             state = state.copy(
                 detailKoText = detail?.koText.orEmpty(),
+                detailJaText = detail?.jaText.orEmpty(),
                 imageState = if (brief.cardNumber.isBlank()) {
                     ImageState.Placeholder("이미지 없음")
                 } else {

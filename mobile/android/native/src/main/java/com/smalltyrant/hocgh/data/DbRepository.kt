@@ -305,9 +305,11 @@ class DbRepository(private val paths: AppPaths) {
                 db.rawQuery(
                     """
                     SELECT
-                        COALESCE(ko.effect_text,'') AS ko_text
+                        COALESCE(ko.effect_text,'') AS ko_text,
+                        COALESCE(ja.effect_text,'') AS ja_text
                     FROM prints p
                     LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
+                    LEFT JOIN card_texts_ja ja ON ja.print_id = p.print_id
                     WHERE p.print_id=?
                     """.trimIndent(),
                     arrayOf(printId.toString()),
@@ -315,7 +317,10 @@ class DbRepository(private val paths: AppPaths) {
                     if (!cursor.moveToFirst()) {
                         return@useCursor null
                     }
-                    CardDetail(koText = cursor.getStringOrEmpty("ko_text"))
+                    CardDetail(
+                        koText = cursor.getStringOrEmpty("ko_text"),
+                        jaText = cursor.getStringOrEmpty("ja_text"),
+                    )
                 }
             }
         } catch (_: Throwable) {

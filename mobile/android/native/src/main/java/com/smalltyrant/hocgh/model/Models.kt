@@ -24,6 +24,7 @@ data class PrintBrief(
 
 data class CardDetail(
     val koText: String,
+    val jaText: String,
 )
 
 data class UpdateDialogState(
@@ -46,6 +47,7 @@ data class HocgUiState(
     val results: List<PrintRow> = emptyList(),
     val selectedPrintId: Long? = null,
     val detailKoText: String = "",
+    val detailJaText: String = "",
     val imageState: ImageState = ImageState.Placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다."),
     val imageCollapsed: Boolean = false,
     val updateRunning: Boolean = false,
