@@ -302,7 +302,9 @@ class DbRepository(private val paths: AppPaths) {
     fun loadCardDetail(printId: Long): CardDetail? {
         return try {
             openReadOnly().useDb { db ->
-                db.rawQuery(
+                val jaColumns = tableColumns(db, "card_texts_ja")
+                val hasJaEffectText = jaColumns.contains("effect_text")
+                val sql = if (hasJaEffectText) {
                     """
                     SELECT
                         COALESCE(ko.effect_text,'') AS ko_text,
@@ -311,7 +313,19 @@ class DbRepository(private val paths: AppPaths) {
                     LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
                     LEFT JOIN card_texts_ja ja ON ja.print_id = p.print_id
                     WHERE p.print_id=?
-                    """.trimIndent(),
+                    """.trimIndent()
+                } else {
+                    """
+                    SELECT
+                        COALESCE(ko.effect_text,'') AS ko_text,
+                        '' AS ja_text
+                    FROM prints p
+                    LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
+                    WHERE p.print_id=?
+                    """.trimIndent()
+                }
+                db.rawQuery(
+                    sql,
                     arrayOf(printId.toString()),
                 ).useCursor { cursor ->
                     if (!cursor.moveToFirst()) {
