@@ -21,7 +21,11 @@ from app.services.db import (
     db_exists,
     clear_conn_cache,
 )
-from app.services.pipeline import run_update_and_refine, get_latest_release_db_info
+from app.services.pipeline import (
+    run_update_and_refine,
+    get_latest_release_db_info,
+    check_db_hash_update_needed,
+)
 from app.paths import get_default_data_root, get_project_root
 from app.services.images import local_image_path, download_image, resolve_url
 from app.services.verify import run_startup_checks
@@ -980,19 +984,28 @@ def launch_app(db_path: str) -> None:
             if not dbp:
                 return
 
-            def _resolve_dates(path_value: str) -> tuple[str | None, str | None]:
+            def _resolve_dates(path_value: str) -> tuple[str | None, str | None, bool]:
+                hash_check = check_db_hash_update_needed(path_value)
+                if bool(hash_check.get("needs_update")):
+                    return None, None, True
+
                 local_date_value = local_db_date(path_value)
                 info = get_latest_release_db_info()
                 if not info:
-                    return local_date_value, None
+                    return local_date_value, None, False
                 remote_date_value = format_iso_date(
                     info.get("asset_updated_at")
                     or info.get("published_at")
                     or info.get("created_at")
                 )
-                return local_date_value, remote_date_value
+                return local_date_value, remote_date_value, False
 
-            local_date_value, remote_date_value = await asyncio.to_thread(_resolve_dates, dbp)
+            local_date_value, remote_date_value, auto_update_needed = await asyncio.to_thread(_resolve_dates, dbp)
+            if auto_update_needed:
+                update_prompt_state["shown"] = True
+                show_toast("DB 해시 변경 감지: 자동 업데이트를 시작합니다.", duration_ms=2200)
+                await do_update_async()
+                return
             if not remote_date_value:
                 return
             if local_date_value == remote_date_value:
