@@ -45,10 +45,35 @@ private enum AppThemeMode: String, CaseIterable, Identifiable {
     }
 }
 
+
+private enum PreferredLanguage: String, CaseIterable, Identifiable {
+    case korean = "ko"
+    case japanese = "ja"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .korean:
+            "한국어"
+        case .japanese:
+            "일본어"
+        }
+    }
+
+    static var defaultFromSystem: PreferredLanguage {
+        let preferred = Locale.preferredLanguages.first?.lowercased() ?? "ko"
+        return preferred.hasPrefix("ja") ? .japanese : .korean
+    }
+}
+
 struct ContentView: View {
     @StateObject private var viewModel = HocgViewModel()
     @State private var showingMenu = false
+    @State private var koExpanded = true
+    @State private var jaExpanded = false
     @AppStorage("theme_mode") private var themeModeRawValue: String = AppThemeMode.system.rawValue
+    @AppStorage("preferred_language") private var preferredLanguageRawValue: String = PreferredLanguage.defaultFromSystem.rawValue
 
     var body: some View {
         GeometryReader { geo in
@@ -91,6 +116,7 @@ struct ContentView: View {
                 MenuSheet(
                     state: viewModel.state,
                     themeMode: selectedThemeModeBinding,
+                    preferredLanguage: selectedPreferredLanguageBinding,
                     onBulkImageDownload: {
                         showingMenu = false
                         viewModel.onBulkImageDownload()
@@ -122,6 +148,14 @@ struct ContentView: View {
             } message: { dialog in
                 Text("DB 업데이트가 있습니다. 업데이트 하시겠습니까?\n로컬 DB 날짜: \(dialog.localDate ?? "없음")\nGitHub DB 날짜: \(dialog.remoteDate)")
             }
+            .onChange(of: viewModel.state.detailKoText) { _ in
+                koExpanded = true
+                jaExpanded = false
+            }
+            .onChange(of: viewModel.state.detailJaText) { _ in
+                koExpanded = true
+                jaExpanded = false
+            }
             .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
             .preferredColorScheme(selectedThemeMode.colorScheme)
         }
@@ -135,6 +169,17 @@ struct ContentView: View {
         Binding(
             get: { selectedThemeMode },
             set: { themeModeRawValue = $0.rawValue }
+        )
+    }
+
+    private var selectedPreferredLanguage: PreferredLanguage {
+        PreferredLanguage(rawValue: preferredLanguageRawValue) ?? .defaultFromSystem
+    }
+
+    private var selectedPreferredLanguageBinding: Binding<PreferredLanguage> {
+        Binding(
+            get: { selectedPreferredLanguage },
+            set: { preferredLanguageRawValue = $0.rawValue }
         )
     }
 
@@ -372,30 +417,66 @@ struct ContentView: View {
     }
 
     private func detailPanel(scrollable: Bool) -> some View {
-        let lines = viewModel.state.detailKoText
-            .split(whereSeparator: { $0.isNewline })
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let koLines = splitDetailLines(viewModel.state.detailKoText)
+        let jaLines = splitDetailLines(viewModel.state.detailJaText)
 
         return Group {
             if scrollable {
                 ScrollView {
-                    detailLinesView(lines: lines)
+                    detailLinesView(koLines: koLines, jaLines: jaLines)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
-                detailLinesView(lines: lines)
+                detailLinesView(koLines: koLines, jaLines: jaLines)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
 
-    private func detailLinesView(lines: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if lines.isEmpty {
-                Text("(한국어 본문 없음)")
-            } else {
+    private func detailLinesView(koLines: [String], jaLines: [String]) -> some View {
+        let hasKo = !koLines.isEmpty
+        let hasJa = !jaLines.isEmpty
+
+        return VStack(alignment: .leading, spacing: 6) {
+            if !hasKo && !hasJa {
+                Text("(본문 없음)")
+            } else if hasKo && hasJa {
+                detailSection(title: "한국어", lines: koLines, expanded: $koExpanded)
+                detailSection(title: "일본어", lines: jaLines, expanded: $jaExpanded)
+            } else if hasKo {
                 sectionChip("한국어")
+                ForEach(Array(koLines.enumerated()), id: \.offset) { item in
+                    detailLine(item.element)
+                }
+            } else {
+                sectionChip("일본어")
+                ForEach(Array(jaLines.enumerated()), id: \.offset) { item in
+                    detailLine(item.element)
+                }
+            }
+        }
+    }
+
+    private func splitDetailLines(_ text: String) -> [String] {
+        text
+            .split(whereSeparator: { $0.isNewline })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func detailSection(title: String, lines: [String], expanded: Binding<Bool>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                sectionChip(title)
+                Spacer()
+                Button(expanded.wrappedValue ? "접기" : "펼치기") {
+                    expanded.wrappedValue.toggle()
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.blue)
+                .font(.caption)
+            }
+            if expanded.wrappedValue {
                 ForEach(Array(lines.enumerated()), id: \.offset) { item in
                     detailLine(item.element)
                 }
@@ -486,7 +567,13 @@ struct ContentView: View {
     }
 
     private func resultTitle(_ row: PrintRow) -> String {
-        let displayName = !row.nameKo.isEmpty ? row.nameKo : (!row.nameJa.isEmpty ? row.nameJa : "(이름 없음)")
+        let displayName: String
+        switch selectedPreferredLanguage {
+        case .korean:
+            displayName = !row.nameKo.isEmpty ? row.nameKo : (!row.nameJa.isEmpty ? row.nameJa : "(이름 없음)")
+        case .japanese:
+            displayName = !row.nameJa.isEmpty ? row.nameJa : (!row.nameKo.isEmpty ? row.nameKo : "(이름 없음)")
+        }
         if !row.cardNumber.isEmpty {
             return "\(row.cardNumber) | \(displayName)"
         }
@@ -501,6 +588,7 @@ struct ContentView: View {
 private struct MenuSheet: View {
     let state: HocgUiState
     @Binding var themeMode: AppThemeMode
+    @Binding var preferredLanguage: PreferredLanguage
     let onBulkImageDownload: () -> Void
     let onManualUpdate: () -> Void
 
@@ -521,6 +609,18 @@ private struct MenuSheet: View {
                     Picker(selection: $themeMode) {
                         ForEach(AppThemeMode.allCases) { mode in
                             Text(mode.label).tag(mode)
+                        }
+                    } label: {
+                        EmptyView()
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.inline)
+                }
+
+                Section("선호 언어") {
+                    Picker(selection: $preferredLanguage) {
+                        ForEach(PreferredLanguage.allCases) { language in
+                            Text(language.label).tag(language)
                         }
                     } label: {
                         EmptyView()

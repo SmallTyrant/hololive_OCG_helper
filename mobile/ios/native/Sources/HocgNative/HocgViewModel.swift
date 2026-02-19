@@ -224,6 +224,7 @@ final class HocgViewModel: ObservableObject {
             state.results = []
             state.selectedPrintId = nil
             state.detailKoText = ""
+            state.detailJaText = ""
             state.imageState = .placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다.")
             return
         }
@@ -237,6 +238,7 @@ final class HocgViewModel: ObservableObject {
                 state.results = []
                 state.selectedPrintId = nil
                 state.detailKoText = ""
+                state.detailJaText = ""
                 state.imageState = .placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다.")
                 return
             }
@@ -253,6 +255,7 @@ final class HocgViewModel: ObservableObject {
             } else {
                 state.selectedPrintId = nil
                 state.detailKoText = ""
+                state.detailJaText = ""
                 state.imageState = .placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다.")
             }
         }
@@ -274,11 +277,13 @@ final class HocgViewModel: ObservableObject {
 
             guard let brief else {
                 state.detailKoText = "[ERROR] 상세 로드 실패"
+                state.detailJaText = ""
                 state.imageState = .error("이미지 로딩 실패")
                 return
             }
 
             state.detailKoText = detail?.koText ?? ""
+            state.detailJaText = detail?.jaText ?? ""
 
             let cardNumber = brief.cardNumber.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !cardNumber.isEmpty else {

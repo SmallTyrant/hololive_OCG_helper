@@ -24,6 +24,7 @@ struct PrintBrief {
 
 struct CardDetail {
     let koText: String
+    let jaText: String
 }
 
 struct UpdateDialogState {
@@ -46,6 +47,7 @@ struct HocgUiState {
     var results: [PrintRow] = []
     var selectedPrintId: Int64?
     var detailKoText: String = ""
+    var detailJaText: String = ""
     var imageState: CardImageState = .placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다.")
     var imageCollapsed: Bool = false
     var updateRunning: Bool = false

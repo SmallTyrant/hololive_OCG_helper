@@ -287,9 +287,11 @@ final class DatabaseRepository {
             return try withSQLite(path: paths.dbURL.path, readOnly: true) { db in
                 let sql = """
                 SELECT
-                    COALESCE(ko.effect_text,'') AS ko_text
+                    COALESCE(ko.effect_text,'') AS ko_text,
+                    COALESCE(ja.effect_text,'') AS ja_text
                 FROM prints p
                 LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
+                LEFT JOIN card_texts_ja ja ON ja.print_id = p.print_id
                 WHERE p.print_id=?
                 """
                 let stmt = try sqlitePrepare(db: db, sql: sql)
@@ -298,7 +300,10 @@ final class DatabaseRepository {
                 guard sqlite3_step(stmt) == SQLITE_ROW else {
                     return nil
                 }
-                return CardDetail(koText: sqliteColumnString(stmt, index: 0))
+                return CardDetail(
+                    koText: sqliteColumnString(stmt, index: 0),
+                    jaText: sqliteColumnString(stmt, index: 1),
+                )
             }
         } catch {
             return nil
