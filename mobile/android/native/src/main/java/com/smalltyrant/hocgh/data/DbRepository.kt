@@ -299,6 +299,54 @@ class DbRepository(private val paths: AppPaths) {
         }
     }
 
+    fun listDeckCards(query: String, limit: Int = 240): List<com.smalltyrant.hocgh.model.DeckCardCandidate> {
+        val like = "%${query.trim()}%"
+        return try {
+            openReadOnly().useDb { db ->
+                db.rawQuery(
+                    """
+                    SELECT
+                        p.print_id,
+                        p.card_number,
+                        COALESCE(p.name_ja,'') AS name_ja,
+                        COALESCE(ko.name,'') AS name_ko,
+                        COALESCE(p.image_url,'') AS image_url,
+                        COALESCE(p.card_type,'') AS card_type,
+                        COALESCE(p.color,'') AS color,
+                        COALESCE(ko.effect_text,'') AS ko_text
+                    FROM prints p
+                    LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
+                    WHERE
+                        ? = '%%'
+                        OR UPPER(COALESCE(p.card_number,'')) LIKE UPPER(?)
+                        OR LOWER(COALESCE(ko.name,'')) LIKE LOWER(?)
+                        OR LOWER(COALESCE(p.name_ja,'')) LIKE LOWER(?)
+                    ORDER BY p.card_number
+                    LIMIT ?
+                    """.trimIndent(),
+                    arrayOf(like, like, like, like, limit.toString()),
+                ).useCursor { cursor ->
+                    val out = mutableListOf<com.smalltyrant.hocgh.model.DeckCardCandidate>()
+                    while (cursor.moveToNext()) {
+                        out += com.smalltyrant.hocgh.model.DeckCardCandidate(
+                            printId = cursor.getLongOrZero("print_id"),
+                            cardNumber = cursor.getStringOrEmpty("card_number"),
+                            nameJa = cursor.getStringOrEmpty("name_ja"),
+                            nameKo = cursor.getStringOrEmpty("name_ko"),
+                            imageUrl = cursor.getStringOrEmpty("image_url"),
+                            cardType = cursor.getStringOrEmpty("card_type"),
+                            color = cursor.getStringOrEmpty("color"),
+                            koText = cursor.getStringOrEmpty("ko_text"),
+                        )
+                    }
+                    out
+                }
+            }
+        } catch (_: Throwable) {
+            emptyList()
+        }
+    }
+
     fun loadCardDetail(printId: Long): CardDetail? {
         return try {
             openReadOnly().useDb { db ->

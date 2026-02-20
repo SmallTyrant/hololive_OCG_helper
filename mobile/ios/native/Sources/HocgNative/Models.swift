@@ -27,6 +27,19 @@ struct CardDetail {
     let jaText: String
 }
 
+struct DeckCardCandidate: Identifiable {
+    let printId: Int64
+    let cardNumber: String
+    let nameJa: String
+    let nameKo: String
+    let imageUrl: String
+    let cardType: String
+    let color: String
+    let koText: String
+
+    var id: Int64 { printId }
+}
+
 struct UpdateDialogState {
     let localDate: String?
     let remoteDate: String

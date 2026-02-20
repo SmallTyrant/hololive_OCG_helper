@@ -32,6 +32,18 @@ data class UpdateDialogState(
     val remoteDate: String,
 )
 
+
+data class DeckCardCandidate(
+    val printId: Long,
+    val cardNumber: String,
+    val nameJa: String,
+    val nameKo: String,
+    val imageUrl: String,
+    val cardType: String,
+    val color: String,
+    val koText: String,
+)
+
 sealed interface ImageState {
     data class Local(val file: File) : ImageState
     data class Remote(val url: String) : ImageState

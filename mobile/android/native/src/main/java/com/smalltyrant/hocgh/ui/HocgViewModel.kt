@@ -401,6 +401,14 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    suspend fun searchDeckCards(query: String): List<DeckCardCandidate> {
+        return withContext(Dispatchers.IO) {
+            dbRepository.listDeckCards(query).map { candidate ->
+                candidate.copy(imageUrl = paths.resolveImageUrl(candidate.imageUrl))
+            }
+        }
+    }
+
     private fun pushToast(message: String) {
         _toastEvents.tryEmit(message)
     }

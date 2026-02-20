@@ -354,6 +354,31 @@ def list_cards(conn: sqlite3.Connection, limit: int = 120) -> list[dict]:
         )
     ]
 
+
+def list_cards_for_deck(conn: sqlite3.Connection, limit: int = 600) -> list[dict]:
+    row_limit = max(1, int(limit or 600))
+    return [
+        dict(r)
+        for r in conn.execute(
+            """
+            SELECT
+                p.print_id,
+                p.card_number,
+                COALESCE(p.name_ja,'') AS name_ja,
+                COALESCE(ko.name,'') AS name_ko,
+                COALESCE(p.image_url,'') AS image_url,
+                COALESCE(p.card_type,'') AS card_type,
+                COALESCE(p.color,'') AS color,
+                COALESCE(ko.effect_text,'') AS ko_text
+            FROM prints p
+            LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
+            ORDER BY p.card_number
+            LIMIT ?
+            """,
+            (row_limit,),
+        )
+    ]
+
 def load_card_detail(conn: sqlite3.Connection, pid: int) -> dict | None:
     r = conn.execute(
         """
