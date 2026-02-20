@@ -53,6 +53,7 @@ APP_NAME = "hOCG_H"
 SEARCH_MODE_PARTIAL = "partial"
 SEARCH_MODE_EXACT = "exact"
 MOBILE_SAFE_BOTTOM_PADDING = 34
+REMOTE_DB_CHECK_INTERVAL_SECONDS = 300
 
 def with_opacity(opacity: float, color: str) -> str:
     return COLORS.with_opacity(opacity, color)
@@ -226,7 +227,7 @@ def launch_app(db_path: str) -> None:
         image_panel_state = {"collapsed": False}
         search_mode_state = {"value": SEARCH_MODE_PARTIAL}
         update_state = {"running": False}
-        update_prompt_state = {"shown": False}
+        update_prompt_state = {"last_marker": None}
         downloading = set()
         download_lock = threading.Lock()
 
@@ -805,7 +806,7 @@ def launch_app(db_path: str) -> None:
 
         def on_db_change(e) -> None:
             invalidate_db_health_cache()
-            update_prompt_state["shown"] = False
+            update_prompt_state["last_marker"] = None
 
         tf_db.on_change = on_db_change
 
@@ -977,32 +978,45 @@ def launch_app(db_path: str) -> None:
             page.show_dialog(db_update_dialog)
 
         async def check_remote_db_update_async() -> None:
-            if update_prompt_state["shown"]:
+            if update_state["running"]:
                 return
 
             dbp = (tf_db.value or "").strip()
             if not dbp:
                 return
 
-            def _resolve_dates(path_value: str) -> tuple[str | None, str | None, bool]:
+            def _resolve_dates(path_value: str) -> tuple[str | None, str | None, bool, str | None]:
                 hash_check = check_db_hash_update_needed(path_value)
                 if bool(hash_check.get("needs_update")):
-                    return None, None, True
+                    marker = f"hash:{(hash_check.get('remote_hash') or '').strip().lower()}"
+                    return None, None, True, marker
 
                 local_date_value = local_db_date(path_value)
                 info = get_latest_release_db_info()
                 if not info:
-                    return local_date_value, None, False
+                    return local_date_value, None, False, None
                 remote_date_value = format_iso_date(
                     info.get("asset_updated_at")
                     or info.get("published_at")
                     or info.get("created_at")
                 )
-                return local_date_value, remote_date_value, False
+                marker = "date:" + "|".join(
+                    [
+                        str(info.get("tag") or "").strip(),
+                        str(info.get("asset_digest") or "").strip().lower(),
+                        str(info.get("asset_updated_at") or "").strip(),
+                        str(info.get("published_at") or "").strip(),
+                        str(info.get("created_at") or "").strip(),
+                    ]
+                )
+                return local_date_value, remote_date_value, False, marker
 
-            local_date_value, remote_date_value, auto_update_needed = await asyncio.to_thread(_resolve_dates, dbp)
+            local_date_value, remote_date_value, auto_update_needed, marker = await asyncio.to_thread(_resolve_dates, dbp)
+            if marker and marker == update_prompt_state["last_marker"]:
+                return
+
             if auto_update_needed:
-                update_prompt_state["shown"] = True
+                update_prompt_state["last_marker"] = marker
                 show_toast("DB 해시 변경 감지: 자동 업데이트를 시작합니다.", duration_ms=2200)
                 await do_update_async()
                 return
@@ -1011,8 +1025,16 @@ def launch_app(db_path: str) -> None:
             if local_date_value == remote_date_value:
                 return
 
-            update_prompt_state["shown"] = True
+            update_prompt_state["last_marker"] = marker
             open_db_update_dialog(local_date_value, remote_date_value)
+
+        async def monitor_remote_db_updates_async() -> None:
+            while True:
+                try:
+                    await check_remote_db_update_async()
+                except Exception as ex:
+                    append_log(f"[WARN] 원격 DB 업데이트 확인 실패: {ex}")
+                await asyncio.sleep(REMOTE_DB_CHECK_INTERVAL_SECONDS)
 
         def on_menu_click(e=None) -> None:
             if not is_mobile_layout():
@@ -1314,7 +1336,7 @@ def launch_app(db_path: str) -> None:
         build_layout()
         refresh_list()
         page.run_task(run_startup_checks_async)
-        page.run_task(check_remote_db_update_async)
+        page.run_task(monitor_remote_db_updates_async)
         if needs_db_update():
             show_toast(DB_MISSING_TOAST, persist=True)
 
