@@ -329,22 +329,30 @@ def launch_app(db_path: str) -> None:
             return None
 
         def decrease_entry_qty(entry: dict) -> None:
-            entry["qty"] = max(0, int(entry.get("qty", 0)) - 1)
+            pid = int(entry.get("print_id") or 0)
+            target = next((x for x in deck_editor_state["entries"] if int(x.get("print_id") or 0) == pid), None)
+            if not target:
+                return
+            target["qty"] = max(0, int(target.get("qty", 0)) - 1)
             deck_editor_state["entries"] = [x for x in deck_editor_state["entries"] if int(x.get("qty", 0)) > 0]
 
         def increase_entry_qty(entry: dict) -> str | None:
-            qty = int(entry.get("qty", 0))
-            max_per_card = int(entry.get("max_per_card", 4))
+            pid = int(entry.get("print_id") or 0)
+            target = next((x for x in deck_editor_state["entries"] if int(x.get("print_id") or 0) == pid), None)
+            if not target:
+                return None
+            qty = int(target.get("qty", 0))
+            max_per_card = int(target.get("max_per_card", 4))
             if qty >= max_per_card:
                 return f"이 카드는 최대 {max_per_card}장까지 가능합니다."
             oshi_count, yell_count, main_count = get_entry_counts(deck_editor_state["entries"])
-            if entry.get("is_oshi") and oshi_count >= 1:
+            if target.get("is_oshi") and oshi_count >= 1:
                 return "오시카드는 1장만 선택 가능합니다."
-            if entry.get("is_yell") and yell_count >= 20:
+            if target.get("is_yell") and yell_count >= 20:
                 return "옐 카드는 최대 20장까지 가능합니다."
-            if not entry.get("is_oshi") and not entry.get("is_yell") and main_count >= 50:
+            if not target.get("is_oshi") and not target.get("is_yell") and main_count >= 50:
                 return "오시/옐 제외 카드는 최대 50장까지 가능합니다."
-            entry["qty"] = qty + 1
+            target["qty"] = qty + 1
             return None
 
         def open_deck_list_screen() -> None:

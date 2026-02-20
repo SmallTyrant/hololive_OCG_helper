@@ -284,12 +284,14 @@ fun HocgScreen(
                     onAdd = {
                         deckTitle = "새 덱"
                         deckDraft.clear()
+                        showDeckList = false
                         showDeckEditor = true
                     },
                     onEdit = { deck ->
                         deckTitle = deck.title
                         deckDraft.clear()
                         deckDraft.addAll(deck.entries.map { it.copy() })
+                        showDeckList = false
                         showDeckEditor = true
                     },
                 )
@@ -351,10 +353,17 @@ fun HocgScreen(
                                                 .fillMaxWidth()
                                                 .clickable {
                                                     val found = deckDraft.firstOrNull { it.card.printId == card.printId }
+                                                    val oshi = deckDraft.filter { isOshi(it.card) }.sumOf { it.qty }
+                                                    val yell = deckDraft.filter { isYell(it.card) }.sumOf { it.qty }
+                                                    val main = deckDraft.filter { !isOshi(it.card) && !isYell(it.card) }.sumOf { it.qty }
                                                     if (found == null) {
-                                                        deckDraft.add(DeckEntryUi(card = card, qty = 1, maxPerCard = maxPerCard(card)))
+                                                        if ((!isOshi(card) || oshi < 1) && (!isYell(card) || yell < 20) && (isOshi(card) || isYell(card) || main < 50)) {
+                                                            deckDraft.add(DeckEntryUi(card = card, qty = 1, maxPerCard = maxPerCard(card)))
+                                                        }
                                                     } else if (found.qty < found.maxPerCard) {
-                                                        found.qty += 1
+                                                        if ((!isOshi(card) || oshi < 1) && (!isYell(card) || yell < 20) && (isOshi(card) || isYell(card) || main < 50)) {
+                                                            found.qty += 1
+                                                        }
                                                     }
                                                 }
                                                 .padding(vertical = 4.dp),
