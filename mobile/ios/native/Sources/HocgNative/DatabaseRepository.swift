@@ -249,6 +249,56 @@ final class DatabaseRepository {
         }
     }
 
+    func listDeckCards(query: String, limit: Int = 240) -> [DeckCardCandidate] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let like = "%\(q)%"
+        do {
+            return try withSQLite(path: paths.dbURL.path, readOnly: true) { db in
+                let sql = """
+                SELECT
+                    p.print_id,
+                    p.card_number,
+                    COALESCE(p.name_ja,'') AS name_ja,
+                    COALESCE(ko.name,'') AS name_ko,
+                    COALESCE(p.image_url,'') AS image_url,
+                    COALESCE(p.card_type,'') AS card_type,
+                    COALESCE(p.color,'') AS color,
+                    COALESCE(ko.effect_text,'') AS ko_text
+                FROM prints p
+                LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
+                WHERE
+                    ? = '%%'
+                    OR UPPER(COALESCE(p.card_number,'')) LIKE UPPER(?)
+                    OR LOWER(COALESCE(ko.name,'')) LIKE LOWER(?)
+                    OR LOWER(COALESCE(p.name_ja,'')) LIKE LOWER(?)
+                ORDER BY p.card_number
+                LIMIT ?
+                """
+                let stmt = try sqlitePrepare(db: db, sql: sql)
+                defer { sqlite3_finalize(stmt) }
+                try sqliteBind([.text(like), .text(like), .text(like), .text(like), .int64(Int64(limit))], to: stmt)
+                var rows: [DeckCardCandidate] = []
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    rows.append(
+                        DeckCardCandidate(
+                            printId: sqliteColumnInt64(stmt, index: 0),
+                            cardNumber: sqliteColumnString(stmt, index: 1),
+                            nameJa: sqliteColumnString(stmt, index: 2),
+                            nameKo: sqliteColumnString(stmt, index: 3),
+                            imageUrl: sqliteColumnString(stmt, index: 4),
+                            cardType: sqliteColumnString(stmt, index: 5),
+                            color: sqliteColumnString(stmt, index: 6),
+                            koText: sqliteColumnString(stmt, index: 7),
+                        )
+                    )
+                }
+                return rows
+            }
+        } catch {
+            return []
+        }
+    }
+
     func getPrintBrief(printId: Int64) -> PrintBrief? {
         do {
             return try withSQLite(path: paths.dbURL.path, readOnly: true) { db in

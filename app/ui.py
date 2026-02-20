@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 import threading
 import sys
 import time
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,6 +18,7 @@ from app.services.db import (
     query_suggest,
     query_exact,
     list_cards,
+    list_cards_for_deck,
     load_card_detail,
     get_print_brief,
     db_exists,
@@ -229,6 +232,136 @@ def launch_app(db_path: str) -> None:
         update_prompt_state = {"shown": False}
         downloading = set()
         download_lock = threading.Lock()
+
+        deck_screen_state = {"name": "main", "deck_id": None}
+        deck_cards_state = {"rows": []}
+        deck_editor_state = {"title": "", "entries": []}
+        deck_search_state = {"query": ""}
+        deck_file = data_root / "deck_lists.json"
+
+        def load_decks() -> list[dict]:
+            if not deck_file.exists():
+                return []
+            try:
+                return json.loads(deck_file.read_text(encoding="utf-8"))
+            except Exception:
+                return []
+
+        def save_decks(decks: list[dict]) -> None:
+            deck_file.parent.mkdir(parents=True, exist_ok=True)
+            deck_file.write_text(json.dumps(decks, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        def card_limit_from_text(text: str) -> int:
+            src = (text or "").lower()
+            if "리미티드" in src or "limited" in src:
+                return 1
+            patterns = [r"(\d+)장만", r"최대\s*(\d+)장", r"(\d+)장까지"]
+            for pattern in patterns:
+                m = re.search(pattern, src)
+                if m:
+                    try:
+                        return max(1, int(m.group(1)))
+                    except Exception:
+                        pass
+            return 4
+
+        def is_oshi(card: dict) -> bool:
+            card_type = (card.get("card_type") or "").lower()
+            return "오시" in card_type or "推し" in card_type
+
+        def is_yell(card: dict) -> bool:
+            color = (card.get("color") or "").lower()
+            card_type = (card.get("card_type") or "").lower()
+            return "옐" in color or "yell" in color or "エール" in color or "yell" in card_type
+
+        def get_entry_counts(entries: list[dict]) -> tuple[int, int, int]:
+            oshi = 0
+            yell = 0
+            main = 0
+            for entry in entries:
+                qty = int(entry.get("qty", 0) or 0)
+                if entry.get("is_oshi"):
+                    oshi += qty
+                elif entry.get("is_yell"):
+                    yell += qty
+                else:
+                    main += qty
+            return oshi, yell, main
+
+        def try_add_card_to_deck(card: dict) -> str | None:
+            entries = deck_editor_state["entries"]
+            oshi_count, yell_count, main_count = get_entry_counts(entries)
+            max_per_card = 1 if is_oshi(card) else card_limit_from_text(card.get("ko_text") or "")
+            card_id = int(card.get("print_id") or 0)
+            found = next((entry for entry in entries if int(entry.get("print_id") or 0) == card_id), None)
+
+            if is_oshi(card) and oshi_count >= 1 and not found:
+                return "오시카드는 1장만 선택 가능합니다."
+            if is_yell(card) and yell_count >= 20 and not found:
+                return "옐 카드는 최대 20장까지 가능합니다."
+            if not is_oshi(card) and not is_yell(card) and main_count >= 50 and not found:
+                return "오시/옐 제외 카드는 최대 50장까지 가능합니다."
+
+            if found:
+                if int(found.get("qty", 0)) >= int(found.get("max_per_card", max_per_card)):
+                    return f"이 카드는 최대 {found.get('max_per_card', max_per_card)}장까지 가능합니다."
+                found["qty"] = int(found.get("qty", 0)) + 1
+                return None
+
+            entries.append(
+                {
+                    "print_id": card_id,
+                    "card_number": (card.get("card_number") or "").strip(),
+                    "name": (card.get("name_ko") or card.get("name_ja") or "(이름 없음)").strip(),
+                    "image_url": resolve_url((card.get("image_url") or "").strip()),
+                    "is_oshi": is_oshi(card),
+                    "is_yell": is_yell(card),
+                    "max_per_card": max_per_card,
+                    "qty": 1,
+                }
+            )
+            return None
+
+        def decrease_entry_qty(entry: dict) -> None:
+            entry["qty"] = max(0, int(entry.get("qty", 0)) - 1)
+            deck_editor_state["entries"] = [x for x in deck_editor_state["entries"] if int(x.get("qty", 0)) > 0]
+
+        def increase_entry_qty(entry: dict) -> str | None:
+            qty = int(entry.get("qty", 0))
+            max_per_card = int(entry.get("max_per_card", 4))
+            if qty >= max_per_card:
+                return f"이 카드는 최대 {max_per_card}장까지 가능합니다."
+            oshi_count, yell_count, main_count = get_entry_counts(deck_editor_state["entries"])
+            if entry.get("is_oshi") and oshi_count >= 1:
+                return "오시카드는 1장만 선택 가능합니다."
+            if entry.get("is_yell") and yell_count >= 20:
+                return "옐 카드는 최대 20장까지 가능합니다."
+            if not entry.get("is_oshi") and not entry.get("is_yell") and main_count >= 50:
+                return "오시/옐 제외 카드는 최대 50장까지 가능합니다."
+            entry["qty"] = qty + 1
+            return None
+
+        def open_deck_list_screen() -> None:
+            deck_screen_state["name"] = "deck_list"
+            deck_editor_state["title"] = ""
+            deck_editor_state["entries"] = []
+            build_layout(force=True)
+            page.update()
+
+        def open_deck_editor(deck_id: int | None = None) -> None:
+            deck_screen_state["name"] = "deck_editor"
+            deck_screen_state["deck_id"] = deck_id
+            if deck_id is None:
+                deck_editor_state["title"] = "새 덱"
+                deck_editor_state["entries"] = []
+            else:
+                decks = load_decks()
+                deck = next((d for d in decks if int(d.get("id", -1)) == int(deck_id)), None)
+                if deck:
+                    deck_editor_state["title"] = deck.get("title") or "덱"
+                    deck_editor_state["entries"] = [dict(x) for x in (deck.get("entries") or [])]
+            build_layout(force=True)
+            page.update()
 
         def append_log(s: str) -> None:
             print(s, flush=True)
@@ -813,6 +946,7 @@ def launch_app(db_path: str) -> None:
             update_state["running"] = running
             btn_menu.disabled = running
             btn_manual_update.disabled = running
+            btn_deck_list.disabled = running
             tf_search.disabled = running
             tf_db.disabled = running
             update_progress.visible = running
@@ -894,6 +1028,10 @@ def launch_app(db_path: str) -> None:
             "DB 수동갱신",
             icon=ICONS.SYNC,
         )
+        btn_deck_list = ft.ElevatedButton(
+            "덱리스트(테스트)",
+            icon=ICONS.VIEW_LIST,
+        )
         menu_panel = ft.NavigationDrawer(
             controls=[
                 ft.Container(
@@ -907,6 +1045,10 @@ def launch_app(db_path: str) -> None:
                 ),
                 ft.Container(
                     content=btn_manual_update,
+                    padding=ft.padding.symmetric(horizontal=12, vertical=6),
+                ),
+                ft.Container(
+                    content=btn_deck_list,
                     padding=ft.padding.symmetric(horizontal=12, vertical=6),
                 ),
                 ft.Divider(height=8),
@@ -946,6 +1088,15 @@ def launch_app(db_path: str) -> None:
             page.run_task(run_manual_update_from_panel_async)
 
         btn_manual_update.on_click = on_manual_update_click
+
+        async def open_deck_list_from_panel_async() -> None:
+            await close_menu_panel_async()
+            open_deck_list_screen()
+
+        def on_deck_list_click(e=None) -> None:
+            page.run_task(open_deck_list_from_panel_async)
+
+        btn_deck_list.on_click = on_deck_list_click
 
         def close_db_update_dialog(e=None) -> None:
             if db_update_dialog.open:
@@ -1082,6 +1233,186 @@ def launch_app(db_path: str) -> None:
                 return is_mobile_platform() and not is_android_tablet()
             return bool(width) and width < 900 and not is_android_tablet()
 
+        def grouped_deck_entries(entries: list[dict]) -> list[dict]:
+            grouped: dict[int, dict] = {}
+            for entry in entries:
+                pid = int(entry.get("print_id") or 0)
+                if pid not in grouped:
+                    grouped[pid] = dict(entry)
+                else:
+                    grouped[pid]["qty"] = int(grouped[pid].get("qty", 0)) + int(entry.get("qty", 0))
+            return sorted(grouped.values(), key=lambda x: (x.get("card_number") or "", x.get("name") or ""))
+
+        def render_deck_list_screen() -> ft.Control:
+            decks = load_decks()
+            items: list[ft.Control] = []
+            for deck in decks:
+                entries = grouped_deck_entries(deck.get("entries") or [])
+                preview = ft.Column(
+                    [
+                        ft.Row(
+                            [
+                                ft.Image(src=(e.get("image_url") or ""), width=48, height=68, fit=IMAGE_FIT_COVER),
+                                ft.Text(f"x {int(e.get('qty', 0))}"),
+                            ],
+                            spacing=8,
+                        )
+                        for e in entries[:5]
+                    ],
+                    spacing=6,
+                )
+                items.append(
+                    ft.Container(
+                        content=ft.Column(
+                            [
+                                ft.Text(deck.get("title") or "덱", weight=ft.FontWeight.BOLD),
+                                preview,
+                            ],
+                            spacing=8,
+                        ),
+                        border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
+                        border_radius=10,
+                        padding=10,
+                        on_click=lambda e, _id=deck.get("id"): open_deck_editor(int(_id)),
+                    )
+                )
+            return ft.SafeArea(
+                content=ft.Container(
+                    content=ft.Column(
+                        [
+                            ft.Row(
+                                [
+                                    ft.TextButton("뒤로", on_click=lambda e: (deck_screen_state.update({"name": "main"}), build_layout(True), page.update())),
+                                    ft.Text("덱 리스트", weight=ft.FontWeight.BOLD),
+                                    ft.IconButton(icon=ICONS.ADD, on_click=lambda e: open_deck_editor(None)),
+                                ],
+                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                            ),
+                            ft.Column(items or [ft.Text("저장된 덱이 없습니다.")], scroll=ft.ScrollMode.AUTO, expand=True),
+                        ],
+                        expand=True,
+                    ),
+                    padding=10,
+                ),
+                expand=True,
+            )
+
+        def open_card_pick_dialog() -> None:
+            if needs_db_update():
+                show_toast(DB_MISSING_TOAST, persist=True)
+                return
+            try:
+                conn = get_conn()
+                deck_cards_state["rows"] = list_cards_for_deck(conn, limit=800)
+            except Exception as ex:
+                show_toast(f"카드 목록 로드 실패: {ex}", duration_ms=2000)
+                return
+
+            search = ft.TextField(label="카드 검색", value=deck_search_state["query"], on_change=lambda e: refresh_dialog())
+            body = ft.Column(scroll=ft.ScrollMode.AUTO, height=420, spacing=6)
+
+            def refresh_dialog() -> None:
+                deck_search_state["query"] = (search.value or "").strip().lower()
+                rows = deck_cards_state["rows"]
+                q = deck_search_state["query"]
+                body.controls.clear()
+                for row in rows:
+                    card_no = (row.get("card_number") or "").lower()
+                    name = ((row.get("name_ko") or row.get("name_ja") or "")).lower()
+                    if q and q not in card_no and q not in name:
+                        continue
+                    body.controls.append(
+                        ft.ListTile(
+                            leading=ft.Image(src=resolve_url((row.get("image_url") or "").strip()), width=36, height=50, fit=IMAGE_FIT_COVER),
+                            title=ft.Text(f"{row.get('card_number') or ''} | {row.get('name_ko') or row.get('name_ja') or ''}"),
+                            on_click=lambda e, _row=row: (show_toast(try_add_card_to_deck(_row) or "카드가 추가되었습니다.", duration_ms=1200), build_layout(True), page.pop_dialog(), page.update()),
+                        )
+                    )
+                page.update()
+
+            refresh_dialog()
+            dlg = ft.AlertDialog(
+                modal=True,
+                title=ft.Text("카드 선택"),
+                content=ft.Column([search, body], tight=True),
+                actions=[ft.TextButton("닫기", on_click=lambda e: page.pop_dialog())],
+            )
+            page.show_dialog(dlg)
+
+        def on_add_entry_click(entry: dict) -> None:
+            message = increase_entry_qty(entry)
+            if message:
+                show_toast(message, duration_ms=1000)
+            build_layout(True)
+            page.update()
+
+        def on_remove_entry_click(entry: dict) -> None:
+            decrease_entry_qty(entry)
+            build_layout(True)
+            page.update()
+
+        def render_deck_editor_screen() -> ft.Control:
+            entries = grouped_deck_entries(deck_editor_state["entries"])
+            oshi_count, yell_count, main_count = get_entry_counts(entries)
+            entry_controls: list[ft.Control] = []
+            for entry in entries:
+                qty = int(entry.get("qty", 0))
+                max_qty = int(entry.get("max_per_card", 4))
+                entry_controls.append(
+                    ft.Container(
+                        content=ft.Row(
+                            [
+                                ft.Image(src=(entry.get("image_url") or ""), width=60, height=84, fit=IMAGE_FIT_COVER),
+                                ft.Text(f"{entry.get('card_number') or ''} | {entry.get('name') or ''} x {qty}", expand=True),
+                                ft.IconButton(icon=ICONS.REMOVE, on_click=lambda e, _entry=entry: on_remove_entry_click(_entry)),
+                                ft.IconButton(icon=ICONS.ADD, on_click=lambda e, _entry=entry: on_add_entry_click(_entry)),
+                            ]
+                        ),
+                        border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
+                        border_radius=10,
+                        padding=8,
+                    )
+                )
+
+            def save_current_deck(e=None) -> None:
+                decks = load_decks()
+                deck_id = deck_screen_state.get("deck_id")
+                payload = {
+                    "id": int(time.time() * 1000) if deck_id is None else deck_id,
+                    "title": (deck_editor_state.get("title") or "덱").strip() or "덱",
+                    "entries": grouped_deck_entries(deck_editor_state["entries"]),
+                }
+                if deck_id is None:
+                    decks.append(payload)
+                else:
+                    decks = [payload if int(d.get("id", -1)) == int(deck_id) else d for d in decks]
+                save_decks(decks)
+                show_toast("덱이 저장되었습니다.", duration_ms=1200)
+                open_deck_list_screen()
+
+            return ft.SafeArea(
+                content=ft.Container(
+                    content=ft.Column(
+                        [
+                            ft.Row(
+                                [
+                                    ft.TextButton("취소", on_click=lambda e: open_deck_list_screen()),
+                                    ft.TextField(value=deck_editor_state.get("title") or "", on_change=lambda e: deck_editor_state.update({"title": e.control.value}), expand=True, label="덱 이름"),
+                                    ft.TextButton("저장", on_click=save_current_deck),
+                                ],
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
+                            ft.Row([ft.Text(f"오시 {oshi_count}/1"), ft.Text(f"옐 {yell_count}/20"), ft.Text(f"기타 {main_count}/50")], spacing=14),
+                            ft.Row([ft.Text("카드 목록"), ft.IconButton(icon=ICONS.ADD, on_click=lambda e: open_card_pick_dialog())], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                            ft.Column(entry_controls or [ft.Text("카드를 추가해주세요.")], scroll=ft.ScrollMode.AUTO, expand=True),
+                        ],
+                        expand=True,
+                    ),
+                    padding=10,
+                ),
+                expand=True,
+            )
+
         def build_layout(force: bool = False) -> None:
             mobile = is_mobile_layout()
             width, height = get_view_size()
@@ -1096,6 +1427,13 @@ def launch_app(db_path: str) -> None:
             layout_state["size"] = size_key
 
             page.controls.clear()
+
+            if deck_screen_state["name"] == "deck_list":
+                page.add(render_deck_list_screen())
+                return
+            if deck_screen_state["name"] == "deck_editor":
+                page.add(render_deck_editor_screen())
+                return
 
             if mobile:
                 lv.expand = True
