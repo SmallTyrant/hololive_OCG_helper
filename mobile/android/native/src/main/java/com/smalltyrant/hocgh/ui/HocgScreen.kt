@@ -109,7 +109,7 @@ private val SECTION_LABELS = listOf(
 )
 
 private val DETAIL_PREFIX_PATTERN = Regex(
-    pattern = """^(?:.+?)\s+(?:서포트|サポート)\s*[/／]\s*(?:아이템|스태프|이벤트|이벤타|アイテム|スタッフ|イベント)\s+""",
+    pattern = """^(?:.+?)\s+(?:서포트|サポート)\s*[/／]\s*(?:아이템|스태프|이벤트|이벤타|툴|アイテム|スタッフ|イベント|ツール)\s+""",
 )
 
 private val INLINE_TAG_PATTERN = Regex(pattern = """#[\p{L}\p{N}_]+""")

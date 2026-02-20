@@ -25,7 +25,7 @@ private let sectionLabels: [String] = [
     "LIFE",
     "HP",
 ]
-private let detailPrefixPattern = #"^(?:.+?)\s+(?:서포트|サポート)\s*[/／]\s*(?:아이템|스태프|이벤트|이벤타|アイテム|スタッフ|イベント)\s+"#
+private let detailPrefixPattern = #"^(?:.+?)\s+(?:서포트|サポート)\s*[/／]\s*(?:아이템|스태프|이벤트|이벤타|툴|アイテム|スタッフ|イベント|ツール)\s+"#
 
 private enum AppThemeMode: String, CaseIterable, Identifiable {
     case system
