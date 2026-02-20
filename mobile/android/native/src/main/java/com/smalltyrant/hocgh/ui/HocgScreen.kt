@@ -108,6 +108,10 @@ private val SECTION_LABELS = listOf(
     "HP",
 )
 
+private val DETAIL_PREFIX_PATTERN = Regex(
+    pattern = """^(?:.+?)\s+(?:서포트|サポート)\s*[/／]\s*(?:아이템|스태프|이벤트|이벤타|アイテム|スタッフ|イベント)\s+""",
+)
+
 private data class DeckEntryUi(
     val card: DeckCardCandidate,
     var qty: Int,
@@ -821,12 +825,12 @@ private fun DetailPanel(
 ) {
     val koLines = remember(koText) {
         koText.lines()
-            .map { it.trim() }
+            .map { sanitizeDetailLine(it) }
             .filter { it.isNotEmpty() }
     }
     val jaLines = remember(jaText) {
         jaText.lines()
-            .map { it.trim() }
+            .map { sanitizeDetailLine(it) }
             .filter { it.isNotEmpty() }
     }
 
@@ -961,6 +965,11 @@ private fun splitSectionLabel(line: String): Pair<String, String>? {
         }
     }
     return null
+}
+
+private fun sanitizeDetailLine(line: String): String {
+    val trimmed = line.trim()
+    return DETAIL_PREFIX_PATTERN.replace(trimmed, "")
 }
 
 @Composable
