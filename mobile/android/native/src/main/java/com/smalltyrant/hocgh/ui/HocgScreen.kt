@@ -109,7 +109,7 @@ private val SECTION_LABELS = listOf(
 )
 
 private val DETAIL_PREFIX_PATTERN = Regex(
-    pattern = """^(\\S(?:.*?\\S)?)\\s+(?:서포트\\s*/\\s*(?:아이템|스태프)|サポート\\s*/\\s*(?:アイテム|スタッフ))\\s+""",
+    pattern = """^(?:.+?)\s+(?:서포트|サポート)\s*[/／]\s*(?:아이템|스태프|이벤트|이벤타|アイテム|スタッフ|イベント)\s+""",
 )
 
 private data class DeckEntryUi(
