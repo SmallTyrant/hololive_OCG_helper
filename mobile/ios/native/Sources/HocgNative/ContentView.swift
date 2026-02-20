@@ -128,6 +128,15 @@ struct ContentView: View {
         return 4
     }
 
+    private func canAddToDeck(_ card: DeckCardCandidate) -> Bool {
+        let oshi = deckEntries.filter { isOshi($0.card) }.map(\.qty).reduce(0, +)
+        let yell = deckEntries.filter { isYell($0.card) }.map(\.qty).reduce(0, +)
+        let main = deckEntries.filter { !isOshi($0.card) && !isYell($0.card) }.map(\.qty).reduce(0, +)
+        if isOshi(card) { return oshi < 1 }
+        if isYell(card) { return yell < 20 }
+        return main < 50
+    }
+
     var body: some View {
         GeometryReader { geo in
             let isMobileLayout = geo.size.width < 900
@@ -700,7 +709,12 @@ struct ContentView: View {
                 Spacer()
                 Text("덱 리스트").font(.headline)
                 Spacer()
-                Button { deckTitle = "새 덱"; deckEntries = []; showingDeckEditor = true } label: { Image(systemName: "plus") }
+                Button {
+                    deckTitle = "새 덱"
+                    deckEntries = []
+                    showingDeckList = false
+                    showingDeckEditor = true
+                } label: { Image(systemName: "plus") }
             }
             ScrollView {
                 VStack(spacing: 8) {
@@ -718,7 +732,12 @@ struct ContentView: View {
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.secondary.opacity(0.3)))
-                        .onTapGesture { deckTitle = deck.title; deckEntries = deck.entries; showingDeckEditor = true }
+                        .onTapGesture {
+                            deckTitle = deck.title
+                            deckEntries = deck.entries
+                            showingDeckList = false
+                            showingDeckEditor = true
+                        }
                     }
                 }
             }
@@ -752,7 +771,11 @@ struct ContentView: View {
                             Text("\(deckEntries[i].card.cardNumber) | \((deckEntries[i].card.nameKo.isEmpty ? deckEntries[i].card.nameJa : deckEntries[i].card.nameKo)) x \(deckEntries[i].qty)")
                             Spacer()
                             Button("-") { deckEntries[i].qty -= 1; if deckEntries[i].qty <= 0 { deckEntries.remove(at: i) } }
-                            Button("+") { if deckEntries[i].qty < deckEntries[i].maxPerCard { deckEntries[i].qty += 1 } }
+                            Button("+") {
+                                if deckEntries[i].qty < deckEntries[i].maxPerCard && canAddToDeck(deckEntries[i].card) {
+                                    deckEntries[i].qty += 1
+                                }
+                            }
                         }
                     }
                 }
@@ -768,9 +791,13 @@ struct ContentView: View {
                     List(deckCandidates) { card in
                         Button {
                             if let idx = deckEntries.firstIndex(where: { $0.id == card.printId }) {
-                                if deckEntries[idx].qty < deckEntries[idx].maxPerCard { deckEntries[idx].qty += 1 }
+                                if deckEntries[idx].qty < deckEntries[idx].maxPerCard && canAddToDeck(deckEntries[idx].card) {
+                                    deckEntries[idx].qty += 1
+                                }
                             } else {
-                                deckEntries.append(DeckEntryState(id: card.printId, card: card, qty: 1, maxPerCard: maxPerCard(card)))
+                                if canAddToDeck(card) {
+                                    deckEntries.append(DeckEntryState(id: card.printId, card: card, qty: 1, maxPerCard: maxPerCard(card)))
+                                }
                             }
                         } label: {
                             HStack {
