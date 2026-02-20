@@ -66,6 +66,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -98,7 +99,6 @@ private val SECTION_LABELS = listOf(
     "SP推しスキル",
     "推しスキル",
     "カードタイプ",
-    "タグ",
     "レアリティ",
     "アーツ",
     "エクストラ",
@@ -111,6 +111,8 @@ private val SECTION_LABELS = listOf(
 private val DETAIL_PREFIX_PATTERN = Regex(
     pattern = """^(?:.+?)\s+(?:서포트|サポート)\s*[/／]\s*(?:아이템|스태프|이벤트|이벤타|アイテム|スタッフ|イベント)\s+""",
 )
+
+private val INLINE_TAG_PATTERN = Regex(pattern = """#[\p{L}\p{N}_]+""")
 
 private data class DeckEntryUi(
     val card: DeckCardCandidate,
@@ -833,14 +835,18 @@ private fun DetailPanel(
     scrollable: Boolean,
 ) {
     val koLines = remember(koText) {
-        koText.lines()
+        mergeBrokenTagLines(
+            koText.lines()
             .map { sanitizeDetailLine(it) }
             .filter { it.isNotEmpty() }
+        )
     }
     val jaLines = remember(jaText) {
-        jaText.lines()
+        mergeBrokenTagLines(
+            jaText.lines()
             .map { sanitizeDetailLine(it) }
             .filter { it.isNotEmpty() }
+        )
     }
 
     val hasKo = koLines.isNotEmpty()
@@ -946,19 +952,43 @@ private fun DetailLine(line: String) {
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 SectionChip(label)
-                Text(rest, style = MaterialTheme.typography.bodyMedium)
+                Text(buildHighlightedTagText(rest, MaterialTheme.colorScheme.primary), style = MaterialTheme.typography.bodyMedium)
             }
         }
         return
     }
 
-    Text(line, style = MaterialTheme.typography.bodyMedium)
+    Text(buildHighlightedTagText(line, MaterialTheme.colorScheme.primary), style = MaterialTheme.typography.bodyMedium)
+}
+
+private fun buildHighlightedTagText(text: String, highlightColor: androidx.compose.ui.graphics.Color) = buildAnnotatedString {
+    var cursor = 0
+    for (match in INLINE_TAG_PATTERN.findAll(text)) {
+        if (match.range.first > cursor) {
+            append(text.substring(cursor, match.range.first))
+        }
+        withStyle(
+            SpanStyle(
+                color = highlightColor,
+                fontWeight = FontWeight.SemiBold,
+            ),
+        ) {
+            append(match.value)
+        }
+        cursor = match.range.last + 1
+    }
+    if (cursor < text.length) {
+        append(text.substring(cursor))
+    }
 }
 
 private fun splitSectionLabel(line: String): Pair<String, String>? {
     val trimmed = line.trim()
     val separators = listOf(" ", ":", "：", "[", "(", "【")
     for (label in SECTION_LABELS) {
+        if (label == "태그" || label == "タグ") {
+            continue
+        }
         if (trimmed == label) {
             return label to ""
         }
@@ -979,6 +1009,45 @@ private fun splitSectionLabel(line: String): Pair<String, String>? {
 private fun sanitizeDetailLine(line: String): String {
     val trimmed = line.trim()
     return DETAIL_PREFIX_PATTERN.replace(trimmed, "")
+}
+
+private fun mergeBrokenTagLines(lines: List<String>): List<String> {
+    val output = mutableListOf<String>()
+    var index = 0
+
+    while (index < lines.size) {
+        val line = lines[index].trim()
+        if (line == "태그" || line == "タグ") {
+            val tags = mutableListOf<String>()
+            var cursor = index
+
+            while (cursor < lines.size) {
+                val current = lines[cursor].trim()
+                if (current == line && cursor + 1 < lines.size && lines[cursor + 1].trim().startsWith("#")) {
+                    tags += lines[cursor + 1].trim()
+                    cursor += 2
+                    continue
+                }
+                if (current.startsWith("#")) {
+                    tags += current
+                    cursor += 1
+                    continue
+                }
+                break
+            }
+
+            if (tags.isNotEmpty()) {
+                output += "$line ${tags.joinToString(" ")}".trim()
+                index = cursor
+                continue
+            }
+        }
+
+        output += lines[index]
+        index += 1
+    }
+
+    return output
 }
 
 @Composable

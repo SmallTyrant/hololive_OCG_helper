@@ -17,7 +17,6 @@ private let sectionLabels: [String] = [
     "SP推しスキル",
     "推しスキル",
     "カードタイプ",
-    "タグ",
     "レアリティ",
     "アーツ",
     "エクストラ",
@@ -548,10 +547,53 @@ struct ContentView: View {
     }
 
     private func splitDetailLines(_ text: String) -> [String] {
-        text
+        let lines = text
             .split(whereSeparator: { $0.isNewline })
             .map { sanitizeDetailLine(String($0)) }
             .filter { !$0.isEmpty }
+
+        return mergeBrokenTagLines(lines)
+    }
+
+    private func mergeBrokenTagLines(_ lines: [String]) -> [String] {
+        var output: [String] = []
+        var index = 0
+
+        while index < lines.count {
+            let line = lines[index].trimmingCharacters(in: .whitespacesAndNewlines)
+            if line == "태그" || line == "タグ" {
+                var tags: [String] = []
+                var cursor = index
+
+                while cursor < lines.count {
+                    let current = lines[cursor].trimmingCharacters(in: .whitespacesAndNewlines)
+                    if current == line,
+                       cursor + 1 < lines.count,
+                       lines[cursor + 1].trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("#") {
+                        tags.append(lines[cursor + 1].trimmingCharacters(in: .whitespacesAndNewlines))
+                        cursor += 2
+                        continue
+                    }
+                    if current.hasPrefix("#") {
+                        tags.append(current)
+                        cursor += 1
+                        continue
+                    }
+                    break
+                }
+
+                if !tags.isEmpty {
+                    output.append("\(line) \(tags.joined(separator: " "))")
+                    index = cursor
+                    continue
+                }
+            }
+
+            output.append(lines[index])
+            index += 1
+        }
+
+        return output
     }
 
     private func sanitizeDetailLine(_ line: String) -> String {
@@ -621,22 +663,55 @@ struct ContentView: View {
             return AnyView(
                 VStack(alignment: .leading, spacing: 4) {
                     sectionChip(label)
-                    Text(rest)
+                    highlightedTagText(rest)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             )
         }
 
         return AnyView(
-            Text(line)
+            highlightedTagText(line)
                 .frame(maxWidth: .infinity, alignment: .leading)
         )
+    }
+
+    private func highlightedTagText(_ text: String) -> Text {
+        let pattern = #"#[\p{L}\p{N}_]+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return Text(text)
+        }
+
+        let ns = text as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
+        if matches.isEmpty {
+            return Text(text)
+        }
+
+        var result = Text("")
+        var cursor = 0
+        for match in matches {
+            if match.range.location > cursor {
+                let plain = ns.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
+                result = result + Text(plain)
+            }
+            let tag = ns.substring(with: match.range)
+            result = result + Text(tag).foregroundStyle(.blue).fontWeight(.semibold)
+            cursor = match.range.location + match.range.length
+        }
+        if cursor < ns.length {
+            let tail = ns.substring(with: NSRange(location: cursor, length: ns.length - cursor))
+            result = result + Text(tail)
+        }
+        return result
     }
 
     private func splitSectionLabel(_ line: String) -> (String, String)? {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         let separators = [" ", ":", "：", "[", "(", "【"]
         for label in sectionLabels {
+            if label == "태그" || label == "タグ" {
+                continue
+            }
             if trimmed == label {
                 return (label, "")
             }
