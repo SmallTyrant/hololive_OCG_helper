@@ -26,6 +26,7 @@ private let sectionLabels: [String] = [
     "LIFE",
     "HP",
 ]
+private let detailPrefixPattern = #"^(\\S(?:.*?\\S)?)\\s+(?:서포트\\s*/\\s*(?:아이템|스태프)|サポート\\s*/\\s*(?:アイテム|スタッフ))\\s+"#
 
 private enum AppThemeMode: String, CaseIterable, Identifiable {
     case system
@@ -540,8 +541,18 @@ struct ContentView: View {
     private func splitDetailLines(_ text: String) -> [String] {
         text
             .split(whereSeparator: { $0.isNewline })
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .map { sanitizeDetailLine(String($0)) }
             .filter { !$0.isEmpty }
+    }
+
+    private func sanitizeDetailLine(_ line: String) -> String {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let regex = try? NSRegularExpression(pattern: detailPrefixPattern) else {
+            return trimmed
+        }
+        let range = NSRange(location: 0, length: trimmed.utf16.count)
+        return regex.stringByReplacingMatches(in: trimmed, range: range, withTemplate: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func detailSection(title: String, lines: [String], expanded: Binding<Bool>) -> some View {

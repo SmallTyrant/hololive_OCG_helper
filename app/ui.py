@@ -49,6 +49,11 @@ SECTION_LABELS = (
     "HP",
 )
 
+
+DETAIL_PREFIX_RE = re.compile(
+    r"^(\S(?:.*?\S)?)\s+(?:서포트\s*/\s*(?:아이템|스태프)|サポート\s*/\s*(?:アイテム|スタッフ))\s+"
+)
+
 DB_MISSING_TOAST = "DB파일이 존재하지 않습니다. 메뉴에서 DB 수동갱신을 실행해주세요"
 DB_UPDATING_TOAST = "갱신중..."
 DB_UPDATED_TOAST = "갱신완료"
@@ -753,10 +758,15 @@ def launch_app(db_path: str) -> None:
                     )
             return ft.Text(line)
 
+        def sanitize_detail_line(line: str) -> str:
+            trimmed = line.strip()
+            return DETAIL_PREFIX_RE.sub("", trimmed).strip()
+
         def append_detail_lines(text: str) -> None:
-            lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+            lines = [sanitize_detail_line(ln) for ln in text.splitlines()]
             for line in lines:
-                detail_lv.controls.append(build_detail_line(line))
+                if line:
+                    detail_lv.controls.append(build_detail_line(line))
 
         def render_detail() -> None:
             detail_lv.controls.clear()
