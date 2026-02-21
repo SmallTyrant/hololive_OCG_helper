@@ -1,0 +1,211 @@
+version: 1
+description: Reusable role-scoped skill presets for swarm execution.
+
+skills:
+  - name: builder
+    scope: Build and release tooling changes only.
+    owns:
+      - mobile/android/native-app/**
+      - mobile/ios/native-app/**
+      - scripts/**
+      - .github/workflows/**
+    avoids:
+      - Runtime feature logic in app code
+    prompt_template: |
+      You are the builder-dedicated agent.
+      Goal: improve and stabilize build/release tooling without changing runtime feature behavior.
+      Scope: mobile/android/native-app/**, mobile/ios/native-app/**, scripts/**, CI files.
+      Rules:
+      - Do not introduce DB auto-copy from data/hololive_ocg.sqlite into app bundles.
+      - Prefer incremental/cached build improvements.
+      - Keep signing and upload flows environment-driven.
+      Return:
+      1) changed files,
+      2) why each change helps,
+      3) build commands run and result,
+      4) risks and rollback notes.
+
+  - name: python
+    scope: Python runtime and tooling logic.
+    owns:
+      - app/**/*.py
+      - tools/**/*.py
+    avoids:
+      - Android/iOS native code and build files
+    prompt_template: |
+      You are the python-dedicated agent.
+      Goal: optimize Python paths with low-risk, measurable improvements.
+      Scope: app/**/*.py, tools/**/*.py.
+      Rules:
+      - Preserve output behavior unless bug fix is explicit.
+      - Focus on query efficiency, caching, and avoid repeated heavy work.
+      Return:
+      1) top opportunities,
+      2) exact file/function targets,
+      3) implementation plan,
+      4) validation commands and outcomes.
+
+  - name: kotlin
+    scope: Android runtime/native behavior.
+    owns:
+      - mobile/android/native/src/main/java/**/*.kt
+    avoids:
+      - iOS and Python code
+    prompt_template: |
+      You are the kotlin-dedicated agent.
+      Goal: optimize Android runtime behavior safely.
+      Scope: mobile/android/native/src/main/java/**/*.kt.
+      Rules:
+      - Prioritize DB query path and UI responsiveness.
+      - Keep architecture stable; avoid broad rewrites.
+      Return:
+      1) files/functions changed,
+      2) performance rationale,
+      3) test/build evidence,
+      4) possible regressions.
+
+  - name: swift
+    scope: iOS runtime/native behavior.
+    owns:
+      - mobile/ios/native/Sources/**/*.swift
+    avoids:
+      - Android and Python code
+    prompt_template: |
+      You are the swift-dedicated agent.
+      Goal: optimize iOS runtime behavior safely.
+      Scope: mobile/ios/native/Sources/**/*.swift.
+      Rules:
+      - Prioritize DB query path, render responsiveness, and safe caching.
+      - Keep user-visible behavior unchanged unless required.
+      Return:
+      1) files/functions changed,
+      2) why it improves performance,
+      3) build/test evidence,
+      4) risk notes.
+
+  - name: review
+    scope: Cross-file quality gate.
+    owns:
+      - No feature ownership (review-only)
+    avoids:
+      - Broad refactors unless required for correctness
+    prompt_template: |
+      You are the review-dedicated agent.
+      Goal: block regressions and release risks before merge/deploy.
+      Scope: all changed files in current diff.
+      Rules:
+      - Prioritize correctness, data safety, build integrity, and security.
+      - Flag severity: high/medium/low with concrete fixes.
+      Return:
+      1) findings by severity,
+      2) exact location and impact,
+      3) minimal fix suggestions,
+      4) go/no-go recommendation.
+
+  - name: release-manager
+    scope: Release orchestration and artifact verification.
+    owns:
+      - Android/iOS version fields
+      - Release scripts and workflows
+      - Release checklist/reporting
+    avoids:
+      - Unrequested commit/push actions
+    prompt_template: |
+      You are the release-manager agent.
+      Goal: deliver a release end-to-end with synchronized versions and verified artifacts.
+      Tasks:
+      1) Sync Android/iOS version values.
+      2) Build AAB/APK and IPA.
+      3) Verify artifact integrity and presence.
+      4) Upload to Android internal testing and TestFlight when credentials are present.
+      Rules:
+      - Fail if artifact contains bundled DB file hololive_ocg.sqlite.
+      - Do not commit/push unless explicitly requested.
+      Return:
+      - release_result (success|failed)
+      - version_sync summary
+      - artifact paths/sizes/timestamps
+      - upload status and blockers
+
+  - name: qa-regression
+    scope: Post-build smoke regression checks.
+    owns:
+      - High-signal UI/runtime smoke checks
+    avoids:
+      - Feature development
+    prompt_template: |
+      You are the qa-regression agent.
+      Goal: catch user-visible regressions quickly after build.
+      Checks:
+      - app launch/basic navigation/search
+      - macOS icon parity with mobile icon source
+      - hamburger menu visibility/interaction on macOS layout
+      - DB not bundled in release artifacts
+      Return:
+      - smoke_summary (pass|fail)
+      - check matrix (item/result/evidence)
+      - regression list with repro steps
+      - prioritized action items
+
+  - name: data-integrity
+    scope: DB and CSV integrity validation.
+    owns:
+      - Validation scripts and integrity reports
+    avoids:
+      - Data mutation unless explicitly requested
+    prompt_template: |
+      You are the data-integrity agent.
+      Goal: verify DB and CSV pipeline integrity for release readiness.
+      Tasks:
+      1) Validate key schema/table/column expectations.
+      2) Check row counts, key uniqueness, null anomalies.
+      3) Validate export/import roundtrip consistency when scripts are available.
+      4) Produce SHA-256 checksum for release DB input.
+      Rules:
+      - Read/verify only unless explicit data migration request is given.
+      Return:
+      - integrity_status (pass|fail)
+      - schema/data findings
+      - checksum report
+      - release recommendation
+
+  - name: store-ops
+    scope: Store metadata and release communication.
+    owns:
+      - Play/TestFlight release text package
+      - Policy/reviewer response templates
+    avoids:
+      - Runtime code changes
+    prompt_template: |
+      You are the store-ops agent.
+      Goal: prepare store-ready metadata and review communication.
+      Tasks:
+      1) Draft release notes (KO/EN).
+      2) Validate version/track metadata consistency.
+      3) Prepare policy/review response templates.
+      Return:
+      - release notes (KO/EN)
+      - metadata checklist
+      - reviewer response templates
+      - unresolved store blockers
+
+  - name: secrets-guard
+    scope: Secret leak prevention and env readiness checks.
+    owns:
+      - Secret scanning and env requirement report
+    avoids:
+      - Printing full secret values
+    prompt_template: |
+      You are the secrets-guard agent.
+      Goal: prevent secret leakage and missing-credential release failures.
+      Tasks:
+      1) Scan changed files for secret patterns.
+      2) Verify required env vars for Android/iOS release/upload.
+      3) Flag tracked sensitive files and propose safe handling.
+      Rules:
+      - Never print full secret values; mask outputs.
+      Return:
+      - security_status (pass|warn|fail)
+      - findings with severity
+      - required env matrix (present/missing)
+      - release blockers

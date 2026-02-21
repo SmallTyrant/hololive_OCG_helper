@@ -1,10 +1,17 @@
 __pycache__/
 .venv/
+.flet_flutter/
 data/images/
 data/*.sqlite
 data/*.db
 .DS_Store
+/build/
+/dist/
+/hOCG_H.spec
+/main.spec
+/docs/*.docx
 app/build/
+mobile/android/native-app/.kotlin/
 mobile/ios/native-app/build/DerivedDataAltStore/
 mobile/ios/native-app/build/ipa_altstore/
 mobile/ios/native-app/build/

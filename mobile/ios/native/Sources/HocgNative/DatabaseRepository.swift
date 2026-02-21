@@ -9,43 +9,66 @@ private let tagAlias: [String: [String]] = [
 final class DatabaseRepository {
     private let paths: AppPaths
 
+    private struct DbFingerprint: Equatable {
+        let path: String
+        let size: UInt64
+        let modifiedAt: TimeInterval
+    }
+
+    private struct DbHealthCache {
+        let fingerprint: DbFingerprint
+        let needsUpdate: Bool
+    }
+
+    private struct SchemaCache {
+        let fingerprint: DbFingerprint
+        var tableColumns: [String: Set<String>] = [:]
+        var tagJoinResolved = false
+        var tagJoinSql: String?
+    }
+
+    private let cacheLock = NSLock()
+    private var dbHealthCache: DbHealthCache?
+    private var schemaCache: SchemaCache?
+
     init(paths: AppPaths) {
         self.paths = paths
     }
 
     func needsDbUpdate() -> Bool {
         let dbPath = paths.dbURL.path
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: dbPath) else {
-            return true
-        }
-        guard let attrs = try? fm.attributesOfItem(atPath: dbPath),
-              let size = attrs[.size] as? NSNumber,
-              size.intValue > 0 else {
+        guard let fingerprint = dbFingerprint(path: dbPath) else {
+            clearCaches()
             return true
         }
 
+        if let cached = cachedNeedsDbUpdate(for: fingerprint) {
+            return cached
+        }
+
+        let needsUpdate: Bool
+
         do {
-            return try withSQLite(path: dbPath, readOnly: true) { db in
+            needsUpdate = try withSQLite(path: dbPath, readOnly: true) { db in
                 guard try tableExists(db: db, table: "prints") else {
                     return true
                 }
-                let columns = try tableColumns(db: db, table: "prints")
+                let columns = try tableColumns(db: db, table: "prints", fingerprint: fingerprint)
                 let required: Set<String> = ["print_id", "card_number", "name_ja", "image_url"]
                 guard columns.isSuperset(of: required) else {
                     return true
                 }
-                let sql = "SELECT COUNT(1) FROM prints"
+                let sql = "SELECT 1 FROM prints LIMIT 1"
                 let stmt = try sqlitePrepare(db: db, sql: sql)
                 defer { sqlite3_finalize(stmt) }
-                if sqlite3_step(stmt) == SQLITE_ROW {
-                    return sqlite3_column_int64(stmt, 0) <= 0
-                }
-                return true
+                return sqlite3_step(stmt) != SQLITE_ROW
             }
         } catch {
-            return true
+            needsUpdate = true
         }
+
+        storeNeedsDbUpdate(needsUpdate, for: fingerprint)
+        return needsUpdate
     }
 
     func querySuggest(_ query: String, limit: Int? = nil) -> [PrintRow] {
@@ -58,7 +81,8 @@ final class DatabaseRepository {
 
         do {
             return try withSQLite(path: paths.dbURL.path, readOnly: true) { db in
-                let joins = try buildTagJoinSql(db: db)
+                let sessionFingerprint = dbFingerprint(path: paths.dbURL.path)
+                let joins = try buildTagJoinSql(db: db, fingerprint: sessionFingerprint)
                 if let joins {
                     var params: [SQLiteBindValue] = [
                         .text(like), .text(like), .text(like), .text(like), .text(like), .text(like),
@@ -161,7 +185,8 @@ final class DatabaseRepository {
 
         do {
             return try withSQLite(path: paths.dbURL.path, readOnly: true) { db in
-                let joins = try buildTagJoinSql(db: db)
+                let sessionFingerprint = dbFingerprint(path: paths.dbURL.path)
+                let joins = try buildTagJoinSql(db: db, fingerprint: sessionFingerprint)
                 if let joins {
                     var params: [SQLiteBindValue] = [.text(q), .text(q), .text(q), .text(q), .text(q)]
                     var sql = """
@@ -335,7 +360,8 @@ final class DatabaseRepository {
     func loadCardDetail(printId: Int64) -> CardDetail? {
         do {
             return try withSQLite(path: paths.dbURL.path, readOnly: true) { db in
-                let jaColumns = try tableColumns(db: db, table: "card_texts_ja")
+                let sessionFingerprint = dbFingerprint(path: paths.dbURL.path)
+                let jaColumns = try tableColumns(db: db, table: "card_texts_ja", fingerprint: sessionFingerprint)
                 let hasJaEffectText = jaColumns.contains("effect_text")
                 let sql = hasJaEffectText ?
                 """
@@ -362,9 +388,14 @@ final class DatabaseRepository {
                 guard sqlite3_step(stmt) == SQLITE_ROW else {
                     return nil
                 }
+
+                let koTextRaw = sqliteColumnString(stmt, index: 0)
+                let jaTextRaw = sqliteColumnString(stmt, index: 1)
+                let tags = try loadTagsForPrint(db: db, printId: printId, fingerprint: sessionFingerprint)
+
                 return CardDetail(
-                    koText: sqliteColumnString(stmt, index: 0),
-                    jaText: sqliteColumnString(stmt, index: 1),
+                    koText: appendTagsIfNeeded(to: koTextRaw, tags: tags, sectionLabel: "태그"),
+                    jaText: appendTagsIfNeeded(to: jaTextRaw, tags: tags, sectionLabel: "タグ"),
                 )
             }
         } catch {
@@ -475,6 +506,87 @@ final class DatabaseRepository {
         return formatter.string(from: modified)
     }
 
+    private func dbFingerprint(path: String) -> DbFingerprint? {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: path) else {
+            return nil
+        }
+        guard let attrs = try? fm.attributesOfItem(atPath: path),
+              let sizeValue = attrs[.size] as? NSNumber else {
+            return nil
+        }
+        let size = sizeValue.uint64Value
+        guard size > 0 else {
+            return nil
+        }
+        let modifiedAt = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return DbFingerprint(path: path, size: size, modifiedAt: modifiedAt)
+    }
+
+    private func clearCaches() {
+        cacheLock.lock()
+        dbHealthCache = nil
+        schemaCache = nil
+        cacheLock.unlock()
+    }
+
+    private func cachedNeedsDbUpdate(for fingerprint: DbFingerprint) -> Bool? {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        guard let cache = dbHealthCache, cache.fingerprint == fingerprint else {
+            return nil
+        }
+        return cache.needsUpdate
+    }
+
+    private func storeNeedsDbUpdate(_ needsUpdate: Bool, for fingerprint: DbFingerprint) {
+        cacheLock.lock()
+        dbHealthCache = DbHealthCache(fingerprint: fingerprint, needsUpdate: needsUpdate)
+        cacheLock.unlock()
+    }
+
+    private func ensureSchemaCacheLocked(for fingerprint: DbFingerprint) {
+        if schemaCache?.fingerprint != fingerprint {
+            schemaCache = SchemaCache(fingerprint: fingerprint)
+            if dbHealthCache?.fingerprint != fingerprint {
+                dbHealthCache = nil
+            }
+        }
+    }
+
+    private func cachedTableColumns(for table: String, fingerprint: DbFingerprint) -> Set<String>? {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        guard let cache = schemaCache, cache.fingerprint == fingerprint else {
+            return nil
+        }
+        return cache.tableColumns[table]
+    }
+
+    private func storeTableColumns(_ columns: Set<String>, for table: String, fingerprint: DbFingerprint) {
+        cacheLock.lock()
+        ensureSchemaCacheLocked(for: fingerprint)
+        schemaCache?.tableColumns[table] = columns
+        cacheLock.unlock()
+    }
+
+    private func cachedTagJoin(fingerprint: DbFingerprint) -> (resolved: Bool, sql: String?) {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        guard let cache = schemaCache, cache.fingerprint == fingerprint else {
+            return (false, nil)
+        }
+        return (cache.tagJoinResolved, cache.tagJoinSql)
+    }
+
+    private func storeTagJoin(_ sql: String?, fingerprint: DbFingerprint) {
+        cacheLock.lock()
+        ensureSchemaCacheLocked(for: fingerprint)
+        schemaCache?.tagJoinResolved = true
+        schemaCache?.tagJoinSql = sql
+        cacheLock.unlock()
+    }
+
     private func runPrintRowsQuery(
         db: OpaquePointer,
         sql: String,
@@ -498,25 +610,108 @@ final class DatabaseRepository {
         return rows
     }
 
-    private func buildTagJoinSql(db: OpaquePointer) throws -> String? {
-        let printTagCols = try tableColumns(db: db, table: "print_tags")
-        let tagCols = try tableColumns(db: db, table: "tags")
+    private func loadTagsForPrint(
+        db: OpaquePointer,
+        printId: Int64,
+        fingerprint: DbFingerprint? = nil,
+    ) throws -> [String] {
+        guard let tagJoinSql = try buildTagJoinSql(db: db, fingerprint: fingerprint) else {
+            return []
+        }
+
+        let sql = """
+        SELECT COALESCE(t.tag,'') AS tag
+        FROM prints p
+        \(tagJoinSql)
+        WHERE p.print_id=?
+        ORDER BY t.tag
+        """
+
+        let stmt = try sqlitePrepare(db: db, sql: sql)
+        defer { sqlite3_finalize(stmt) }
+        try sqliteBind([.int64(printId)], to: stmt)
+
+        var tags: [String] = []
+        var seen: Set<String> = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            var tag = sqliteColumnString(stmt, index: 0).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !tag.isEmpty else {
+                continue
+            }
+            if !tag.hasPrefix("#") {
+                tag = "#\(tag)"
+            }
+            if seen.insert(tag).inserted {
+                tags.append(tag)
+            }
+        }
+        return tags
+    }
+
+    private func appendTagsIfNeeded(to text: String, tags: [String], sectionLabel: String) -> String {
+        guard !tags.isEmpty else {
+            return text
+        }
+
+        let existingTags = Set(
+            text
+                .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+                .map(String.init)
+                .filter { $0.hasPrefix("#") }
+        )
+
+        if !existingTags.isEmpty {
+            return text
+        }
+
+        let missing = tags.filter { !existingTags.contains($0) }
+        guard !missing.isEmpty else {
+            return text
+        }
+
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tagLine = missing.joined(separator: " ")
+        if normalized.isEmpty {
+            return "\(sectionLabel)\n\(tagLine)"
+        }
+        return "\(normalized)\n\(sectionLabel)\n\(tagLine)"
+    }
+
+    private func buildTagJoinSql(
+        db: OpaquePointer,
+        fingerprint: DbFingerprint? = nil,
+    ) throws -> String? {
+        let cacheFingerprint = fingerprint ?? dbFingerprint(path: paths.dbURL.path)
+        if let cacheFingerprint {
+            let cached = cachedTagJoin(fingerprint: cacheFingerprint)
+            if cached.resolved {
+                return cached.sql
+            }
+        }
+
+        let printTagCols = try tableColumns(db: db, table: "print_tags", fingerprint: cacheFingerprint)
+        let tagCols = try tableColumns(db: db, table: "tags", fingerprint: cacheFingerprint)
+
+        let resolved: String?
 
         if printTagCols.contains("tag") && tagCols.contains("tag") {
-            return """
+            resolved = """
             LEFT JOIN print_tags pt ON pt.print_id = p.print_id
             LEFT JOIN tags t ON t.tag = pt.tag
             """
-        }
-
-        if printTagCols.contains("tag_id") && tagCols.contains("tag_id") {
-            return """
+        } else if printTagCols.contains("tag_id") && tagCols.contains("tag_id") {
+            resolved = """
             LEFT JOIN print_tags pt ON pt.print_id = p.print_id
             LEFT JOIN tags t ON t.tag_id = pt.tag_id
             """
+        } else {
+            resolved = nil
         }
 
-        return nil
+        if let cacheFingerprint {
+            storeTagJoin(resolved, fingerprint: cacheFingerprint)
+        }
+        return resolved
     }
 
     private func tableExists(db: OpaquePointer, table: String) throws -> Bool {
@@ -529,7 +724,17 @@ final class DatabaseRepository {
         return sqlite3_step(stmt) == SQLITE_ROW
     }
 
-    private func tableColumns(db: OpaquePointer, table: String) throws -> Set<String> {
+    private func tableColumns(
+        db: OpaquePointer,
+        table: String,
+        fingerprint: DbFingerprint? = nil,
+    ) throws -> Set<String> {
+        let cacheFingerprint = fingerprint ?? dbFingerprint(path: paths.dbURL.path)
+        if let cacheFingerprint,
+           let cached = cachedTableColumns(for: table, fingerprint: cacheFingerprint) {
+            return cached
+        }
+
         let stmt = try sqlitePrepare(db: db, sql: "PRAGMA table_info(\(table))")
         defer { sqlite3_finalize(stmt) }
 
@@ -539,6 +744,10 @@ final class DatabaseRepository {
             if !name.isEmpty {
                 columns.insert(name)
             }
+        }
+
+        if let cacheFingerprint {
+            storeTableColumns(columns, for: table, fingerprint: cacheFingerprint)
         }
         return columns
     }

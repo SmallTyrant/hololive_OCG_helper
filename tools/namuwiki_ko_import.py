@@ -28,6 +28,7 @@ from urllib3.util.retry import Retry
 NAMU_BASE = "https://namu.wiki"
 CARDNO_RE = re.compile(r"(?<![A-Za-z0-9_])[hH][A-Za-z]{1,5}\d{2}-\d{3}(?![A-Za-z0-9_])")
 HANGUL_RE = re.compile(r"[가-힣]")
+JAPANESE_CHAR_RE = re.compile(r"[\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff々〆ヵヶ]")
 
 DEFAULT_SOURCE_PAGES: tuple[str, ...] = (
     "https://namu.wiki/w/%EC%98%A4%EC%8B%9C%20%EB%A6%B0%EB%8F%84%20%EC%B9%98%ED%95%98%EC%95%BC",
@@ -37,6 +38,27 @@ DEFAULT_SOURCE_PAGES: tuple[str, ...] = (
     "https://namu.wiki/w/%EC%98%A4%EC%8B%9C%20Justice/%EC%B9%B4%EB%93%9C",
     "https://namu.wiki/w/%EC%98%A4%EC%8B%9C%20Advent/%EC%B9%B4%EB%93%9C",
     "https://namu.wiki/w/%EC%8A%A4%ED%83%80%ED%8A%B8%20%EB%8D%B1%20FLOW%20GLOW/%EC%B9%B4%EB%93%9C",
+    "https://namu.wiki/w/%EC%98%A4%EC%98%A4%EC%A1%B0%EB%9D%BC%20%EC%8A%A4%EB%B0%94%EB%A3%A8/%ED%99%80%EB%A1%9C%EB%9D%BC%EC%9D%B4%EB%B8%8C%20%EC%98%A4%ED%94%BC%EC%85%9C%20%EC%B9%B4%EB%93%9C%20%EA%B2%8C%EC%9E%84",
+    "https://namu.wiki/w/%EC%8B%9C%EB%9D%BC%EC%B9%B4%EB%AF%B8%20%ED%9B%84%EB%B6%80%ED%82%A4/%ED%99%80%EB%A1%9C%EB%9D%BC%EC%9D%B4%EB%B8%8C%20%EC%98%A4%ED%94%BC%EC%85%9C%20%EC%B9%B4%EB%93%9C%20%EA%B2%8C%EC%9E%84",
+    "https://namu.wiki/w/%EC%98%A4%EC%98%A4%EC%B9%B4%EB%AF%B8%20%EB%AF%B8%EC%98%A4/%ED%99%80%EB%A1%9C%EB%9D%BC%EC%9D%B4%EB%B8%8C%20%EC%98%A4%ED%94%BC%EC%85%9C%20%EC%B9%B4%EB%93%9C%20%EA%B2%8C%EC%9E%84",
+    "https://namu.wiki/w/%EB%84%A4%EC%BD%94%EB%A7%88%ED%83%80%20%EC%98%A4%EC%B9%B4%EC%9C%A0/%ED%99%80%EB%A1%9C%EB%9D%BC%EC%9D%B4%EB%B8%8C%20%EC%98%A4%ED%94%BC%EC%85%9C%20%EC%B9%B4%EB%93%9C%20%EA%B2%8C%EC%9E%84",
+    "https://namu.wiki/w/%EC%9D%B4%EB%88%84%EA%B0%80%EB%AF%B8%20%EC%BD%94%EB%A1%9C%EB%84%A4/%ED%99%80%EB%A1%9C%EB%9D%BC%EC%9D%B4%EB%B8%8C%20%EC%98%A4%ED%94%BC%EC%85%9C%20%EC%B9%B4%EB%93%9C%20%EA%B2%8C%EC%9E%84",
+    "https://namu.wiki/w/%EC%9A%B0%EC%82%AC%EB%8B%A4%20%ED%8E%98%EC%BD%94%EB%9D%BC/%ED%99%80%EB%A1%9C%EB%9D%BC%EC%9D%B4%EB%B8%8C%20%EC%98%A4%ED%94%BC%EC%85%9C%20%EC%B9%B4%EB%93%9C%20%EA%B2%8C%EC%9E%84",
+    "https://namu.wiki/w/%EC%8B%9C%EB%9D%BC%EB%88%84%EC%9D%B4%20%ED%9B%84%EB%A0%88%EC%95%84/%ED%99%80%EB%A1%9C%EB%9D%BC%EC%9D%B4%EB%B8%8C%20%EC%98%A4%ED%94%BC%EC%85%9C%20%EC%B9%B4%EB%93%9C%20%EA%B2%8C%EC%9E%84",
+    "https://namu.wiki/w/%EC%8B%9C%EB%A1%9C%EA%B0%80%EB%84%A4%20%EB%85%B8%EC%97%98/%ED%99%80%EB%A1%9C%EB%9D%BC%EC%9D%B4%EB%B8%8C%20%EC%98%A4%ED%94%BC%EC%85%9C%20%EC%B9%B4%EB%93%9C%20%EA%B2%8C%EC%9E%84",
+    "https://namu.wiki/w/%ED%98%B8%EC%87%BC%20%EB%A7%88%EB%A6%B0/%ED%99%80%EB%A1%9C%EB%9D%BC%EC%9D%B4%EB%B8%8C%20%EC%98%A4%ED%94%BC%EC%85%9C%20%EC%B9%B4%EB%93%9C%20%EA%B2%8C%EC%9E%84",
+    "https://namu.wiki/w/%EC%95%84%EB%A7%88%EB%84%A4%20%EC%B9%B4%EB%82%98%ED%83%80/%ED%99%80%EB%A1%9C%EB%9D%BC%EC%9D%B4%EB%B8%8C%20%EC%98%A4%ED%94%BC%EC%85%9C%20%EC%B9%B4%EB%93%9C%20%EA%B2%8C%EC%9E%84",
+    "https://namu.wiki/w/%EC%B8%A0%EB%85%B8%EB%A7%88%ED%82%A4%20%EC%99%80%ED%83%80%EB%A9%94/%ED%99%80%EB%A1%9C%EB%9D%BC%EC%9D%B4%EB%B8%8C%20%EC%98%A4%ED%94%BC%EC%85%9C%20%EC%B9%B4%EB%93%9C%20%EA%B2%8C%EC%9E%84",
+    "https://namu.wiki/w/%ED%86%A0%EC%BD%94%EC%95%BC%EB%AF%B8%20%ED%86%A0%EC%99%80/%ED%99%80%EB%A1%9C%EB%9D%BC%EC%9D%B4%EB%B8%8C%20%EC%98%A4%ED%94%BC%EC%85%9C%20%EC%B9%B4%EB%93%9C%20%EA%B2%8C%EC%9E%84",
+    "https://namu.wiki/w/%ED%9E%88%EB%A9%94%EB%AA%A8%EB%A6%AC%20%EB%A3%A8%EB%82%98/%ED%99%80%EB%A1%9C%EB%9D%BC%EC%9D%B4%EB%B8%8C%20%EC%98%A4%ED%94%BC%EC%85%9C%20%EC%B9%B4%EB%93%9C%20%EA%B2%8C%EC%9E%84",
+    "https://namu.wiki/w/%EC%9C%A0%ED%82%A4%ED%95%98%EB%82%98%20%EB%9D%BC%EB%AF%B8/%ED%99%80%EB%A1%9C%EB%9D%BC%EC%9D%B4%EB%B8%8C%20%EC%98%A4%ED%94%BC%EC%85%9C%20%EC%B9%B4%EB%93%9C%20%EA%B2%8C%EC%9E%84",
+    "https://namu.wiki/w/%ED%86%A0%ED%82%A4%EB%85%B8%20%EC%86%8C%EB%9D%BC%26AZKi/%EC%B9%B4%EB%93%9C#%EC%84%9C%EB%B8%8C%20%EC%BB%B4%ED%93%A8%ED%84%B0",
+    "https://namu.wiki/w/%EB%B8%94%EB%A3%A8%EB%B0%8D%20%EB%A0%88%EB%94%94%EC%96%B8%EC%8A%A4/%EC%B9%B4%EB%93%9C",
+    "https://namu.wiki/w/%ED%80%B8%ED%85%9F%20%EC%8A%A4%ED%8E%99%ED%8A%B8%EB%9F%BC/%EC%B9%B4%EB%93%9C",
+    "https://namu.wiki/w/%EC%97%98%EB%A6%AC%ED%8A%B8%20%EC%8A%A4%ED%8C%8C%ED%81%AC/%EC%B9%B4%EB%93%9C",
+    "https://namu.wiki/w/%ED%81%90%EB%A6%AC%EC%96%B4%EC%8A%A4%20%EC%9C%A0%EB%8B%88%EB%B2%84%EC%8A%A4/%EC%B9%B4%EB%93%9C",
+    "https://namu.wiki/w/%EC%9D%B8%EC%B1%88%ED%8A%B8%20%EB%A0%88%EA%B0%88%EB%A6%AC%EC%95%84/%EC%B9%B4%EB%93%9C",
+    "https://namu.wiki/w/%EC%95%84%EC%95%BC%EC%B9%B4%EC%8B%9C%20%EB%B2%84%EB%B0%80%EB%A6%AC%EC%98%A8/%EC%B9%B4%EB%93%9C",
 )
 
 EFFECT_HEADER_KEYWORDS = (
@@ -80,6 +102,66 @@ CARDNO_HEADER_KEYWORDS = (
 
 BULLET_MARKERS = ("■", "●", "◆", "◇", "•", "·")
 
+CARD_ID_ATTR_RE = re.compile(r"id=['\"](?P<id>[hH][A-Za-z]{1,5}\d{2}-\d{3})['\"]")
+RARITY_LINE_RE = re.compile(r"^(?:OSR|OUR|SEC|UR|SR|RR|R|C|U|P|S|PR|HR|AR|SP|SPR|\-)$", re.IGNORECASE)
+
+BAD_NAME_LABELS = {
+    "카드넘버",
+    "카드 번호",
+    "카드번호",
+    "card number",
+    "card no",
+    "card_no",
+    "print",
+}
+
+EFFECT_START_PREFIXES = (
+    "SP 오시 스킬",
+    "오시 스킬",
+    "SP推しスキル",
+    "推しスキル",
+    "아츠",
+    "콜라보 이펙트",
+    "블룸 이펙트",
+    "기프트",
+    "엑스트라",
+)
+
+SECTION_END_PREFIXES = (
+    "카드 넘버",
+    "카드번호",
+    "카드 번호",
+    "수록 팩 일람",
+    "수록 팩",
+    "레어도",
+    "비고",
+)
+
+SECTION_HEADING_LINES = {
+    "오시 홀로멤",
+    "debut 홀로멤",
+    "1st 홀로멤",
+    "2nd 홀로멤",
+    "spot 홀로멤",
+    "서포트 카드",
+    "support",
+}
+
+NOISE_METADATA_LINES = {
+    "[편집]",
+    "홀로멤",
+    "오시 홀로멤",
+    "속성",
+    "레벨",
+    "hp",
+    "life",
+    "배턴 터치",
+    "debut",
+    "1st",
+    "2nd",
+    "spot",
+}
+
 def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
@@ -98,6 +180,18 @@ def normalize_header(text: str) -> str:
 def normalize_name_key(text: str) -> str:
     normalized = normalize_ws(text).lower()
     return re.sub(r"[\s·・ㆍ:：()\\[\\]\"'`’“”]", "", normalized)
+
+
+def sanitize_ko_name(text: str) -> str:
+    raw = normalize_ws(text)
+    if not raw:
+        return ""
+
+    cleaned = JAPANESE_CHAR_RE.sub(" ", raw)
+    cleaned = re.split(r"\b(?:LIFE|HP)\b", cleaned, maxsplit=1)[0]
+    cleaned = re.sub(r"\s*[|/]+\s*", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -_.,:;|/")
+    return cleaned
 
 
 @dataclass
@@ -257,57 +351,301 @@ def pick_card_number(cells: list[str], header_map: dict[str, int]) -> str:
     return ""
 
 
+def collect_card_numbers_in_table(table_rows: list[list[str]]) -> set[str]:
+    numbers: set[str] = set()
+    for cells in table_rows:
+        for cell in cells:
+            for match in CARDNO_RE.finditer(cell):
+                numbers.add(normalize_card_number(match.group(0)))
+                if len(numbers) >= 8:
+                    return numbers
+    return numbers
+
+
+def is_section_heading_line(line: str) -> bool:
+    normalized = normalize_ws(line)
+    if not normalized:
+        return False
+    lowered = normalize_header(normalized)
+    if lowered in SECTION_HEADING_LINES:
+        return True
+    if re.fullmatch(r"\d+(?:\.\d+)*\.?", normalized):
+        return True
+    return False
+
+
+def is_noise_metadata_line(line: str) -> bool:
+    normalized = normalize_ws(line)
+    if not normalized:
+        return True
+    lowered = normalize_header(normalized)
+    if lowered in NOISE_METADATA_LINES:
+        return True
+    if RARITY_LINE_RE.fullmatch(normalized):
+        return True
+    if re.fullmatch(r"\d+(?:\.\d+)*\.?", normalized):
+        return True
+    return False
+
+
+def merge_split_skill_tokens(lines: list[str]) -> list[str]:
+    merged: list[str] = []
+    idx = 0
+    while idx < len(lines):
+        cur = lines[idx]
+        nxt = lines[idx + 1] if idx + 1 < len(lines) else ""
+        nxt2 = lines[idx + 2] if idx + 2 < len(lines) else ""
+
+        if cur.upper() == "SP" and nxt in {"오시", "推し"} and nxt2 in {"스킬", "スキル"}:
+            merged.append("SP 오시 스킬" if nxt == "오시" else "SP推しスキル")
+            idx += 3
+            continue
+
+        if cur in {"오시", "推し"} and nxt in {"스킬", "スキル"}:
+            merged.append("오시 스킬" if cur == "오시" else "推しスキル")
+            idx += 2
+            continue
+
+        merged.append(cur)
+        idx += 1
+    return merged
+
+
+def parse_card_sections_from_ids(html: str, source_url: str) -> list[KoRow]:
+    matches = list(CARD_ID_ATTR_RE.finditer(html))
+    if not matches:
+        return []
+
+    rows: list[KoRow] = []
+    seen_cards: set[str] = set()
+    for idx, match in enumerate(matches):
+        card_no = normalize_card_number(match.group("id"))
+        if card_no in seen_cards:
+            continue
+        seen_cards.add(card_no)
+
+        start = match.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(html)
+        segment_html = html[start:end]
+        segment_text = BeautifulSoup(segment_html, "html.parser").get_text("\n", strip=True)
+        raw_lines = [normalize_ws(line) for line in segment_text.splitlines()]
+        raw_lines = [line for line in raw_lines if line]
+        if not raw_lines:
+            continue
+        raw_lines = merge_split_skill_tokens(raw_lines)
+
+        name = ""
+        for line in raw_lines:
+            if line.startswith("#"):
+                continue
+            if CARDNO_RE.search(line):
+                continue
+            if is_section_heading_line(line):
+                continue
+            if is_noise_metadata_line(line):
+                continue
+            candidate_name = pick_name([line], {})
+            if not candidate_name:
+                continue
+            if normalize_header(candidate_name) in BAD_NAME_LABELS:
+                continue
+            name = candidate_name
+            break
+
+        effect_lines: list[str] = []
+        started = False
+        for line in raw_lines:
+            if CARDNO_RE.search(line):
+                continue
+            numeric_outline = bool(re.fullmatch(r"\d+(?:\.\d+)*\.?", line))
+            if any(line.startswith(prefix) for prefix in SECTION_END_PREFIXES) or (
+                is_section_heading_line(line) and not numeric_outline
+            ):
+                if started:
+                    break
+                continue
+
+            if not started:
+                if line.startswith("#") or line.startswith("[홀로 파워") or line.startswith(EFFECT_START_PREFIXES):
+                    started = True
+                    effect_lines.append(line)
+                continue
+
+            if is_noise_metadata_line(line) and not line.startswith("#"):
+                continue
+            effect_lines.append(line)
+
+        if not effect_lines:
+            continue
+
+        effect = normalize_ws(" ".join(effect_lines))
+        if not effect:
+            continue
+        rows.append(KoRow(card_number=card_no, name=name, effect=effect, source_url=source_url))
+
+    return rows
+
+
+def row_quality_score(row: KoRow) -> float:
+    score = 0.0
+    normalized_name = normalize_header(row.name)
+    if row.name and normalized_name not in BAD_NAME_LABELS:
+        score += 8.0
+    else:
+        score -= 20.0
+
+    effect = row.effect or ""
+    if any(marker in effect for marker in EFFECT_START_PREFIXES) or "#" in effect:
+        score += 8.0
+
+    refs = {normalize_card_number(m.group(0)) for m in CARDNO_RE.finditer(effect)}
+    if len(refs) > 1:
+        score -= len(refs) * 6.0
+
+    lowered_effect = normalize_header(effect)
+    if "카드넘버 카드명 종류" in lowered_effect or "카드 넘버 카드명 종류" in lowered_effect:
+        score -= 60.0
+
+    score += min(len(effect), 1200) / 120.0
+    return score
+
+
+def is_better_candidate(candidate: KoRow, previous: KoRow | None) -> bool:
+    if previous is None:
+        return True
+    candidate_score = row_quality_score(candidate)
+    previous_score = row_quality_score(previous)
+    if candidate_score != previous_score:
+        return candidate_score > previous_score
+    return len(candidate.effect) > len(previous.effect)
+
+
 def parse_tables(
     html: str,
     source_url: str,
     *,
     fallback_card_numbers: list[str] | None = None,
 ) -> list[KoRow]:
+    _ = fallback_card_numbers
     try:
         soup = BeautifulSoup(html, "lxml")
     except FeatureNotFound:
         soup = BeautifulSoup(html, "html.parser")
+
     rows: list[KoRow] = []
+    best_by_card: dict[str, KoRow] = {}
+
     for table in soup.select("table"):
+        table_rows: list[list[str]] = []
+        for tr in table.select("tr"):
+            cells = [normalize_ws(c.get_text(" ", strip=True)) for c in tr.find_all(["th", "td"])]
+            cells = [c for c in cells if c]
+            if cells:
+                table_rows.append(cells)
+
+        if not table_rows:
+            continue
+
+        table_card_numbers = collect_card_numbers_in_table(table_rows)
+
+        card_no = ""
+        card_row_idx = -1
+        for idx, cells in enumerate(table_rows):
+            for cell in cells:
+                match = CARDNO_RE.search(cell)
+                if match:
+                    card_no = normalize_card_number(match.group(0))
+                    card_row_idx = idx
+                    break
+            if card_no:
+                break
+
+        if card_no and len(table_card_numbers) == 1:
+            first_row = table_rows[0]
+            name = pick_name([first_row[0]] if first_row else [], {})
+            if not name and first_row:
+                name = normalize_ws(first_row[0].split("/", 1)[0])
+
+            effect_parts: list[str] = []
+            for idx, cells in enumerate(table_rows):
+                if idx == card_row_idx:
+                    continue
+                line = normalize_ws(" ".join(cells))
+                if not line:
+                    continue
+                normalized_line = normalize_header(line)
+                if normalized_line in {
+                    "홀로멤",
+                    "오시 홀로멤",
+                    "레벨 속성",
+                    "레벨",
+                    "속성",
+                    "debut",
+                    "1st",
+                    "2nd",
+                    "spot",
+                }:
+                    continue
+                effect_parts.append(line)
+
+            effect = normalize_ws(" ".join(effect_parts))
+            if not effect:
+                continue
+
+            candidate = KoRow(card_number=card_no, name=name, effect=effect, source_url=source_url)
+            previous = best_by_card.get(card_no)
+            if is_better_candidate(candidate, previous):
+                best_by_card[card_no] = candidate
+            continue
+
         header_map: dict[str, int] = {}
         header_cells: list[str] = []
-        body_rows = []
-        for tr in table.select("tr"):
-            cells = tr.find_all(["th", "td"])
-            if not cells:
-                continue
-            cell_texts = [c.get_text("\n", strip=True) for c in cells]
-            if not header_cells and tr.find("th"):
-                header_cells = cell_texts
-                header_map = find_header_map(header_cells)
-                continue
-            body_rows.append(cell_texts)
+        body_rows: list[list[str]] = []
+        for cells in table_rows:
+            if not header_cells:
+                candidate = find_header_map(cells)
+                if candidate:
+                    header_cells = cells
+                    header_map = candidate
+                    continue
+            body_rows.append(cells)
 
         if not header_cells and body_rows:
-            header_cells = body_rows[0]
-            header_map = find_header_map(header_cells)
-            body_rows = body_rows[1:]
+            candidate = find_header_map(body_rows[0])
+            if candidate:
+                header_cells = body_rows[0]
+                header_map = candidate
+                body_rows = body_rows[1:]
+
+        if not header_map:
+            continue
+
+        if "effect" not in header_map:
+            continue
 
         for cells in body_rows:
             card_no = pick_card_number(cells, header_map)
             if not card_no:
-                card_no = ""
-            effect = pick_effect(cells, header_map)
-            name = pick_name(cells, header_map)
-            if not card_no and not name:
                 continue
+            effect = pick_effect(cells, header_map)
+            normalized_effect = normalize_header(effect)
+            if normalized_effect in {"카드 넘버", "카드 번호", "카드번호", "card number", "card no", "card_no", "print"}:
+                continue
+            name = pick_name(cells, header_map)
             if not effect:
                 continue
-            rows.append(KoRow(card_number=card_no, name=name, effect=effect, source_url=source_url))
-    if fallback_card_numbers:
-        missing_indices = [idx for idx, row in enumerate(rows) if not row.card_number]
-        if fallback_card_numbers and missing_indices:
-            if len(fallback_card_numbers) == 1:
-                for idx in missing_indices:
-                    rows[idx].card_number = fallback_card_numbers[0]
-            elif len(fallback_card_numbers) == len(missing_indices):
-                for idx, card_no in zip(missing_indices, fallback_card_numbers, strict=False):
-                    rows[idx].card_number = card_no
+
+            candidate = KoRow(card_number=card_no, name=name, effect=effect, source_url=source_url)
+            previous = best_by_card.get(card_no)
+            if is_better_candidate(candidate, previous):
+                best_by_card[card_no] = candidate
+
+    for candidate in parse_card_sections_from_ids(html, source_url):
+        previous = best_by_card.get(candidate.card_number)
+        if is_better_candidate(candidate, previous):
+            best_by_card[candidate.card_number] = candidate
+
+    rows.extend(best_by_card.values())
     return rows
 
 
@@ -477,6 +815,14 @@ def parse_sheet_csv(csv_text: str, source_url: str) -> list[KoRow]:
     return rows
 
 
+def has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    for row in rows:
+        if row[1] == column:
+            return True
+    return False
+
+
 def upsert_ko_text(
     conn: sqlite3.Connection,
     print_id: int,
@@ -484,10 +830,15 @@ def upsert_ko_text(
     effect: str,
     source_url: str,
     *,
+    include_source: bool,
     overwrite: bool,
     existing: dict[int, tuple[str, str, int]] | None = None,
 ) -> bool:
+    name = sanitize_ko_name(name)
     cached = existing.get(print_id) if existing is not None else None
+    if not name and cached:
+        name = sanitize_ko_name(cached[0])
+
     if cached and not overwrite:
         if cached[1].strip():
             return False
@@ -496,20 +847,35 @@ def upsert_ko_text(
         version = int(cached[2] or 1)
         if cached[1] != effect or cached[0] != name:
             version += 1
-    conn.execute(
-        """
-        INSERT INTO card_texts_ko(print_id,name,effect_text,memo,source,version,updated_at)
-        VALUES(?,?,?,?,?,?,?)
-        ON CONFLICT(print_id) DO UPDATE SET
-          name=excluded.name,
-          effect_text=excluded.effect_text,
-          memo=excluded.memo,
-          source=excluded.source,
-          version=excluded.version,
-          updated_at=excluded.updated_at
-        """,
-        (print_id, name, effect, source_url, "namuwiki", version, now_iso()),
-    )
+    if include_source:
+        conn.execute(
+            """
+            INSERT INTO card_texts_ko(print_id,name,effect_text,memo,source,version,updated_at)
+            VALUES(?,?,?,?,?,?,?)
+            ON CONFLICT(print_id) DO UPDATE SET
+              name=excluded.name,
+              effect_text=excluded.effect_text,
+              memo=excluded.memo,
+              source=excluded.source,
+              version=excluded.version,
+              updated_at=excluded.updated_at
+            """,
+            (print_id, name, effect, source_url, "namuwiki", version, now_iso()),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO card_texts_ko(print_id,name,effect_text,memo,version,updated_at)
+            VALUES(?,?,?,?,?,?)
+            ON CONFLICT(print_id) DO UPDATE SET
+              name=excluded.name,
+              effect_text=excluded.effect_text,
+              memo=excluded.memo,
+              version=excluded.version,
+              updated_at=excluded.updated_at
+            """,
+            (print_id, name, effect, source_url, version, now_iso()),
+        )
     if existing is not None:
         existing[print_id] = (name, effect, version)
     return True
@@ -561,6 +927,7 @@ def import_rows(
     conn: sqlite3.Connection,
     rows: Iterable[KoRow],
     *,
+    include_source: bool,
     overwrite: bool,
     print_map: dict[str, int],
     existing_ko: dict[int, tuple[str, str, int]],
@@ -583,6 +950,7 @@ def import_rows(
             row.name,
             row.effect,
             row.source_url,
+            include_source=include_source,
             overwrite=overwrite,
             existing=existing_ko,
         ):
@@ -608,6 +976,7 @@ def import_from_pages(
     print_map = load_print_map(conn)
     existing_ko = load_existing_ko(conn)
     name_map = load_print_name_map(conn)
+    include_source = has_column(conn, "card_texts_ko", "source")
 
     updated = 0
     seen_pages: set[str] = set()
@@ -621,6 +990,7 @@ def import_from_pages(
         updated += import_rows(
             conn,
             parse_tables(html, source_url, fallback_card_numbers=fallback_card_numbers),
+            include_source=include_source,
             overwrite=overwrite,
             print_map=print_map,
             existing_ko=existing_ko,
@@ -641,6 +1011,7 @@ def import_from_pages(
                 updated += import_rows(
                     conn,
                     parse_tables(page_html, url, fallback_card_numbers=fallback_card_numbers),
+                    include_source=include_source,
                     overwrite=overwrite,
                     print_map=print_map,
                     existing_ko=existing_ko,
@@ -650,7 +1021,7 @@ def import_from_pages(
     if search_card_numbers:
         for card_no in iter_card_numbers_for_search(print_map, existing_ko, overwrite=overwrite):
             query = normalize_card_number(card_no)
-            search_url = f"{NAMU_BASE}/w/검색?query={quote(query)}"
+            search_url = f"{NAMU_BASE}/Search?q={quote(query)}"
             try:
                 html = fetch_html(session, search_url, timeout=timeout)
             except requests.RequestException as exc:
@@ -674,6 +1045,7 @@ def import_from_pages(
                 updated += import_rows(
                     conn,
                     parse_tables(page_html, url, fallback_card_numbers=fallback_card_numbers),
+                    include_source=include_source,
                     overwrite=overwrite,
                     print_map=print_map,
                     existing_ko=existing_ko,
@@ -692,11 +1064,13 @@ def import_from_sheet(db_path: str, sheet_url: str, *, timeout: float, overwrite
     print_map = load_print_map(conn)
     existing_ko = load_existing_ko(conn)
     name_map = load_print_name_map(conn)
+    include_source = has_column(conn, "card_texts_ko", "source")
     resp = session.get(csv_url, timeout=timeout)
     resp.raise_for_status()
     updated = import_rows(
         conn,
         parse_sheet_csv(resp.text, csv_url),
+        include_source=include_source,
         overwrite=overwrite,
         print_map=print_map,
         existing_ko=existing_ko,

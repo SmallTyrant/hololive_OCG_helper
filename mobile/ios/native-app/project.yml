@@ -37,23 +37,12 @@ targets:
     preBuildScripts:
       - name: Copy Bundled DB
         basedOnDependencyAnalysis: false
-        outputFiles:
-          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Data/hololive_ocg.sqlite
         script: |
           set -euo pipefail
-          SRC_DB="$PROJECT_DIR/../../../data/hololive_ocg.sqlite"
           LEGACY_DB="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/hololive_ocg.sqlite"
-          DST_DIR="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Data"
-          DST_DB="$DST_DIR/hololive_ocg.sqlite"
-          rm -f "$LEGACY_DB"
-          if [ -f "$SRC_DB" ] && [ -s "$SRC_DB" ]; then
-            mkdir -p "$DST_DIR"
-            cp "$SRC_DB" "$DST_DB"
-            chmod 0644 "$DST_DB"
-            echo "Copied DB to bundle: $DST_DB"
-          else
-            echo "DB not found at $SRC_DB (skipped)"
-          fi
+          DATA_DB="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Data/hololive_ocg.sqlite"
+          rm -f "$LEGACY_DB" "$DATA_DB"
+          echo "Bundled DB auto-copy disabled"
     settings:
       base:
         PRODUCT_NAME: HocgNative
