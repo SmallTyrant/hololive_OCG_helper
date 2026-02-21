@@ -1,9 +1,14 @@
 import SwiftUI
 import UIKit
+import Foundation
 
 private let sectionLabels: [String] = [
     "SP 오시 스킬",
     "오시 스킬",
+    "콜라보 이펙트",
+    "블룸 이펙트",
+    "기프트",
+    "태그",
     "카드 타입",
     "카드타입",
     "레어리티",
@@ -17,15 +22,96 @@ private let sectionLabels: [String] = [
     "SP推しスキル",
     "推しスキル",
     "カードタイプ",
+    "タグ",
     "レアリティ",
+    "能力テキスト",
+    "色",
     "アーツ",
     "エクストラ",
     "Bloomレベル",
     "キーワード",
+    "バトンタッチ",
     "LIFE",
     "HP",
 ]
 private let detailPrefixPattern = #"^(?:.+?)\s+(?:서포트|サポート)\s*[/／]\s*(?:아이템|스태프|이벤트|이벤타|툴|アイテム|スタッフ|イベント|ツール)\s+"#
+private let sectionLabelsSorted = sectionLabels.sorted { $0.count > $1.count }
+private let japaneseCharPattern = "[\\u3040-\\u30ff\\u31f0-\\u31ff\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff々〆ヵヶ]"
+private let koSectionMarkerRegex = try! NSRegularExpression(
+    pattern: "SP 오시 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\\s+[A-Za-z가-힣])|#"
+)
+private let jaSectionMarkerRegex = try! NSRegularExpression(
+    pattern: "SP推しスキル|推しスキル|コラボエフェクト|ブルームエフェクト|ギフト|エクストラ|アーツ(?=\\s+\\S)|カードタイプ|タグ|レアリティ|能力テキスト|バトンタッチ|#"
+)
+private let tagTokenRegex = try! NSRegularExpression(pattern: "#[^\\s#]+")
+private let koMetadataTokenSet: Set<String> = [
+    "레벨",
+    "속성",
+    "hp",
+    "life",
+    "배턴",
+    "터치",
+    "배턴터치",
+    "1st",
+    "2nd",
+    "debut",
+    "buzz",
+]
+private let jaMetadataTokenSet: Set<String> = [
+    "レベル",
+    "hp",
+    "life",
+    "1st",
+    "2nd",
+    "debut",
+    "buzz",
+]
+private let koDetailReplacements: [(String, String)] = [
+    ("【콜라보 이펙트】", "콜라보 이펙트"),
+    ("【블룸 이펙트】", "블룸 이펙트"),
+    ("【기프트】", "기프트"),
+]
+private let jaDetailReplacements: [(String, String)] = [
+    ("【SP推しスキル】", "SP推しスキル"),
+    ("【推しスキル】", "推しスキル"),
+    ("【コラボエフェクト】", "コラボエフェクト"),
+    ("【ブルームエフェクト】", "ブルームエフェクト"),
+    ("【ギフト】", "ギフト"),
+    ("【エクストラ】", "エクストラ"),
+    ("【アーツ】", "アーツ"),
+    ("【カードタイプ】", "カードタイプ"),
+    ("【タグ】", "タグ"),
+    ("【レアリティ】", "レアリティ"),
+    ("【能力テキスト】", "能力テキスト"),
+    ("【バトンタッチ】", "バトンタッチ"),
+    ("【色】", "色"),
+]
+private let koLineBreakRules: [(String, String)] = [
+    ("\\s*SP 오시 스킬\\s*", "\nSP 오시 스킬\n"),
+    ("\\s*(?<!SP )오시 스킬\\s*", "\n오시 스킬\n"),
+    ("\\s*콜라보 이펙트\\s*", "\n콜라보 이펙트\n"),
+    ("\\s*블룸 이펙트\\s*", "\n블룸 이펙트\n"),
+    ("\\s*기프트\\s*", "\n기프트\n"),
+    ("\\s*엑스트라\\s*", "\n엑스트라\n"),
+    ("\\s*아츠(?=\\s+[A-Za-z가-힣])\\s*", "\n아츠\n"),
+    ("\\s+#", "\n#"),
+]
+private let jaLineBreakRules: [(String, String)] = [
+    ("\\s*SP推しスキル\\s*", "\nSP推しスキル\n"),
+    ("\\s*(?<!SP)推しスキル\\s*", "\n推しスキル\n"),
+    ("\\s*コラボエフェクト\\s*", "\nコラボエフェクト\n"),
+    ("\\s*ブルームエフェクト\\s*", "\nブルームエフェクト\n"),
+    ("\\s*ギフト\\s*", "\nギフト\n"),
+    ("\\s*エクストラ\\s*", "\nエクストラ\n"),
+    ("\\s*アーツ(?=\\s+\\S)\\s*", "\nアーツ\n"),
+    ("\\s*カードタイプ\\s*", "\nカードタイプ\n"),
+    ("\\s*タグ\\s*", "\nタグ\n"),
+    ("\\s*レアリティ\\s*", "\nレアリティ\n"),
+    ("\\s*能力テキスト\\s*", "\n能力テキスト\n"),
+    ("\\s*バトンタッチ\\s*", "\nバトンタッチ\n"),
+    ("(?:^|\\s)色(?=\\s+\\S)", "\n色\n"),
+    ("\\s+#", "\n#"),
+]
 
 private enum AppThemeMode: String, CaseIterable, Identifiable {
     case system
@@ -76,6 +162,11 @@ private enum PreferredLanguage: String, CaseIterable, Identifiable {
         let preferred = Locale.preferredLanguages.first?.lowercased() ?? "ko"
         return preferred.hasPrefix("ja") ? .japanese : .korean
     }
+}
+
+private enum DetailTextLanguage {
+    case korean
+    case japanese
 }
 
 struct ContentView: View {
@@ -154,7 +245,7 @@ struct ContentView: View {
                 if let toast = viewModel.toastMessage {
                     Text(toast)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .foregroundColor(.white)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
                         .background(Color.black.opacity(0.88), in: Capsule())
@@ -189,10 +280,6 @@ struct ContentView: View {
                     onManualUpdate: {
                         showingMenu = false
                         viewModel.onManualUpdate()
-                    },
-                    onDeckList: {
-                        showingMenu = false
-                        showingDeckList = true
                     }
                 )
             }
@@ -254,8 +341,10 @@ struct ContentView: View {
     }
 
     private func resetDetailExpansion() {
-        let hasKo = !splitDetailLines(viewModel.state.detailKoText).isEmpty
-        let hasJa = !splitDetailLines(viewModel.state.detailJaText).isEmpty
+        let koLines = splitDetailLines(viewModel.state.detailKoText, language: .korean)
+        let jaLines = splitDetailLines(viewModel.state.detailJaText, language: .japanese)
+        let hasKo = !koLines.isEmpty
+        let hasJa = !jaLines.isEmpty
 
         guard hasKo || hasJa else {
             koExpanded = false
@@ -264,8 +353,14 @@ struct ContentView: View {
         }
 
         if hasKo && hasJa {
-            koExpanded = selectedPreferredLanguage == .korean
-            jaExpanded = selectedPreferredLanguage == .japanese
+            let expandBoth = koLines.count <= 2 && jaLines.count >= 4
+            if expandBoth {
+                koExpanded = true
+                jaExpanded = true
+            } else {
+                koExpanded = selectedPreferredLanguage == .korean
+                jaExpanded = selectedPreferredLanguage == .japanese
+            }
         } else {
             koExpanded = hasKo
             jaExpanded = hasJa
@@ -273,7 +368,8 @@ struct ContentView: View {
     }
 
     private func mobileLayout(screenHeight: CGFloat) -> some View {
-        let listHeight = scaledHeight(screenHeight: screenHeight, ratio: 0.30, minHeight: 190, maxHeight: 360)
+        let rawListHeight = scaledHeight(screenHeight: screenHeight, ratio: 0.30, minHeight: 190, maxHeight: 360)
+        let listHeight = snappedListPanelHeight(rawListHeight)
         let imageHeight = scaledHeight(screenHeight: screenHeight, ratio: 0.45, minHeight: 240, maxHeight: 560)
 
         return ScrollView {
@@ -316,13 +412,13 @@ struct ContentView: View {
                         viewModel.onToggleImagePanel()
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(.blue)
+                    .foregroundColor(.blue)
                 }
 
                 if viewModel.state.imageCollapsed {
                     Text("이미지를 접었습니다.")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundColor(.secondary)
                 } else {
                     panel(height: imageHeight) {
                         imagePanel
@@ -407,13 +503,13 @@ struct ContentView: View {
             if !viewModel.state.updateStatus.isEmpty {
                 Text(viewModel.state.updateStatus)
                     .font(.footnote)
-                    .foregroundStyle(viewModel.state.updateStatusError ? .red : .green)
+                    .foregroundColor(viewModel.state.updateStatusError ? .red : .green)
             }
 
             if let message = viewModel.state.persistentMessage, !message.isEmpty {
                 Text(message)
                     .font(.footnote)
-                    .foregroundStyle(.red)
+                    .foregroundColor(.red)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -442,7 +538,7 @@ struct ContentView: View {
         Group {
             if viewModel.state.results.isEmpty {
                 Text("검색 결과가 없습니다.")
-                    .foregroundStyle(.secondary)
+                    .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 ScrollView {
@@ -481,7 +577,7 @@ struct ContentView: View {
                 ProgressView()
                 Text("이미지 로딩 중...")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundColor(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -506,8 +602,8 @@ struct ContentView: View {
     }
 
     private func detailPanel(scrollable: Bool) -> some View {
-        let koLines = splitDetailLines(viewModel.state.detailKoText)
-        let jaLines = splitDetailLines(viewModel.state.detailJaText)
+        let koLines = splitDetailLines(viewModel.state.detailKoText, language: .korean)
+        let jaLines = splitDetailLines(viewModel.state.detailJaText, language: .japanese)
 
         return Group {
             if scrollable {
@@ -546,10 +642,19 @@ struct ContentView: View {
         }
     }
 
-    private func splitDetailLines(_ text: String) -> [String] {
-        let lines = text
+    private func splitDetailLines(_ text: String, language: DetailTextLanguage) -> [String] {
+        let payload: String
+        switch language {
+        case .korean:
+            payload = prettifyKoDetailText(text)
+        case .japanese:
+            payload = prettifyJaDetailText(text)
+        }
+
+        let lines = payload
             .split(whereSeparator: { $0.isNewline })
             .map { sanitizeDetailLine(String($0)) }
+            .map(normalizeInlineWhitespace)
             .filter { !$0.isEmpty }
 
         return mergeBrokenTagLines(lines)
@@ -606,6 +711,113 @@ struct ContentView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private func prettifyKoDetailText(_ text: String) -> String {
+        return prettifyDetailText(
+            text,
+            replacements: koDetailReplacements,
+            sectionMarkerRegex: koSectionMarkerRegex,
+            lineBreakRules: koLineBreakRules,
+            tagLabel: "태그",
+            metadataTokens: koMetadataTokenSet,
+            stripJapaneseCharacters: true
+        )
+    }
+
+    private func prettifyJaDetailText(_ text: String) -> String {
+        return prettifyDetailText(
+            text,
+            replacements: jaDetailReplacements,
+            sectionMarkerRegex: jaSectionMarkerRegex,
+            lineBreakRules: jaLineBreakRules,
+            tagLabel: "タグ",
+            metadataTokens: jaMetadataTokenSet
+        )
+    }
+
+    private func prettifyDetailText(
+        _ text: String,
+        replacements: [(String, String)],
+        sectionMarkerRegex: NSRegularExpression,
+        lineBreakRules: [(String, String)],
+        tagLabel: String,
+        metadataTokens: Set<String>,
+        stripJapaneseCharacters: Bool = false
+    ) -> String {
+        var normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.isEmpty {
+            return ""
+        }
+
+        for (before, after) in replacements {
+            normalized = normalized.replacingOccurrences(of: before, with: after)
+        }
+        if stripJapaneseCharacters {
+            normalized = normalized.replacingOccurrences(of: japaneseCharPattern, with: " ", options: .regularExpression)
+        }
+
+        var lines = normalized
+            .split(whereSeparator: { $0.isNewline })
+            .map { normalizeInlineWhitespace(String($0)) }
+            .filter { !$0.isEmpty }
+
+        if lines.count <= 2 {
+            var merged = normalizeInlineWhitespace(lines.joined(separator: " "))
+            if let markerRange = firstSectionRange(in: merged, regex: sectionMarkerRegex), markerRange.lowerBound > merged.startIndex {
+                merged = String(merged[markerRange.lowerBound...])
+            }
+
+            for (pattern, replacement) in lineBreakRules {
+                merged = merged.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)
+            }
+
+            lines = merged
+                .split(whereSeparator: { $0.isNewline })
+                .map { normalizeInlineWhitespace(String($0)) }
+                .filter { !$0.isEmpty }
+        }
+
+        var expanded: [String] = []
+        for line in lines {
+            guard let hashIndex = line.firstIndex(of: "#"), hashIndex != line.startIndex else {
+                expanded.append(line)
+                continue
+            }
+
+            let prefix = normalizeInlineWhitespace(String(line[..<hashIndex]))
+            let tags = normalizeInlineWhitespace(String(line[hashIndex...]))
+            if !prefix.isEmpty {
+                expanded.append(prefix)
+            }
+            if !tags.isEmpty {
+                expanded.append(tags)
+            }
+        }
+
+        let markerIndex = expanded.firstIndex(where: { $0.hasPrefix("#") || splitSectionLabel($0) != nil })
+        let trimmed = markerIndex.map { Array(expanded[$0...]) } ?? expanded
+        let filtered = trimmed.filter { !isNoiseMetadataLine($0, metadataTokens: metadataTokens) }
+
+        var result: [String] = []
+        for line in filtered {
+            if line.hasPrefix("#") {
+                if result.last != tagLabel {
+                    result.append(tagLabel)
+                }
+                result.append(normalizeTagLine(line))
+                continue
+            }
+            if line == tagLabel, result.last == tagLabel {
+                continue
+            }
+            if result.last == line, sectionLabels.contains(line) {
+                continue
+            }
+            result.append(line)
+        }
+
+        return result.joined(separator: "\n")
+    }
+
     private func detailSection(title: String, lines: [String], expanded: Binding<Bool>) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -615,7 +827,7 @@ struct ContentView: View {
                     expanded.wrappedValue.toggle()
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.blue)
+                .foregroundColor(.blue)
                 .font(.caption)
             }
             if expanded.wrappedValue {
@@ -643,14 +855,42 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
+    private func remotePhaseView(_ phase: AsyncImagePhase) -> some View {
+        switch phase {
+        case .success(let image):
+            image
+                .resizable()
+                .scaledToFill()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+                .cornerRadius(6)
+        case .failure:
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.secondary.opacity(0.12))
+                .overlay(
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                )
+        case .empty:
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.secondary.opacity(0.1))
+                .overlay(ProgressView().controlSize(.small))
+        @unknown default:
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.secondary.opacity(0.1))
+        }
+    }
+
     private func placeholder(message: String, error: Bool) -> some View {
         VStack(spacing: 8) {
             Image(systemName: error ? "photo.badge.exclamationmark" : "photo")
                 .font(.system(size: 28))
-                .foregroundStyle(.secondary)
+                .foregroundColor(.secondary)
             Text(message)
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -666,6 +906,13 @@ struct ContentView: View {
                     highlightedTagText(rest)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+            )
+        }
+
+        if line.hasPrefix("#") {
+            return AnyView(
+                tagStyledText(line)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             )
         }
 
@@ -695,7 +942,7 @@ struct ContentView: View {
                 result = result + Text(plain)
             }
             let tag = ns.substring(with: match.range)
-            result = result + Text(tag).foregroundStyle(.blue).fontWeight(.semibold)
+            result = result + Text(tag).foregroundColor(.blue).fontWeight(.semibold)
             cursor = match.range.location + match.range.length
         }
         if cursor < ns.length {
@@ -708,10 +955,7 @@ struct ContentView: View {
     private func splitSectionLabel(_ line: String) -> (String, String)? {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         let separators = [" ", ":", "：", "[", "(", "【"]
-        for label in sectionLabels {
-            if label == "태그" || label == "タグ" {
-                continue
-            }
+        for label in sectionLabelsSorted {
             if trimmed == label {
                 return (label, "")
             }
@@ -727,6 +971,94 @@ struct ContentView: View {
             }
         }
         return nil
+    }
+
+    private func normalizeInlineWhitespace(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func firstSectionRange(in text: String, regex: NSRegularExpression) -> Range<String.Index>? {
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = regex.firstMatch(in: text, options: [], range: range) else {
+            return nil
+        }
+        return Range(match.range, in: text)
+    }
+
+    private func normalizeTagLine(_ line: String) -> String {
+        let nsRange = NSRange(line.startIndex..., in: line)
+        let matches = tagTokenRegex.matches(in: line, options: [], range: nsRange)
+        guard !matches.isEmpty else {
+            return normalizeInlineWhitespace(line)
+        }
+
+        let tags = matches.compactMap { match -> String? in
+            guard let range = Range(match.range, in: line) else {
+                return nil
+            }
+            return String(line[range])
+        }
+
+        var remainder = line
+        for tag in tags {
+            remainder = remainder.replacingOccurrences(of: tag, with: " ")
+        }
+        let tail = normalizeInlineWhitespace(remainder)
+        if tail.isEmpty {
+            return tags.joined(separator: " ")
+        }
+        return "\(tags.joined(separator: " ")) \(tail)"
+    }
+
+    private func isNoiseMetadataLine(_ line: String, metadataTokens: Set<String>) -> Bool {
+        let normalized = normalizeInlineWhitespace(line)
+        if normalized.isEmpty {
+            return true
+        }
+
+        let lowered = normalized.lowercased()
+        let scalarPattern = "^(hp\\s*\\d{2,3}|(1st|2nd)\\s*\\d{2,3})$"
+        if lowered.range(of: scalarPattern, options: .regularExpression) != nil {
+            return true
+        }
+
+        let tokens = lowered.split(separator: " ").map(String.init)
+        if !tokens.isEmpty && tokens.allSatisfy({ token in
+            metadataTokens.contains(token) || token.range(of: "^\\d{2,3}$", options: .regularExpression) != nil
+        }) {
+            return true
+        }
+
+        return false
+    }
+
+    private func tagStyledText(_ line: String) -> Text {
+        let nsRange = NSRange(line.startIndex..., in: line)
+        let matches = tagTokenRegex.matches(in: line, options: [], range: nsRange)
+        guard !matches.isEmpty else {
+            return Text(line)
+        }
+
+        var composed = Text("")
+        var cursor = line.startIndex
+        for match in matches {
+            guard let range = Range(match.range, in: line) else {
+                continue
+            }
+            if cursor < range.lowerBound {
+                composed = composed + Text(String(line[cursor..<range.lowerBound]))
+            }
+            composed = composed + Text(String(line[range]))
+                .fontWeight(.semibold)
+                .foregroundColor(.blue)
+            cursor = range.upperBound
+        }
+        if cursor < line.endIndex {
+            composed = composed + Text(String(line[cursor...]))
+        }
+        return composed
     }
 
     private func sectionChip(_ text: String) -> some View {
@@ -761,6 +1093,18 @@ struct ContentView: View {
     private func scaledHeight(screenHeight: CGFloat, ratio: CGFloat, minHeight: CGFloat, maxHeight: CGFloat) -> CGFloat {
         let scaled = screenHeight * ratio
         return Swift.min(Swift.max(scaled, minHeight), maxHeight)
+    }
+
+    private func snappedListPanelHeight(_ rawHeight: CGFloat) -> CGFloat {
+        let panelVerticalPadding: CGFloat = 20
+        let rowHeight: CGFloat = 38
+        let rowSpacing: CGFloat = 4
+        let rowStride = rowHeight + rowSpacing
+
+        let available = Swift.max(rawHeight - panelVerticalPadding + rowSpacing, rowStride)
+        let fullRows = Swift.max(1, Int((available / rowStride).rounded(.down)))
+        let snappedInnerHeight = CGFloat(fullRows) * rowStride - rowSpacing
+        return snappedInnerHeight + panelVerticalPadding
     }
 
     private func resultTitle(_ row: PrintRow) -> String {
@@ -899,7 +1243,6 @@ private struct MenuSheet: View {
     @Binding var preferredLanguage: PreferredLanguage
     let onBulkImageDownload: () -> Void
     let onManualUpdate: () -> Void
-    let onDeckList: () -> Void
 
     var body: some View {
         NavigationStack {
@@ -911,9 +1254,6 @@ private struct MenuSheet: View {
                     .disabled(state.updateRunning)
 
                     Button("DB 수동갱신", action: onManualUpdate)
-                        .disabled(state.updateRunning)
-
-                    Button("덱리스트(테스트)", action: onDeckList)
                         .disabled(state.updateRunning)
                 }
 

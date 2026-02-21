@@ -7,6 +7,7 @@ import subprocess
 import sys
 import json
 import hashlib
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 from urllib.request import Request, urlopen
@@ -85,6 +86,86 @@ def file_sha256(path: str | Path, *, chunk_size: int = 1024 * 256) -> str | None
     return hasher.hexdigest()
 
 
+def _normalize_hash_text(value: str | None) -> str:
+    text = str(value or "").strip().lower()
+    if text.startswith("sha256:"):
+        text = text.split(":", 1)[1].strip()
+    return text
+
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _read_local_release_meta(db_path: str) -> dict[str, str]:
+    target = Path(db_path)
+    if not target.exists() or not target.is_file() or target.stat().st_size == 0:
+        return {}
+
+    try:
+        conn = sqlite3.connect(target)
+    except Exception:
+        return {}
+
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'"
+        ).fetchone()
+        if not row:
+            return {}
+        rows = conn.execute(
+            "SELECT key, value FROM meta WHERE key IN (?,?,?,?,?)",
+            (
+                "release_tag",
+                "release_asset_updated_at",
+                "release_published_at",
+                "release_created_at",
+                "release_asset_digest",
+            ),
+        ).fetchall()
+        return {
+            str(key): str(value or "").strip()
+            for key, value in rows
+            if str(key or "").strip()
+        }
+    except Exception:
+        return {}
+    finally:
+        conn.close()
+
+
+def _local_release_timestamp(db_path: str, meta: dict[str, str]) -> datetime | None:
+    for key in ("release_asset_updated_at", "release_published_at", "release_created_at"):
+        dt = _parse_iso_datetime(meta.get(key))
+        if dt is not None:
+            return dt
+
+    try:
+        modified = datetime.fromtimestamp(Path(db_path).stat().st_mtime, tz=timezone.utc)
+        return modified
+    except Exception:
+        return None
+
+
+def _remote_release_timestamp(release_info: dict) -> datetime | None:
+    for key in ("asset_updated_at", "published_at", "created_at"):
+        dt = _parse_iso_datetime(release_info.get(key))
+        if dt is not None:
+            return dt
+    return None
+
+
 def check_db_hash_update_needed(db_path: str) -> dict:
     local_hash = file_sha256(db_path)
     if not local_hash:
@@ -106,8 +187,19 @@ def check_db_hash_update_needed(db_path: str) -> dict:
             "reason": "failed to fetch latest release info",
         }
 
-    remote_hash = str(info.get("asset_digest") or "").strip().lower()
+    remote_hash = _normalize_hash_text(str(info.get("asset_digest") or ""))
     if not remote_hash:
+        local_meta = _read_local_release_meta(db_path)
+        remote_ts = _remote_release_timestamp(info)
+        local_ts = _local_release_timestamp(db_path, local_meta)
+        if remote_ts is not None and local_ts is not None and remote_ts > local_ts:
+            return {
+                "status": "remote_hash_unavailable_remote_newer",
+                "needs_update": True,
+                "local_hash": local_hash,
+                "remote_hash": None,
+                "reason": "release timestamp is newer and digest is unavailable",
+            }
         return {
             "status": "remote_hash_unavailable",
             "needs_update": False,
@@ -116,7 +208,18 @@ def check_db_hash_update_needed(db_path: str) -> dict:
             "reason": "latest release digest is unavailable",
         }
 
-    if local_hash != remote_hash:
+    local_meta = _read_local_release_meta(db_path)
+    local_meta_hash = _normalize_hash_text(local_meta.get("release_asset_digest"))
+    if local_hash == remote_hash:
+        hash_match_mode = "file"
+    elif local_meta_hash and local_meta_hash == remote_hash:
+        hash_match_mode = "meta"
+    else:
+        hash_match_mode = ""
+
+    hash_matched = bool(hash_match_mode)
+
+    if not hash_matched:
         return {
             "status": "mismatch",
             "needs_update": True,
@@ -125,12 +228,23 @@ def check_db_hash_update_needed(db_path: str) -> dict:
             "reason": "hash mismatch",
         }
 
+    remote_ts = _remote_release_timestamp(info)
+    local_ts = _local_release_timestamp(db_path, local_meta)
+    if remote_ts is not None and local_ts is not None and remote_ts > local_ts:
+        return {
+            "status": "remote_newer",
+            "needs_update": True,
+            "local_hash": local_hash,
+            "remote_hash": remote_hash,
+            "reason": "release timestamp is newer than local DB metadata",
+        }
+
     return {
         "status": "up_to_date",
         "needs_update": False,
         "local_hash": local_hash,
         "remote_hash": remote_hash,
-        "reason": "hash matched",
+        "reason": "hash matched" if hash_match_mode == "file" else "hash matched via local meta",
     }
 
 

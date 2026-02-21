@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sqlite3
 import threading
 import sys
 import time
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -36,6 +36,14 @@ from app.services.verify import run_startup_checks
 COLORS = ft.Colors if hasattr(ft, "Colors") else ft.colors
 ICONS = ft.Icons if hasattr(ft, "Icons") else ft.icons
 SECTION_LABELS = (
+    "SP 오시 스킬",
+    "오시 스킬",
+    "아츠",
+    "태그",
+    "콜라보 이펙트",
+    "블룸 이펙트",
+    "기프트",
+    "엑스트라",
     "カードタイプ",
     "タグ",
     "レアリティ",
@@ -45,8 +53,20 @@ SECTION_LABELS = (
     "エクストラ",
     "Bloomレベル",
     "キーワード",
+    "能力テキスト",
+    "色",
+    "バトンタッチ",
     "LIFE",
     "HP",
+)
+SECTION_LABELS_SORTED = tuple(sorted(SECTION_LABELS, key=len, reverse=True))
+JAPANESE_CHAR_RE = re.compile(r"[\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff々〆ヵヶ]")
+TAG_ONLY_LINE_RE = re.compile(r"^(?:#[^\s#]+(?:\s+|$))+(?:[A-Za-z0-9가-힣]+(?:\s+[A-Za-z0-9가-힣]+)*)?$")
+KO_SECTION_MARKER_RE = re.compile(
+    r"SP 오시 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\s+[A-Za-z가-힣])|#"
+)
+JA_SECTION_MARKER_RE = re.compile(
+    r"SP推しスキル|推しスキル|コラボエフェクト|ブルームエフェクト|ギフト|エクストラ|アーツ(?=\s+\S)|カードタイプ|レアリティ|能力テキスト|タグ|バトンタッチ|#"
 )
 
 
@@ -65,6 +85,152 @@ REMOTE_DB_CHECK_INTERVAL_SECONDS = 300
 
 def with_opacity(opacity: float, color: str) -> str:
     return COLORS.with_opacity(opacity, color)
+
+
+def normalize_inline_ws(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def _normalize_nonempty_lines(text: str) -> list[str]:
+    lines = [normalize_inline_ws(ln) for ln in text.splitlines()]
+    return [ln for ln in lines if ln]
+
+
+def _expand_tag_lines(lines: list[str], tag_label: str) -> list[str]:
+    expanded: list[str] = []
+    for line in lines:
+        if "#" not in line:
+            expanded.append(line)
+            continue
+
+        if TAG_ONLY_LINE_RE.fullmatch(line):
+            expanded.append(tag_label)
+            expanded.append(line)
+            continue
+
+        prefix, sep, suffix = line.partition("#")
+        if not sep:
+            expanded.append(line)
+            continue
+
+        prefix_text = normalize_inline_ws(prefix)
+        tag_text = normalize_inline_ws("#" + suffix)
+        if prefix_text and TAG_ONLY_LINE_RE.fullmatch(tag_text):
+            expanded.append(prefix_text)
+            expanded.append(tag_label)
+            expanded.append(tag_text)
+        else:
+            expanded.append(line)
+    return expanded
+
+
+def _dedupe_detail_lines(lines: list[str], tag_label: str) -> list[str]:
+    result: list[str] = []
+    for line in lines:
+        if line == tag_label and result and result[-1] == tag_label:
+            continue
+        if result and result[-1] == line and line in SECTION_LABELS:
+            continue
+        result.append(line)
+    return result
+
+
+def _prettify_detail_text(
+    text: str,
+    *,
+    replacements: tuple[tuple[str, str], ...],
+    section_marker_re: re.Pattern[str],
+    section_break_rules: tuple[tuple[str, str], ...],
+    tag_label: str,
+    strip_japanese_chars: bool = False,
+) -> str:
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+
+    normalized = raw
+    for before, after in replacements:
+        normalized = normalized.replace(before, after)
+    if strip_japanese_chars:
+        normalized = JAPANESE_CHAR_RE.sub(" ", normalized)
+
+    lines = _normalize_nonempty_lines(normalized)
+    if len(lines) <= 2:
+        merged = normalize_inline_ws(" ".join(lines) if lines else normalized)
+        marker = section_marker_re.search(merged)
+        if marker and marker.start() > 0:
+            merged = merged[marker.start():]
+
+        for pattern, replacement in section_break_rules:
+            merged = re.sub(pattern, replacement, merged)
+        lines = _normalize_nonempty_lines(merged)
+
+    expanded = _expand_tag_lines(lines, tag_label)
+    deduped = _dedupe_detail_lines(expanded, tag_label)
+    return "\n".join(deduped)
+
+
+def prettify_ko_detail_text(text: str) -> str:
+    return _prettify_detail_text(
+        text,
+        replacements=(
+            ("【콜라보 이펙트】", "콜라보 이펙트"),
+            ("【블룸 이펙트】", "블룸 이펙트"),
+            ("【기프트】", "기프트"),
+        ),
+        section_marker_re=KO_SECTION_MARKER_RE,
+        section_break_rules=(
+            (r"\s*SP 오시 스킬\s*", "\nSP 오시 스킬\n"),
+            (r"\s*(?<!SP )오시 스킬\s*", "\n오시 스킬\n"),
+            (r"\s*콜라보 이펙트\s*", "\n콜라보 이펙트\n"),
+            (r"\s*블룸 이펙트\s*", "\n블룸 이펙트\n"),
+            (r"\s*기프트\s*", "\n기프트\n"),
+            (r"\s*엑스트라\s*", "\n엑스트라\n"),
+            (r"\s*아츠(?=\s+[A-Za-z가-힣])\s*", "\n아츠\n"),
+            (r"\s+#", "\n#"),
+        ),
+        tag_label="태그",
+        strip_japanese_chars=True,
+    )
+
+
+def prettify_ja_detail_text(text: str) -> str:
+    return _prettify_detail_text(
+        text,
+        replacements=(
+            ("【SP推しスキル】", "SP推しスキル"),
+            ("【推しスキル】", "推しスキル"),
+            ("【コラボエフェクト】", "コラボエフェクト"),
+            ("【ブルームエフェクト】", "ブルームエフェクト"),
+            ("【ギフト】", "ギフト"),
+            ("【エクストラ】", "エクストラ"),
+            ("【アーツ】", "アーツ"),
+            ("【カードタイプ】", "カードタイプ"),
+            ("【タグ】", "タグ"),
+            ("【レアリティ】", "レアリティ"),
+            ("【能力テキスト】", "能力テキスト"),
+            ("【バトンタッチ】", "バトンタッチ"),
+            ("【色】", "色"),
+        ),
+        section_marker_re=JA_SECTION_MARKER_RE,
+        section_break_rules=(
+            (r"\s*SP推しスキル\s*", "\nSP推しスキル\n"),
+            (r"\s*(?<!SP)推しスキル\s*", "\n推しスキル\n"),
+            (r"\s*コラボエフェクト\s*", "\nコラボエフェクト\n"),
+            (r"\s*ブルームエフェクト\s*", "\nブルームエフェクト\n"),
+            (r"\s*ギフト\s*", "\nギフト\n"),
+            (r"\s*エクストラ\s*", "\nエクストラ\n"),
+            (r"\s*アーツ(?=\s+\S)\s*", "\nアーツ\n"),
+            (r"\s*カードタイプ\s*", "\nカードタイプ\n"),
+            (r"\s*タグ\s*", "\nタグ\n"),
+            (r"\s*レアリティ\s*", "\nレアリティ\n"),
+            (r"\s*能力テキスト\s*", "\n能力テキスト\n"),
+            (r"\s*バトンタッチ\s*", "\nバトンタッチ\n"),
+            (r"(?:^|\s)色(?=\s+\S)", "\n色\n"),
+            (r"\s+#", "\n#"),
+        ),
+        tag_label="タグ",
+    )
 
 def _center_alignment():
     if hasattr(ft, "Alignment"):
@@ -103,6 +269,10 @@ def icon_paths(project_root: Path) -> tuple[Path, Path]:
     d = icon_dir(project_root)
     png_path = d / "app_icon.png"
     return d / "app_icon.ico", png_path
+
+
+def mobile_icon_path(project_root: Path) -> Path:
+    return project_root / "app" / "assets" / "icon_ios.png"
 
 
 def launch_app(db_path: str) -> None:
@@ -446,8 +616,8 @@ def launch_app(db_path: str) -> None:
                     if not row:
                         db_health_cache.update({"path": path, "value": True, "checked_at": now})
                         return True
-                    count = conn.execute("SELECT COUNT(1) FROM prints").fetchone()
-                    value = (count[0] if count else 0) == 0
+                    has_rows = conn.execute("SELECT 1 FROM prints LIMIT 1").fetchone()
+                    value = has_rows is None
                     db_health_cache.update(
                         {"path": path, "value": value, "checked_at": now}
                     )
@@ -573,6 +743,7 @@ def launch_app(db_path: str) -> None:
 
         def setup_window_icon() -> None:
             ico_path, png_path = icon_paths(project_root)
+            mobile_png_path = mobile_icon_path(project_root)
 
             def set_icon(path: Path) -> bool:
                 try:
@@ -608,6 +779,7 @@ def launch_app(db_path: str) -> None:
                     return False
 
             is_windows = sys.platform.startswith("win")
+            is_macos = sys.platform == "darwin"
 
             # Windows: prefer ICO; PNG can be ignored by the OS without error.
             if is_windows:
@@ -616,6 +788,15 @@ def launch_app(db_path: str) -> None:
                         return
                 if png_path.exists():
                     set_icon(png_path)
+                return
+
+            # macOS: match mobile icon first.
+            if is_macos:
+                for candidate in (mobile_png_path, png_path, ico_path):
+                    if candidate.exists() and set_icon(candidate):
+                        return
+                if ensure_ico_from_png():
+                    set_icon(ico_path)
                 return
 
             # Non-Windows: PNG first, ICO fallback.
@@ -755,14 +936,18 @@ def launch_app(db_path: str) -> None:
             if line in SECTION_LABELS:
                 return build_section_chip(line)
 
-            for label in SECTION_LABELS:
+            for label in SECTION_LABELS_SORTED:
                 if line.startswith(label + " "):
-                    rest = line[len(label):]
-                    return ft.Text(
-                        spans=[
-                            ft.TextSpan(label, style=ft.TextStyle(weight=ft.FontWeight.BOLD)),
-                            ft.TextSpan(rest),
-                        ]
+                    rest = line[len(label):].strip()
+                    if not rest:
+                        return build_section_chip(label)
+                    return ft.Column(
+                        controls=[
+                            build_section_chip(label),
+                            ft.Text(rest),
+                        ],
+                        spacing=4,
+                        tight=True,
                     )
             return ft.Text(line)
 
@@ -770,8 +955,14 @@ def launch_app(db_path: str) -> None:
             trimmed = line.strip()
             return DETAIL_PREFIX_RE.sub("", trimmed).strip()
 
-        def append_detail_lines(text: str) -> None:
-            lines = [sanitize_detail_line(ln) for ln in text.splitlines()]
+        def append_detail_lines(text: str, *, lang: str | None = None) -> None:
+            payload = text or ""
+            if lang == "ko":
+                payload = prettify_ko_detail_text(payload)
+            elif lang == "ja":
+                payload = prettify_ja_detail_text(payload)
+
+            lines = [sanitize_detail_line(ln) for ln in payload.splitlines()]
             for line in lines:
                 if line:
                     detail_lv.controls.append(build_detail_line(line))
@@ -783,10 +974,10 @@ def launch_app(db_path: str) -> None:
 
             if ko:
                 detail_lv.controls.append(build_section_chip("한국어"))
-                append_detail_lines(ko)
+                append_detail_lines(ko, lang="ko")
             elif ja:
                 detail_lv.controls.append(build_section_chip("일본어 원문"))
-                append_detail_lines(ja)
+                append_detail_lines(ja, lang="ja")
             else:
                 detail_lv.controls.append(ft.Text("(본문 없음)"))
 
@@ -965,7 +1156,6 @@ def launch_app(db_path: str) -> None:
             update_state["running"] = running
             btn_menu.disabled = running
             btn_manual_update.disabled = running
-            btn_deck_list.disabled = running
             tf_search.disabled = running
             tf_db.disabled = running
             update_progress.visible = running
@@ -1047,10 +1237,6 @@ def launch_app(db_path: str) -> None:
             "DB 수동갱신",
             icon=ICONS.SYNC,
         )
-        btn_deck_list = ft.ElevatedButton(
-            "덱리스트(테스트)",
-            icon=ICONS.VIEW_LIST,
-        )
         menu_panel = ft.NavigationDrawer(
             controls=[
                 ft.Container(
@@ -1064,10 +1250,6 @@ def launch_app(db_path: str) -> None:
                 ),
                 ft.Container(
                     content=btn_manual_update,
-                    padding=ft.padding.symmetric(horizontal=12, vertical=6),
-                ),
-                ft.Container(
-                    content=btn_deck_list,
                     padding=ft.padding.symmetric(horizontal=12, vertical=6),
                 ),
                 ft.Divider(height=8),
@@ -1107,15 +1289,6 @@ def launch_app(db_path: str) -> None:
             page.run_task(run_manual_update_from_panel_async)
 
         btn_manual_update.on_click = on_manual_update_click
-
-        async def open_deck_list_from_panel_async() -> None:
-            await close_menu_panel_async()
-            open_deck_list_screen()
-
-        def on_deck_list_click(e=None) -> None:
-            page.run_task(open_deck_list_from_panel_async)
-
-        btn_deck_list.on_click = on_deck_list_click
 
         def close_db_update_dialog(e=None) -> None:
             if db_update_dialog.open:
@@ -1206,7 +1379,7 @@ def launch_app(db_path: str) -> None:
                 await asyncio.sleep(REMOTE_DB_CHECK_INTERVAL_SECONDS)
 
         def on_menu_click(e=None) -> None:
-            if not is_mobile_layout():
+            if not (is_mobile_layout() or sys.platform == "darwin"):
                 return
             page.run_task(open_menu_panel_async)
 
@@ -1455,6 +1628,7 @@ def launch_app(db_path: str) -> None:
 
         def build_layout(force: bool = False) -> None:
             mobile = is_mobile_layout()
+            show_hamburger_menu = mobile or sys.platform == "darwin"
             width, height = get_view_size()
             size_key = (int(width or 0), int(height or 0))
             if (
@@ -1476,6 +1650,7 @@ def launch_app(db_path: str) -> None:
                 return
 
             if mobile:
+                btn_menu.visible = show_hamburger_menu
                 lv.expand = True
                 lv.scroll = ft.ScrollMode.AUTO
                 detail_lv.expand = True
@@ -1606,6 +1781,7 @@ def launch_app(db_path: str) -> None:
             lv.scroll = ft.ScrollMode.AUTO
             detail_lv.expand = True
             detail_lv.scroll = ft.ScrollMode.AUTO
+            btn_menu.visible = show_hamburger_menu
 
             top = ft.Row(
                 [
@@ -1614,7 +1790,10 @@ def launch_app(db_path: str) -> None:
                 ],
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             )
-            search_row = ft.Row([tf_search], vertical_alignment=ft.CrossAxisAlignment.CENTER)
+            search_controls: list[ft.Control] = [tf_search]
+            if show_hamburger_menu:
+                search_controls.append(btn_menu)
+            search_row = ft.Row(search_controls, spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
             left = ft.Column(
                 [

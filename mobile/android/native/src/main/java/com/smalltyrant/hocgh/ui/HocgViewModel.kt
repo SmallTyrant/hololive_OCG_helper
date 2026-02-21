@@ -10,6 +10,7 @@ import com.smalltyrant.hocgh.data.AppPaths
 import com.smalltyrant.hocgh.data.DbRepository
 import com.smalltyrant.hocgh.data.ImageRepository
 import com.smalltyrant.hocgh.data.UpdateRepository
+import com.smalltyrant.hocgh.model.DeckCardCandidate
 import com.smalltyrant.hocgh.model.HocgUiState
 import com.smalltyrant.hocgh.model.ImageState
 import com.smalltyrant.hocgh.model.UpdateDialogState

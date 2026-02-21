@@ -31,8 +31,8 @@ android {
         applicationId = "com.smalltyrant.hocgh"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 113
+        versionName = "1.1.3"
     }
 
     if (hasReleaseSigning) {
@@ -78,32 +78,6 @@ android {
             assets.srcDirs("src/main/assets")
         }
     }
-}
-
-val syncBundledDb by tasks.registering {
-    group = "assets"
-    description = "Copies root data/hololive_ocg.sqlite into app assets when available"
-
-    doLast {
-        val repoRoot = rootProject.projectDir.resolve("../../..").normalize()
-        val src = repoRoot.resolve("data/hololive_ocg.sqlite")
-        val assetsDir = project.layout.projectDirectory.dir("src/main/assets").asFile
-        val dst = assetsDir.resolve("hololive_ocg.sqlite")
-
-        assetsDir.mkdirs()
-
-        if (!src.exists() || !src.isFile || src.length() <= 0L) {
-            logger.lifecycle("[syncBundledDb] skipped: source DB not found at ${src.absolutePath}")
-            return@doLast
-        }
-
-        src.copyTo(dst, overwrite = true)
-        logger.lifecycle("[syncBundledDb] copied DB -> ${dst.absolutePath}")
-    }
-}
-
-tasks.named("preBuild") {
-    dependsOn(syncBundledDb)
 }
 
 dependencies {

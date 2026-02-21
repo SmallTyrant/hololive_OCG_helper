@@ -1,5 +1,6 @@
 package com.smalltyrant.hocgh.ui
 
+import android.content.res.Configuration
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -82,10 +83,15 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import java.util.Locale
 
 private val SECTION_LABELS = listOf(
     "SP 오시 스킬",
     "오시 스킬",
+    "콜라보 이펙트",
+    "블룸 이펙트",
+    "기프트",
+    "태그",
     "카드 타입",
     "카드타입",
     "레어리티",
@@ -99,13 +105,94 @@ private val SECTION_LABELS = listOf(
     "SP推しスキル",
     "推しスキル",
     "カードタイプ",
+    "タグ",
     "レアリティ",
+    "能力テキスト",
+    "色",
     "アーツ",
     "エクストラ",
     "Bloomレベル",
     "キーワード",
+    "バトンタッチ",
     "LIFE",
     "HP",
+)
+private val SECTION_LABELS_SORTED = SECTION_LABELS.sortedByDescending { it.length }
+private val JAPANESE_CHAR_REGEX = Regex("[\\u3040-\\u30ff\\u31f0-\\u31ff\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff々〆ヵヶ]")
+private val KO_SECTION_MARKER_REGEX = Regex(
+    "SP 오시 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\\s+[A-Za-z가-힣])|#",
+)
+private val JA_SECTION_MARKER_REGEX = Regex(
+    "SP推しスキル|推しスキル|コラボエフェクト|ブルームエフェクト|ギフト|エクストラ|アーツ(?=\\s+\\S)|カードタイプ|タグ|レアリティ|能力テキスト|バトンタッチ|#",
+)
+private val TAG_TOKEN_REGEX = Regex("#[^\\s#]+")
+private val KO_METADATA_TOKEN_SET = setOf(
+    "레벨",
+    "속성",
+    "hp",
+    "life",
+    "배턴",
+    "터치",
+    "배턴터치",
+    "1st",
+    "2nd",
+    "debut",
+    "buzz",
+)
+private val JA_METADATA_TOKEN_SET = setOf(
+    "レベル",
+    "hp",
+    "life",
+    "1st",
+    "2nd",
+    "debut",
+    "buzz",
+)
+private val KO_DETAIL_REPLACEMENTS = listOf(
+    "【콜라보 이펙트】" to "콜라보 이펙트",
+    "【블룸 이펙트】" to "블룸 이펙트",
+    "【기프트】" to "기프트",
+)
+private val JA_DETAIL_REPLACEMENTS = listOf(
+    "【SP推しスキル】" to "SP推しスキル",
+    "【推しスキル】" to "推しスキル",
+    "【コラボエフェクト】" to "コラボエフェクト",
+    "【ブルームエフェクト】" to "ブルームエフェクト",
+    "【ギフト】" to "ギフト",
+    "【エクストラ】" to "エクストラ",
+    "【アーツ】" to "アーツ",
+    "【カードタイプ】" to "カードタイプ",
+    "【タグ】" to "タグ",
+    "【レアリティ】" to "レアリティ",
+    "【能力テキスト】" to "能力テキスト",
+    "【バトンタッチ】" to "バトンタッチ",
+    "【色】" to "色",
+)
+private val KO_LINE_BREAK_PATTERNS = listOf(
+    Regex("\\s*SP 오시 스킬\\s*") to "\nSP 오시 스킬\n",
+    Regex("\\s*(?<!SP )오시 스킬\\s*") to "\n오시 스킬\n",
+    Regex("\\s*콜라보 이펙트\\s*") to "\n콜라보 이펙트\n",
+    Regex("\\s*블룸 이펙트\\s*") to "\n블룸 이펙트\n",
+    Regex("\\s*기프트\\s*") to "\n기프트\n",
+    Regex("\\s*엑스트라\\s*") to "\n엑스트라\n",
+    Regex("\\s*아츠(?=\\s+[A-Za-z가-힣])\\s*") to "\n아츠\n",
+    Regex("\\s+#") to "\n#",
+)
+private val JA_LINE_BREAK_PATTERNS = listOf(
+    Regex("\\s*SP推しスキル\\s*") to "\nSP推しスキル\n",
+    Regex("\\s*(?<!SP)推しスキル\\s*") to "\n推しスキル\n",
+    Regex("\\s*コラボエフェクト\\s*") to "\nコラボエフェクト\n",
+    Regex("\\s*ブルームエフェクト\\s*") to "\nブルームエフェクト\n",
+    Regex("\\s*ギフト\\s*") to "\nギフト\n",
+    Regex("\\s*エクストラ\\s*") to "\nエクストラ\n",
+    Regex("\\s*アーツ(?=\\s+\\S)\\s*") to "\nアーツ\n",
+    Regex("\\s*カードタイプ\\s*") to "\nカードタイプ\n",
+    Regex("\\s*タグ\\s*") to "\nタグ\n",
+    Regex("\\s*レアリティ\\s*") to "\nレアリティ\n",
+    Regex("\\s*能力テキスト\\s*") to "\n能力テキスト\n",
+    Regex("\\s*バトンタッチ\\s*") to "\nバトンタッチ\n",
+    Regex("(?:^|\\s)色(?=\\s+\\S)") to "\n色\n",
+    Regex("\\s+#") to "\n#",
 )
 
 private val DETAIL_PREFIX_PATTERN = Regex(
@@ -113,6 +200,11 @@ private val DETAIL_PREFIX_PATTERN = Regex(
 )
 
 private val INLINE_TAG_PATTERN = Regex(pattern = """#[\p{L}\p{N}_]+""")
+
+private enum class DetailTextLanguage {
+    KOREAN,
+    JAPANESE,
+}
 
 private data class DeckEntryUi(
     val card: DeckCardCandidate,
@@ -154,7 +246,9 @@ fun HocgScreen(
 ) {
     val state = viewModel.state
     val config = androidx.compose.ui.platform.LocalConfiguration.current
-    val isMobileLayout = config.screenWidthDp < 900
+    val forceDesktopLandscape =
+        config.orientation == Configuration.ORIENTATION_LANDSCAPE && config.screenWidthDp < 900
+    val isMobileLayout = config.screenWidthDp < 900 && !forceDesktopLandscape
     val focusManager = LocalFocusManager.current
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -211,7 +305,7 @@ fun HocgScreen(
             .fillMaxSize()
             .clearFocusOnTap(focusManager),
         drawerState = drawerState,
-        gesturesEnabled = isMobileLayout,
+        gesturesEnabled = isMobileLayout || forceDesktopLandscape,
         drawerContent = {
             ModalDrawerSheet {
                 Column(
@@ -242,16 +336,6 @@ fun HocgScreen(
                         enabled = !state.updateRunning,
                     ) {
                         Text("DB 수동갱신")
-                    }
-                    ElevatedButton(
-                        onClick = {
-                            scope.launch { drawerState.close() }
-                            showDeckList = true
-                            showDeckEditor = false
-                        },
-                        enabled = !state.updateRunning,
-                    ) {
-                        Text("덱리스트(테스트)")
                     }
                     HorizontalDivider()
                     Text("테마", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
@@ -397,6 +481,10 @@ fun HocgScreen(
                     innerPadding = innerPadding,
                     onSearchQueryChanged = viewModel::onSearchQueryChanged,
                     onDismissKeyboard = { focusManager.clearFocus() },
+                    onOpenMenu = { scope.launch { drawerState.open() } },
+                    showMenuButton = forceDesktopLandscape,
+                    keepSearchBarTop = forceDesktopLandscape,
+                    twoPaneLandscape = forceDesktopLandscape,
                     onSelectPrint = viewModel::onSelectPrint,
                     preferredLanguage = preferredLanguage,
                 )
@@ -490,7 +578,7 @@ private fun MobileLayout(
     onToggleImagePanel: () -> Unit,
     preferredLanguage: PreferredLanguage,
 ) {
-    val listHeight = scaledHeightDp(ratio = 0.30f, minPx = 190, maxPx = 360)
+    val listHeight = snappedListHeightDp(scaledHeightDp(ratio = 0.30f, minPx = 190, maxPx = 360))
     val imageHeight = scaledHeightDp(ratio = 0.45f, minPx = 240, maxPx = 560)
 
     Column(
@@ -584,6 +672,10 @@ private fun DesktopLayout(
     innerPadding: androidx.compose.foundation.layout.PaddingValues,
     onSearchQueryChanged: (String) -> Unit,
     onDismissKeyboard: () -> Unit,
+    onOpenMenu: () -> Unit,
+    showMenuButton: Boolean,
+    keepSearchBarTop: Boolean,
+    twoPaneLandscape: Boolean,
     onSelectPrint: (Long) -> Unit,
     preferredLanguage: PreferredLanguage,
 ) {
@@ -594,69 +686,166 @@ private fun DesktopLayout(
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            OutlinedTextField(
-                modifier = Modifier.weight(1f),
-                value = state.dbPath,
-                onValueChange = {},
-                readOnly = true,
-                enabled = !state.updateRunning,
-                label = { Text("DB") },
-                singleLine = true,
-            )
-            if (state.updateRunning) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    strokeWidth = 2.dp,
+        if (keepSearchBarTop) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedTextField(
+                    modifier = Modifier.weight(1f),
+                    value = state.searchQuery,
+                    onValueChange = onSearchQueryChanged,
+                    label = { Text("카드번호 / 이름 / 태그 / 한국어 본문 검색") },
+                    enabled = !state.updateRunning,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { onDismissKeyboard() }),
+                )
+                if (state.updateRunning) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                    )
+                }
+                if (showMenuButton) {
+                    IconButton(
+                        onClick = {
+                            onDismissKeyboard()
+                            onOpenMenu()
+                        },
+                        enabled = !state.updateRunning,
+                    ) {
+                        Icon(Icons.Default.Menu, contentDescription = "메뉴")
+                    }
+                }
+            }
+            if (state.dbPath.isNotBlank()) {
+                Text(
+                    text = "DB: ${state.dbPath}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-        }
+        } else {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedTextField(
+                    modifier = Modifier.weight(1f),
+                    value = state.dbPath,
+                    onValueChange = {},
+                    readOnly = true,
+                    enabled = !state.updateRunning,
+                    label = { Text("DB") },
+                    singleLine = true,
+                )
+                if (state.updateRunning) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                    )
+                }
+            }
 
-        OutlinedTextField(
-            modifier = Modifier.fillMaxWidth(),
-            value = state.searchQuery,
-            onValueChange = onSearchQueryChanged,
-            label = { Text("카드번호 / 이름 / 태그 / 한국어 본문 검색") },
-            enabled = !state.updateRunning,
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { onDismissKeyboard() }),
-        )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedTextField(
+                    modifier = Modifier.weight(1f),
+                    value = state.searchQuery,
+                    onValueChange = onSearchQueryChanged,
+                    label = { Text("카드번호 / 이름 / 태그 / 한국어 본문 검색") },
+                    enabled = !state.updateRunning,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { onDismissKeyboard() }),
+                )
+                if (showMenuButton) {
+                    IconButton(
+                        onClick = {
+                            onDismissKeyboard()
+                            onOpenMenu()
+                        },
+                        enabled = !state.updateRunning,
+                    ) {
+                        Icon(Icons.Default.Menu, contentDescription = "메뉴")
+                    }
+                }
+            }
+        }
 
         UpdateStatusBlock(state)
         HorizontalDivider()
 
-        Row(modifier = Modifier.fillMaxSize()) {
-            Column(modifier = Modifier.weight(3f)) {
-                Text("목록", modifier = Modifier.padding(start = 10.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall)
-                Panel(modifier = Modifier.fillMaxSize()) {
-                    ResultsList(state = state, onSelect = onSelectPrint, preferredLanguage = preferredLanguage)
+        if (twoPaneLandscape) {
+            Row(modifier = Modifier.fillMaxSize()) {
+                Column(modifier = Modifier.weight(4f).fillMaxSize()) {
+                    Text("목록", modifier = Modifier.padding(start = 10.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall)
+                    Panel(modifier = Modifier.fillMaxSize()) {
+                        ResultsList(state = state, onSelect = onSelectPrint, preferredLanguage = preferredLanguage)
+                    }
+                }
+
+                VerticalDivider(modifier = Modifier.width(1.dp))
+
+                Column(
+                    modifier = Modifier.weight(7f).fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Column(modifier = Modifier.weight(6f).fillMaxWidth()) {
+                        Text("이미지", modifier = Modifier.padding(start = 10.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall)
+                        Panel(modifier = Modifier.fillMaxSize()) {
+                            ImagePanel(state.imageState)
+                        }
+                    }
+
+                    Column(modifier = Modifier.weight(4f).fillMaxWidth()) {
+                        Text("효과", modifier = Modifier.padding(start = 10.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall)
+                        Panel(modifier = Modifier.fillMaxSize()) {
+                            DetailPanel(
+                                koText = state.detailKoText,
+                                jaText = state.detailJaText,
+                                preferredLanguage = preferredLanguage,
+                                scrollable = true,
+                            )
+                        }
+                    }
                 }
             }
-
-            VerticalDivider(modifier = Modifier.width(1.dp))
-
-            Column(modifier = Modifier.weight(6f)) {
-                Text("이미지", modifier = Modifier.padding(start = 10.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall)
-                Panel(modifier = Modifier.fillMaxSize()) {
-                    ImagePanel(state.imageState)
+        } else {
+            Row(modifier = Modifier.fillMaxSize()) {
+                Column(modifier = Modifier.weight(3f)) {
+                    Text("목록", modifier = Modifier.padding(start = 10.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall)
+                    Panel(modifier = Modifier.fillMaxSize()) {
+                        ResultsList(state = state, onSelect = onSelectPrint, preferredLanguage = preferredLanguage)
+                    }
                 }
-            }
 
-            VerticalDivider(modifier = Modifier.width(1.dp))
+                VerticalDivider(modifier = Modifier.width(1.dp))
 
-            Column(modifier = Modifier.weight(4f)) {
-                Text("효과", modifier = Modifier.padding(start = 10.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall)
-                Panel(modifier = Modifier.fillMaxSize()) {
-                    DetailPanel(
-                        koText = state.detailKoText,
-                        jaText = state.detailJaText,
-                        preferredLanguage = preferredLanguage,
-                        scrollable = true,
-                    )
+                Column(modifier = Modifier.weight(6f)) {
+                    Text("이미지", modifier = Modifier.padding(start = 10.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall)
+                    Panel(modifier = Modifier.fillMaxSize()) {
+                        ImagePanel(state.imageState)
+                    }
+                }
+
+                VerticalDivider(modifier = Modifier.width(1.dp))
+
+                Column(modifier = Modifier.weight(4f)) {
+                    Text("효과", modifier = Modifier.padding(start = 10.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall)
+                    Panel(modifier = Modifier.fillMaxSize()) {
+                        DetailPanel(
+                            koText = state.detailKoText,
+                            jaText = state.detailJaText,
+                            preferredLanguage = preferredLanguage,
+                            scrollable = true,
+                        )
+                    }
                 }
             }
         }
@@ -834,30 +1023,19 @@ private fun DetailPanel(
     preferredLanguage: PreferredLanguage,
     scrollable: Boolean,
 ) {
-    val koLines = remember(koText) {
-        mergeBrokenTagLines(
-            koText.lines()
-            .map { sanitizeDetailLine(it) }
-            .filter { it.isNotEmpty() }
-        )
-    }
-    val jaLines = remember(jaText) {
-        mergeBrokenTagLines(
-            jaText.lines()
-            .map { sanitizeDetailLine(it) }
-            .filter { it.isNotEmpty() }
-        )
-    }
+    val koLines = remember(koText) { splitDetailLines(koText, language = DetailTextLanguage.KOREAN) }
+    val jaLines = remember(jaText) { splitDetailLines(jaText, language = DetailTextLanguage.JAPANESE) }
 
     val hasKo = koLines.isNotEmpty()
     val hasJa = jaLines.isNotEmpty()
     val showJaFirst = !hasKo
+    val expandBoth = hasKo && hasJa && koLines.size <= 2 && jaLines.size >= 4
 
     var koExpanded by rememberSaveable(koText, jaText, preferredLanguage) {
-        mutableStateOf(hasKo && (!hasJa || preferredLanguage == PreferredLanguage.KOREAN))
+        mutableStateOf(hasKo && (expandBoth || !hasJa || preferredLanguage == PreferredLanguage.KOREAN))
     }
     var jaExpanded by rememberSaveable(koText, jaText, preferredLanguage) {
-        mutableStateOf(hasJa && (!hasKo || preferredLanguage == PreferredLanguage.JAPANESE))
+        mutableStateOf(hasJa && (expandBoth || !hasKo || preferredLanguage == PreferredLanguage.JAPANESE))
     }
 
     val contentModifier = if (scrollable) {
@@ -985,10 +1163,7 @@ private fun buildHighlightedTagText(text: String, highlightColor: androidx.compo
 private fun splitSectionLabel(line: String): Pair<String, String>? {
     val trimmed = line.trim()
     val separators = listOf(" ", ":", "：", "[", "(", "【")
-    for (label in SECTION_LABELS) {
-        if (label == "태그" || label == "タグ") {
-            continue
-        }
+    for (label in SECTION_LABELS_SORTED) {
         if (trimmed == label) {
             return label to ""
         }
@@ -1050,6 +1225,169 @@ private fun mergeBrokenTagLines(lines: List<String>): List<String> {
     return output
 }
 
+private fun splitDetailLines(text: String, language: DetailTextLanguage): List<String> {
+    val payload = when (language) {
+        DetailTextLanguage.KOREAN -> prettifyKoDetailText(text)
+        DetailTextLanguage.JAPANESE -> prettifyJaDetailText(text)
+    }
+    val lines = payload.lines()
+        .map(::sanitizeDetailLine)
+        .map(::normalizeInlineWhitespace)
+        .filter { it.isNotEmpty() }
+
+    return mergeBrokenTagLines(lines)
+}
+
+private fun prettifyKoDetailText(text: String): String {
+    return prettifyDetailText(
+        text = text,
+        replacements = KO_DETAIL_REPLACEMENTS,
+        sectionMarkerRegex = KO_SECTION_MARKER_REGEX,
+        lineBreakPatterns = KO_LINE_BREAK_PATTERNS,
+        tagLabel = "태그",
+        metadataTokens = KO_METADATA_TOKEN_SET,
+        stripJapaneseChars = true,
+    )
+}
+
+private fun prettifyJaDetailText(text: String): String {
+    return prettifyDetailText(
+        text = text,
+        replacements = JA_DETAIL_REPLACEMENTS,
+        sectionMarkerRegex = JA_SECTION_MARKER_REGEX,
+        lineBreakPatterns = JA_LINE_BREAK_PATTERNS,
+        tagLabel = "タグ",
+        metadataTokens = JA_METADATA_TOKEN_SET,
+    )
+}
+
+private fun prettifyDetailText(
+    text: String,
+    replacements: List<Pair<String, String>>,
+    sectionMarkerRegex: Regex,
+    lineBreakPatterns: List<Pair<Regex, String>>,
+    tagLabel: String,
+    metadataTokens: Set<String>,
+    stripJapaneseChars: Boolean = false,
+): String {
+    var normalized = text.trim()
+    if (normalized.isEmpty()) {
+        return ""
+    }
+
+    replacements.forEach { (before, after) ->
+        normalized = normalized.replace(before, after)
+    }
+    if (stripJapaneseChars) {
+        normalized = JAPANESE_CHAR_REGEX.replace(normalized, " ")
+    }
+
+    var lines = normalized.lines()
+        .map(::normalizeInlineWhitespace)
+        .filter { it.isNotEmpty() }
+
+    if (lines.size <= 2) {
+        var merged = normalizeInlineWhitespace(lines.joinToString(" "))
+        val marker = sectionMarkerRegex.find(merged)
+        if (marker != null && marker.range.first > 0) {
+            merged = merged.substring(marker.range.first)
+        }
+
+        lineBreakPatterns.forEach { (pattern, replacement) ->
+            merged = merged.replace(pattern, replacement)
+        }
+
+        lines = merged.lines()
+            .map(::normalizeInlineWhitespace)
+            .filter { it.isNotEmpty() }
+    }
+
+    val expanded = mutableListOf<String>()
+    for (line in lines) {
+        val hashIdx = line.indexOf('#')
+        if (hashIdx > 0) {
+            val prefix = normalizeInlineWhitespace(line.substring(0, hashIdx))
+            val tags = normalizeInlineWhitespace(line.substring(hashIdx))
+            if (prefix.isNotEmpty()) {
+                expanded += prefix
+            }
+            if (tags.isNotEmpty()) {
+                expanded += tags
+            }
+        } else {
+            expanded += line
+        }
+    }
+
+    val markerIndex = expanded.indexOfFirst { it.startsWith("#") || splitSectionLabel(it) != null }
+    val trimmed = if (markerIndex >= 0) expanded.drop(markerIndex) else expanded
+    val filtered = trimmed.filterNot { isNoiseMetadataLine(it, metadataTokens) }
+
+    val result = mutableListOf<String>()
+    for (line in filtered) {
+        if (line.startsWith("#")) {
+            if (result.lastOrNull() != tagLabel) {
+                result += tagLabel
+            }
+            result += normalizeTagLine(line)
+            continue
+        }
+
+        if (line == tagLabel && result.lastOrNull() == tagLabel) {
+            continue
+        }
+        if (line in SECTION_LABELS && result.lastOrNull() == line) {
+            continue
+        }
+        result += line
+    }
+
+    return result.joinToString("\n")
+}
+
+private fun normalizeInlineWhitespace(text: String): String {
+    return text.replace(Regex("\\s+"), " ").trim()
+}
+
+private fun normalizeTagLine(line: String): String {
+    val tags = TAG_TOKEN_REGEX.findAll(line).map { it.value }.toList()
+    if (tags.isEmpty()) {
+        return normalizeInlineWhitespace(line)
+    }
+
+    var tail = line
+    for (tag in tags) {
+        tail = tail.replace(tag, " ")
+    }
+    val remainder = normalizeInlineWhitespace(tail)
+    return if (remainder.isEmpty()) {
+        tags.joinToString(" ")
+    } else {
+        "${tags.joinToString(" ")} $remainder"
+    }
+}
+
+private fun isNoiseMetadataLine(line: String, metadataTokens: Set<String>): Boolean {
+    val normalized = normalizeInlineWhitespace(line)
+    if (normalized.isEmpty()) {
+        return true
+    }
+
+    val lowered = normalized.lowercase(Locale.ROOT)
+    if (Regex("^(hp\\s*\\d{2,3}|(1st|2nd)\\s*\\d{2,3})$").matches(lowered)) {
+        return true
+    }
+
+    val tokens = lowered.split(" ").filter { it.isNotBlank() }
+    if (tokens.isNotEmpty() && tokens.all { token ->
+            token in metadataTokens || Regex("^\\d{2,3}$").matches(token)
+        }) {
+        return true
+    }
+
+    return false
+}
+
 @Composable
 private fun ThemeModeItem(
     mode: AppThemeMode,
@@ -1103,6 +1441,19 @@ private fun scaledHeightDp(ratio: Float, minPx: Int, maxPx: Int): Dp {
     val config = androidx.compose.ui.platform.LocalConfiguration.current
     val scaled = (config.screenHeightDp * ratio).roundToInt()
     return scaled.coerceIn(minPx, maxPx).dp
+}
+
+private fun snappedListHeightDp(rawHeight: Dp): Dp {
+    val panelVerticalPadding = 20
+    val rowHeight = 38
+    val rowSpacing = 4
+    val rowStride = rowHeight + rowSpacing
+
+    val raw = rawHeight.value.roundToInt()
+    val available = (raw - panelVerticalPadding + rowSpacing).coerceAtLeast(rowStride)
+    val fullRows = (available / rowStride).coerceAtLeast(1)
+    val snappedInner = fullRows * rowStride - rowSpacing
+    return (snappedInner + panelVerticalPadding).dp
 }
 
 private fun Modifier.clearFocusOnTap(focusManager: FocusManager): Modifier {

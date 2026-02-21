@@ -20,31 +20,61 @@ class DbRepository(private val paths: AppPaths) {
         val imageUrl: String,
     )
 
+    private data class DbFingerprint(
+        val path: String,
+        val size: Long,
+        val modifiedAtMillis: Long,
+    )
+
+    private data class DbHealthCache(
+        val fingerprint: DbFingerprint,
+        val needsUpdate: Boolean,
+    )
+
+    private data class SchemaCache(
+        val fingerprint: DbFingerprint,
+        val tableColumns: MutableMap<String, Set<String>> = mutableMapOf(),
+        var tagJoinResolved: Boolean = false,
+        var tagJoinSql: String? = null,
+    )
+
+    @Volatile
+    private var dbHealthCache: DbHealthCache? = null
+
+    @Volatile
+    private var schemaCache: SchemaCache? = null
+
     fun needsDbUpdate(): Boolean {
-        val dbFile = paths.dbFile
-        if (!dbFile.exists() || !dbFile.isFile || dbFile.length() <= 0L) {
+        val fingerprint = dbFingerprint()
+        if (fingerprint == null) {
+            clearCaches()
             return true
         }
 
-        return try {
+        cachedNeedsDbUpdate(fingerprint)?.let { return it }
+
+        val needsUpdate = try {
             openReadOnly().useDb { db ->
                 if (!tableExists(db, "prints")) {
                     true
                 } else {
-                    val cols = tableColumns(db, "prints")
+                    val cols = tableColumns(db, "prints", fingerprint)
                     val required = setOf("print_id", "card_number", "name_ja", "image_url")
                     if (!cols.containsAll(required)) {
                         return@useDb true
                     }
-                    val count = db.rawQuery("SELECT COUNT(1) FROM prints", null).useCursor { cursor ->
-                        if (cursor.moveToFirst()) cursor.getLong(0) else 0L
+                    val hasRows = db.rawQuery("SELECT 1 FROM prints LIMIT 1", null).useCursor { cursor ->
+                        cursor.moveToFirst()
                     }
-                    count <= 0L
+                    !hasRows
                 }
             }
         } catch (_: Throwable) {
             true
         }
+
+        storeNeedsDbUpdate(fingerprint, needsUpdate)
+        return needsUpdate
     }
 
     fun querySuggest(query: String, limit: Int? = null): List<PrintRow> {
@@ -59,7 +89,8 @@ class DbRepository(private val paths: AppPaths) {
 
         return try {
             openReadOnly().useDb { db ->
-                val joins = buildTagJoinSql(db)
+                val sessionFingerprint = dbFingerprint()
+                val joins = buildTagJoinSql(db, sessionFingerprint)
                 if (joins != null) {
                     val params = mutableListOf(like, like, like, like, like, like)
                     val sql = buildString {
@@ -170,7 +201,8 @@ class DbRepository(private val paths: AppPaths) {
 
         return try {
             openReadOnly().useDb { db ->
-                val joins = buildTagJoinSql(db)
+                val sessionFingerprint = dbFingerprint()
+                val joins = buildTagJoinSql(db, sessionFingerprint)
                 if (joins != null) {
                     val params = mutableListOf(q, q, q, q, q)
                     val sql = buildString {
@@ -350,7 +382,8 @@ class DbRepository(private val paths: AppPaths) {
     fun loadCardDetail(printId: Long): CardDetail? {
         return try {
             openReadOnly().useDb { db ->
-                val jaColumns = tableColumns(db, "card_texts_ja")
+                val sessionFingerprint = dbFingerprint()
+                val jaColumns = tableColumns(db, "card_texts_ja", sessionFingerprint)
                 val hasJaEffectText = jaColumns.contains("effect_text")
                 val sql = if (hasJaEffectText) {
                     """
@@ -379,14 +412,77 @@ class DbRepository(private val paths: AppPaths) {
                     if (!cursor.moveToFirst()) {
                         return@useCursor null
                     }
+
+                    val koTextRaw = cursor.getStringOrEmpty("ko_text")
+                    val jaTextRaw = cursor.getStringOrEmpty("ja_text")
+                    val tags = loadTagsForPrint(db, printId, sessionFingerprint)
+
                     CardDetail(
-                        koText = cursor.getStringOrEmpty("ko_text"),
-                        jaText = cursor.getStringOrEmpty("ja_text"),
+                        koText = appendTagsIfNeeded(koTextRaw, tags, "태그"),
+                        jaText = appendTagsIfNeeded(jaTextRaw, tags, "タグ"),
                     )
                 }
             }
         } catch (_: Throwable) {
             null
+        }
+    }
+
+    private fun loadTagsForPrint(
+        db: SQLiteDatabase,
+        printId: Long,
+        fingerprint: DbFingerprint? = null,
+    ): List<String> {
+        val tagJoinSql = buildTagJoinSql(db, fingerprint) ?: return emptyList()
+        return db.rawQuery(
+            """
+            SELECT COALESCE(t.tag,'') AS tag
+            FROM prints p
+            $tagJoinSql
+            WHERE p.print_id=?
+            ORDER BY t.tag
+            """.trimIndent(),
+            arrayOf(printId.toString()),
+        ).useCursor { cursor ->
+            val out = LinkedHashSet<String>()
+            while (cursor.moveToNext()) {
+                var tag = cursor.getStringOrEmpty("tag").trim()
+                if (tag.isEmpty()) continue
+                if (!tag.startsWith("#")) {
+                    tag = "#$tag"
+                }
+                out += tag
+            }
+            out.toList()
+        }
+    }
+
+    private fun appendTagsIfNeeded(text: String, tags: List<String>, sectionLabel: String): String {
+        if (tags.isEmpty()) {
+            return text
+        }
+
+        val existingTags = text
+            .split(Regex("\\s+"))
+            .map { it.trim() }
+            .filter { it.startsWith("#") }
+            .toSet()
+
+        if (existingTags.isNotEmpty()) {
+            return text
+        }
+
+        val missing = tags.filterNot(existingTags::contains)
+        if (missing.isEmpty()) {
+            return text
+        }
+
+        val normalized = text.trim()
+        val tagLine = missing.joinToString(" ")
+        return if (normalized.isEmpty()) {
+            "$sectionLabel\n$tagLine"
+        } else {
+            "$normalized\n$sectionLabel\n$tagLine"
         }
     }
 
@@ -488,6 +584,56 @@ class DbRepository(private val paths: AppPaths) {
         }.getOrNull()
     }
 
+    private fun dbFingerprint(): DbFingerprint? {
+        val dbFile = paths.dbFile
+        if (!dbFile.exists() || !dbFile.isFile) {
+            return null
+        }
+        val size = dbFile.length()
+        if (size <= 0L) {
+            return null
+        }
+        return DbFingerprint(
+            path = dbFile.absolutePath,
+            size = size,
+            modifiedAtMillis = dbFile.lastModified(),
+        )
+    }
+
+    @Synchronized
+    private fun clearCaches() {
+        dbHealthCache = null
+        schemaCache = null
+    }
+
+    @Synchronized
+    private fun cachedNeedsDbUpdate(fingerprint: DbFingerprint): Boolean? {
+        val cache = dbHealthCache
+        if (cache != null && cache.fingerprint == fingerprint) {
+            return cache.needsUpdate
+        }
+        return null
+    }
+
+    @Synchronized
+    private fun storeNeedsDbUpdate(fingerprint: DbFingerprint, needsUpdate: Boolean) {
+        dbHealthCache = DbHealthCache(fingerprint = fingerprint, needsUpdate = needsUpdate)
+    }
+
+    @Synchronized
+    private fun schemaCacheFor(fingerprint: DbFingerprint): SchemaCache {
+        val cache = schemaCache
+        if (cache != null && cache.fingerprint == fingerprint) {
+            return cache
+        }
+        val fresh = SchemaCache(fingerprint = fingerprint)
+        schemaCache = fresh
+        if (dbHealthCache?.fingerprint != fingerprint) {
+            dbHealthCache = null
+        }
+        return fresh
+    }
+
     private fun queryRows(
         db: SQLiteDatabase,
         sql: String,
@@ -507,23 +653,46 @@ class DbRepository(private val paths: AppPaths) {
         }
     }
 
-    private fun buildTagJoinSql(db: SQLiteDatabase): String? {
-        val ptCols = tableColumns(db, "print_tags")
-        val tagCols = tableColumns(db, "tags")
+    private fun buildTagJoinSql(
+        db: SQLiteDatabase,
+        fingerprint: DbFingerprint? = null,
+    ): String? {
+        val cacheFingerprint = fingerprint ?: dbFingerprint()
+        if (cacheFingerprint != null) {
+            val cached = synchronized(this) {
+                val cache = schemaCacheFor(cacheFingerprint)
+                cache.tagJoinResolved to cache.tagJoinSql
+            }
+            if (cached.first) {
+                return cached.second
+            }
+        }
 
-        if (ptCols.contains("tag") && tagCols.contains("tag")) {
-            return """
+        val ptCols = tableColumns(db, "print_tags", cacheFingerprint)
+        val tagCols = tableColumns(db, "tags", cacheFingerprint)
+
+        val resolved = if (ptCols.contains("tag") && tagCols.contains("tag")) {
+            """
                 LEFT JOIN print_tags pt ON pt.print_id = p.print_id
                 LEFT JOIN tags t ON t.tag = pt.tag
             """.trimIndent()
-        }
-        if (ptCols.contains("tag_id") && tagCols.contains("tag_id")) {
-            return """
+        } else if (ptCols.contains("tag_id") && tagCols.contains("tag_id")) {
+            """
                 LEFT JOIN print_tags pt ON pt.print_id = p.print_id
                 LEFT JOIN tags t ON t.tag_id = pt.tag_id
             """.trimIndent()
+        } else {
+            null
         }
-        return null
+
+        if (cacheFingerprint != null) {
+            synchronized(this) {
+                val cache = schemaCacheFor(cacheFingerprint)
+                cache.tagJoinResolved = true
+                cache.tagJoinSql = resolved
+            }
+        }
+        return resolved
     }
 
     private fun tableExists(db: SQLiteDatabase, table: String): Boolean {
@@ -533,8 +702,20 @@ class DbRepository(private val paths: AppPaths) {
         ).useCursor { cursor -> cursor.moveToFirst() }
     }
 
-    private fun tableColumns(db: SQLiteDatabase, table: String): Set<String> {
-        return db.rawQuery("PRAGMA table_info($table)", null).useCursor { cursor ->
+    private fun tableColumns(
+        db: SQLiteDatabase,
+        table: String,
+        fingerprint: DbFingerprint? = null,
+    ): Set<String> {
+        val cacheFingerprint = fingerprint ?: dbFingerprint()
+        if (cacheFingerprint != null) {
+            val cached = synchronized(this) { schemaCacheFor(cacheFingerprint).tableColumns[table] }
+            if (cached != null) {
+                return cached
+            }
+        }
+
+        val columns = db.rawQuery("PRAGMA table_info($table)", null).useCursor { cursor ->
             val out = mutableSetOf<String>()
             while (cursor.moveToNext()) {
                 val name = cursor.getStringOrEmpty("name")
@@ -544,6 +725,13 @@ class DbRepository(private val paths: AppPaths) {
             }
             out
         }
+
+        if (cacheFingerprint != null) {
+            synchronized(this) {
+                schemaCacheFor(cacheFingerprint).tableColumns[table] = columns
+            }
+        }
+        return columns
     }
 
     private fun sqlNormalizeExpr(column: String): String {

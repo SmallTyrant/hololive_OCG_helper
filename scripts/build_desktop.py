@@ -13,7 +13,9 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_MAIN = ROOT / "app" / "main.py"
+APP_PACKAGE_NAME = "hOCG_H"
 PNG_ICON = ROOT / "app" / "app_icon.png"
+IOS_PNG_ICON = ROOT / "app" / "assets" / "icon_ios.png"
 ICO_ICON = ROOT / "app" / "app_icon.ico"
 ICNS_ICON = ROOT / "app" / "app_icon.icns"
 ICONSET_DIR = ROOT / "app" / "icon.iconset"
@@ -22,6 +24,23 @@ ICONSET_DIR = ROOT / "app" / "icon.iconset"
 def run_command(command: list[str]) -> None:
     print("+", " ".join(str(part) for part in command))
     subprocess.run(command, cwd=ROOT, check=True)
+
+
+def run_flet_pack(icon: Path) -> None:
+    run_command(
+        [
+            "flet",
+            "pack",
+            str(APP_MAIN),
+            "--icon",
+            str(icon),
+            "--name",
+            APP_PACKAGE_NAME,
+            "--product-name",
+            APP_PACKAGE_NAME,
+            "--yes",
+        ]
+    )
 
 
 def ensure_windows_icon() -> Path:
@@ -41,8 +60,9 @@ def ensure_windows_icon() -> Path:
 
 
 def ensure_macos_icon() -> Path:
-    if not PNG_ICON.exists():
-        raise FileNotFoundError(f"PNG 아이콘 파일이 없습니다: {PNG_ICON}")
+    icon_source = IOS_PNG_ICON if IOS_PNG_ICON.exists() else PNG_ICON
+    if not icon_source.exists():
+        raise FileNotFoundError(f"PNG 아이콘 파일이 없습니다: {icon_source}")
 
     if ICONSET_DIR.exists():
         shutil.rmtree(ICONSET_DIR)
@@ -61,7 +81,7 @@ def ensure_macos_icon() -> Path:
         (1024, "icon_512x512@2x.png"),
     ]
 
-    with Image.open(PNG_ICON) as img:
+    with Image.open(icon_source) as img:
         if img.mode not in ("RGBA", "RGB"):
             img = img.convert("RGBA")
         for size, name in icon_sizes:
@@ -78,7 +98,7 @@ def build_windows() -> None:
         raise RuntimeError("Windows .exe 빌드는 Windows 환경에서만 가능합니다.")
 
     icon = ensure_windows_icon()
-    run_command(["flet", "pack", str(APP_MAIN), "--icon", str(icon)])
+    run_flet_pack(icon)
 
 
 def build_macos() -> None:
@@ -86,7 +106,7 @@ def build_macos() -> None:
         raise RuntimeError("macOS .app 빌드는 macOS 환경에서만 가능합니다.")
 
     icon = ensure_macos_icon()
-    run_command(["flet", "pack", str(APP_MAIN), "--icon", str(icon)])
+    run_flet_pack(icon)
 
 
 def parse_args() -> argparse.Namespace:
