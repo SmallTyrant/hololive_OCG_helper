@@ -3,6 +3,14 @@
 실행 가능한 Android Studio/Gradle 프로젝트입니다.
 실제 앱 로직은 `/Users/perlihite/Desktop/hololive_OCG_helper/mobile/android/native/src/main/java`를 소스셋으로 직접 참조합니다.
 
+## 빌드 게이트 (권장)
+루트 경로에서 먼저 실행하세요.
+```bash
+python3 scripts/mobile_build_gate.py --target android
+```
+
+- 위 게이트는 `mobile/android/native/src/main/java` 누락과 런처 Activity 클래스 누락을 즉시 `NO-GO`로 차단합니다.
+
 ## 빌드
 ```bash
 cd /Users/perlihite/Desktop/hololive_OCG_helper/mobile/android/native-app

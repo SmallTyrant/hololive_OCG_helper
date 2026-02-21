@@ -39,9 +39,18 @@
 - [Android 안내](./android/README.md)
 - [iOS 안내](./ios/README.md)
 
-## 네이티브 소스 레퍼런스
-- Android Kotlin: [./android/native](./android/native)
-- iOS Swift: [./ios/native](./ios/native)
+## 빌드 게이트
+루트 경로에서 아래 명령으로 Android/iOS 빌드 게이트를 동시에 실행할 수 있습니다.
+
+```bash
+python3 scripts/mobile_build_gate.py --target all
+```
+
+- 게이트는 Android/iOS 런타임 소스 경로 누락, 엔트리포인트 누락, 버전 불일치, 기본 빌드 헬스 체크를 `NO-GO`로 차단합니다.
+
+## 런타임 소스 경로(필수)
+- Android Kotlin: `mobile/android/native/src/main/java`
+- iOS Swift: `mobile/ios/native/Sources/HocgNative`
 
 ## 실행 가능한 네이티브 프로젝트
 - Android app project: [./android/native-app](./android/native-app)

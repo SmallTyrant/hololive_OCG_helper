@@ -3,6 +3,14 @@
 실행 가능한 Xcode 프로젝트입니다.
 실제 앱 로직은 `/Users/perlihite/Desktop/hololive_OCG_helper/mobile/ios/native/Sources/HocgNative`를 직접 참조합니다.
 
+## 빌드 게이트 (권장)
+루트 경로에서 먼저 실행하세요.
+```bash
+python3 scripts/mobile_build_gate.py --target ios
+```
+
+- 위 게이트는 `mobile/ios/native/Sources/HocgNative` 누락과 Swift 소스 파일 누락을 즉시 `NO-GO`로 차단합니다.
+
 ## 프로젝트 재생성
 ```bash
 cd /Users/perlihite/Desktop/hololive_OCG_helper/mobile/ios/native-app
@@ -98,5 +106,5 @@ TESTFLIGHT_WHATS_NEW="버그 수정" \
 ```
 
 ## DB 번들 처리
-- 빌드 단계에서 `data/hololive_ocg.sqlite`를 앱 번들 `Data/hololive_ocg.sqlite`로 복사합니다.
+- 빌드 단계에서 레거시 DB 경로(`hololive_ocg.sqlite`, `Data/hololive_ocg.sqlite`)를 제거하며 자동 복사는 비활성화되어 있습니다.
 - 저장소 정책상 DB 파일은 커밋하지 않습니다.

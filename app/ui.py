@@ -62,6 +62,7 @@ SECTION_LABELS = (
 SECTION_LABELS_SORTED = tuple(sorted(SECTION_LABELS, key=len, reverse=True))
 JAPANESE_CHAR_RE = re.compile(r"[\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff々〆ヵヶ]")
 TAG_ONLY_LINE_RE = re.compile(r"^(?:#[^\s#]+(?:\s+|$))+(?:[A-Za-z0-9가-힣]+(?:\s+[A-Za-z0-9가-힣]+)*)?$")
+JA_TAG_OBJECT_SPLIT_RE = re.compile(r"^(#[^\s#を]+(?:\s+[^\s#を]+)*)(を.+)$")
 KO_SECTION_MARKER_RE = re.compile(
     r"SP 오시 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\s+[A-Za-z가-힣])|#"
 )
@@ -103,6 +104,18 @@ def _expand_tag_lines(lines: list[str], tag_label: str) -> list[str]:
             expanded.append(line)
             continue
 
+        line_ja_split = JA_TAG_OBJECT_SPLIT_RE.match(line)
+        if line_ja_split:
+            expanded.append(tag_label)
+            expanded.append(normalize_inline_ws(line_ja_split.group(1)))
+            tail = normalize_inline_ws(line_ja_split.group(2))
+            if tail:
+                if "#" in tail:
+                    expanded.extend(_expand_tag_lines([tail], tag_label))
+                else:
+                    expanded.append(tail)
+            continue
+
         if TAG_ONLY_LINE_RE.fullmatch(line):
             expanded.append(tag_label)
             expanded.append(line)
@@ -115,7 +128,19 @@ def _expand_tag_lines(lines: list[str], tag_label: str) -> list[str]:
 
         prefix_text = normalize_inline_ws(prefix)
         tag_text = normalize_inline_ws("#" + suffix)
-        if prefix_text and TAG_ONLY_LINE_RE.fullmatch(tag_text):
+        ja_split = JA_TAG_OBJECT_SPLIT_RE.match(tag_text)
+        if ja_split:
+            if prefix_text:
+                expanded.append(prefix_text)
+            expanded.append(tag_label)
+            expanded.append(normalize_inline_ws(ja_split.group(1)))
+            tail = normalize_inline_ws(ja_split.group(2))
+            if tail:
+                if "#" in tail:
+                    expanded.extend(_expand_tag_lines([tail], tag_label))
+                else:
+                    expanded.append(tail)
+        elif prefix_text and TAG_ONLY_LINE_RE.fullmatch(tag_text):
             expanded.append(prefix_text)
             expanded.append(tag_label)
             expanded.append(tag_text)
@@ -158,7 +183,7 @@ def _prettify_detail_text(
     if len(lines) <= 2:
         merged = normalize_inline_ws(" ".join(lines) if lines else normalized)
         marker = section_marker_re.search(merged)
-        if marker and marker.start() > 0:
+        if marker and marker.start() > 0 and marker.group() != "#":
             merged = merged[marker.start():]
 
         for pattern, replacement in section_break_rules:

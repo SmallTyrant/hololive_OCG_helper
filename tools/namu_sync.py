@@ -105,23 +105,49 @@ def ensure_table(conn: sqlite3.Connection) -> None:
     pass
 
 
-def upsert_ko(conn: sqlite3.Connection, print_id: int, title: str, content: str) -> None:
+def has_source_column(conn: sqlite3.Connection) -> bool:
+    rows = conn.execute("PRAGMA table_info(card_texts_ko)").fetchall()
+    return any((row[1] or "") == "source" for row in rows)
+
+
+def upsert_ko(
+    conn: sqlite3.Connection,
+    print_id: int,
+    title: str,
+    content: str,
+    *,
+    include_source: bool,
+) -> None:
     ts = now_iso()
     # keep memo as full content; effect_text as short summary
     summary = content[:1000]
-    conn.execute(
-        """
-        INSERT INTO card_texts_ko(print_id, name, effect_text, memo, source, updated_at)
-        VALUES(?, ?, ?, ?, 'namuwiki', ?)
-        ON CONFLICT(print_id) DO UPDATE SET
-          name=excluded.name,
-          effect_text=excluded.effect_text,
-          memo=excluded.memo,
-          source=excluded.source,
-          updated_at=excluded.updated_at
-        """,
-        (print_id, title, summary, content, ts),
-    )
+    if include_source:
+        conn.execute(
+            """
+            INSERT INTO card_texts_ko(print_id, name, effect_text, memo, source, updated_at)
+            VALUES(?, ?, ?, ?, 'namuwiki', ?)
+            ON CONFLICT(print_id) DO UPDATE SET
+              name=excluded.name,
+              effect_text=excluded.effect_text,
+              memo=excluded.memo,
+              source=excluded.source,
+              updated_at=excluded.updated_at
+            """,
+            (print_id, title, summary, content, ts),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO card_texts_ko(print_id, name, effect_text, memo, updated_at)
+            VALUES(?, ?, ?, ?, ?)
+            ON CONFLICT(print_id) DO UPDATE SET
+              name=excluded.name,
+              effect_text=excluded.effect_text,
+              memo=excluded.memo,
+              updated_at=excluded.updated_at
+            """,
+            (print_id, title, summary, content, ts),
+        )
 
 
 def main() -> int:
@@ -137,6 +163,7 @@ def main() -> int:
     conn = sqlite3.connect(args.db)
     conn.row_factory = sqlite3.Row
     ensure_table(conn)
+    include_source = has_source_column(conn)
 
     rows = conn.execute(
         "SELECT print_id, card_number FROM prints ORDER BY print_id"
@@ -153,12 +180,20 @@ def main() -> int:
             continue
 
         if not args.force:
-            existing = conn.execute(
-                "SELECT source FROM card_texts_ko WHERE print_id=?",
-                (print_id,),
-            ).fetchone()
-            if existing and (existing["source"] or "") == "namuwiki":
-                continue
+            if include_source:
+                existing = conn.execute(
+                    "SELECT source FROM card_texts_ko WHERE print_id=?",
+                    (print_id,),
+                ).fetchone()
+                if existing and (existing["source"] or "") == "namuwiki":
+                    continue
+            else:
+                existing = conn.execute(
+                    "SELECT 1 FROM card_texts_ko WHERE print_id=?",
+                    (print_id,),
+                ).fetchone()
+                if existing:
+                    continue
 
         search_url = search_page_url(card_no, args.search_url)
         try:
@@ -175,7 +210,7 @@ def main() -> int:
                 print(f"[SKIP] {card_no} empty content")
                 continue
 
-            upsert_ko(conn, print_id, title or card_no, content)
+            upsert_ko(conn, print_id, title or card_no, content, include_source=include_source)
             conn.commit()
             processed += 1
             print(f"[OK] {card_no} -> {title}")

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$PROJECT_DIR/../../.." && pwd)"
 SCHEME="HocgNative"
 TEAM_ID="${TEAM_ID:-}"
 BUNDLE_ID="${BUNDLE_ID:-com.smalltyrant.hocg.native}"
@@ -15,6 +16,9 @@ if [[ -z "$TEAM_ID" ]]; then
 fi
 
 cd "$PROJECT_DIR"
+
+echo "[0/3] Preflight build gate"
+python3 "$REPO_ROOT/scripts/mobile_build_gate.py" --target ios --preflight-only
 
 echo "[1/3] Build signed iOS app (Release, iphoneos)"
 xcodebuild \
