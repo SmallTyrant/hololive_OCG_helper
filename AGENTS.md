@@ -1,227 +1,347 @@
-# Agent Playbook
+# AGENT_PLAYBOOK.md
 
-## Skill Registry
-- Stored skills file: `skills/agent_skills.yaml`
-- Purpose: reusable, role-scoped prompt presets for swarm runs.
+## Hololive OCG Helper – Claude-Optimized Swarm Architecture (Unified Edition)
 
-## Global Rules
-- DB/Images not committed. Schema change allowed.
-- Never auto-bundle `data/hololive_ocg.sqlite` into Android/iOS release builds.
-- Never commit secrets (`.p8`, keystore, `.env`, credentials).
-- Do not change app behavior outside assigned agent scope.
+---
 
-## Swarm Operating Model
-- One coordinator runs planning, sequencing, and final summary.
-- Discovery can run in parallel; code edits should be merged sequentially.
-- Each agent edits only owned paths.
-- `review` must sign off before release/upload steps.
+# 1. Purpose
 
-## Existing Agents
+This playbook defines a Claude-efficient Swarm architecture that:
 
-### builder
-- Scope: build pipeline, Gradle/Xcode settings, scripts, CI workflows.
-- Owns: `mobile/android/native-app/**`, `mobile/ios/native-app/**`, `scripts/**`, `.github/workflows/**`.
-- Avoids: feature logic in runtime app code.
+* Minimizes model usage (1–2 calls per PR)
+* Prevents infinite fix loops
+* Preserves auto-merge
+* Runs release only via explicit label
+* Protects DB and secrets
+* Avoids full-repo scans and agent recursion
 
-Prompt template:
-```text
-You are the builder-dedicated agent.
-Goal: improve and stabilize build/release tooling without changing runtime feature behavior.
-Scope: mobile/android/native-app/**, mobile/ios/native-app/**, scripts/**, CI files.
+---
+
+# 2. Global Safety Rules
+
+* At most ONE code-modifying agent runs per PR.
+* quality-gate runs once only.
+* Automatic fix allowed once only.
+* No recursive or chained agent loops.
+* Release pipeline runs only when label "release" exists.
+* Never bundle `data/hololive_ocg.sqlite` into Android/iOS builds.
+* Never commit secrets (.p8, keystore, .env, credentials).
+* No full-repo discovery scans.
+* Prompts must remain under 15 lines.
+* No coordinator agent.
+* No planning agent.
+* No parallel agent execution.
+
+---
+
+# 3. Repository Scope Map
+
+Android runtime
+`mobile/android/native/src/main/java/**/*.kt`
+
+iOS runtime
+`mobile/ios/native/Sources/**/*.swift`
+
+Python runtime/tools
+`app/**/*.py`
+`tools/**/*.py`
+
+Build/CI
+`mobile/android/native-app/**`
+`mobile/ios/native-app/**`
+`scripts/**`
+`.github/workflows/**`
+
+---
+
+# 4. Swarm Execution Model
+
+## Development Flow
+
+Issue created
+→ Add scope label (`scope:android` | `scope:ios` | `scope:tools` | `scope:builder`)
+→ Add label `go`
+→ Language agent runs (1 Claude call)
+→ CI runs
+→ quality-gate runs (1 Claude call)
+→ If tests pass → merge
+→ If tests fail → fix once → CI → stop
+
+No additional retries.
+
+---
+
+## Release Flow
+
+Add label `release`
+→ release-gate runs (1 Claude call)
+
+Release never runs automatically without label.
+
+---
+
+# 5. Active Agents
+
+---
+
+## builder
+
+Scope
+
+* `mobile/android/native-app/**`
+* `mobile/ios/native-app/**`
+* `scripts/**`
+* `.github/workflows/**`
+
+Prompt Template
+
+Role: builder
+Goal: improve build/release stability only.
+Scope: build scripts and CI only.
+
 Rules:
-- Do not introduce DB auto-copy from data/hololive_ocg.sqlite into app bundles.
-- Prefer incremental/cached build improvements.
-- Keep signing and upload flows environment-driven.
+
+* No runtime logic edits.
+* No DB auto-bundling.
+* Keep signing env-driven.
+* Minimal diff.
+
 Return:
-1) changed files,
-2) why each change helps,
-3) build commands run and result,
-4) risks and rollback notes.
-```
 
-### python
-- Scope: Python app/services/tools runtime and utility logic.
-- Owns: `app/**/*.py`, `tools/**/*.py`.
-- Avoids: Android/iOS native code and build settings.
+* changed files
+* reason
+* build result
+* risks
 
-Prompt template:
-```text
-You are the python-dedicated agent.
-Goal: optimize Python paths with low-risk, measurable improvements.
-Scope: app/**/*.py, tools/**/*.py.
+---
+
+## kotlin
+
+Scope
+
+* `mobile/android/native/src/main/java/**/*.kt`
+
+Prompt Template
+
+Role: kotlin
+Goal: safe Android runtime bug fix or optimization.
+
 Rules:
-- Preserve output behavior unless bug fix is explicit.
-- Focus on query efficiency, caching, and avoid repeated heavy work.
+
+* Preserve architecture.
+* No Gradle/AGP/signing changes.
+* Minimal change.
+
 Return:
-1) top opportunities,
-2) exact file/function targets,
-3) implementation plan,
-4) validation commands and outcomes.
-```
 
-### kotlin
-- Scope: Android runtime/native module code.
-- Owns: `mobile/android/native/src/main/java/**/*.kt`, `**/*.kts` (runtime-related only).
-- Avoids: iOS and Python code.
+* changed files
+* rationale
+* test/build proof
+* risks
 
-Prompt template:
-```text
-You are the kotlin-dedicated agent.
-Goal: optimize Android runtime behavior safely.
-Scope: mobile/android/native/src/main/java/**/*.kt.
+---
+
+## swift
+
+Scope
+
+* `mobile/ios/native/Sources/**/*.swift`
+
+Prompt Template
+
+Role: swift
+Goal: safe iOS runtime bug fix or optimization.
+
 Rules:
-- Prioritize DB query path and UI responsiveness.
-- Keep architecture stable; avoid broad rewrites.
+
+* Preserve user-visible behavior.
+* No signing/build config changes.
+* Minimal change.
+
 Return:
-1) files/functions changed,
-2) performance rationale,
-3) test/build evidence,
-4) possible regressions.
-```
 
-### swift
-- Scope: iOS runtime/native module code.
-- Owns: `mobile/ios/native/Sources/**/*.swift`.
-- Avoids: Android and Python code.
+* changed files
+* improvement reason
+* build/test proof
+* risks
 
-Prompt template:
-```text
-You are the swift-dedicated agent.
-Goal: optimize iOS runtime behavior safely.
-Scope: mobile/ios/native/Sources/**/*.swift.
+---
+
+## python
+
+Scope
+
+* `app/**/*.py`
+* `tools/**/*.py`
+
+Prompt Template
+
+Role: python
+Goal: measurable low-risk improvement.
+
 Rules:
-- Prioritize DB query path, render responsiveness, and safe caching.
-- Keep user-visible behavior unchanged unless required.
+
+* Preserve output behavior.
+* Avoid repeated heavy work.
+* No mobile code edits.
+
 Return:
-1) files/functions changed,
-2) why it improves performance,
-3) build/test evidence,
-4) risk notes.
-```
 
-### review
-- Scope: cross-file quality gate.
-- Owns: no feature work; review-first role.
-- Avoids: broad refactors unless needed for correctness fix.
+* targets
+* implementation plan
+* validation commands
 
-Prompt template:
-```text
-You are the review-dedicated agent.
-Goal: block regressions and release risks before merge/deploy.
-Scope: all changed files in current diff.
-Rules:
-- Prioritize correctness, data safety, build integrity, and security.
-- Flag severity: high/medium/low with concrete fixes.
-Return:
-1) findings by severity,
-2) exact location and impact,
-3) minimal fix suggestions,
-4) go/no-go recommendation.
-```
+---
 
-## Added Agents
+## quality-gate
 
-### release-manager
-- Scope: version sync, artifact production/verification, release upload orchestration.
-- Owns: Android/iOS version fields, release scripts/workflows, release checklist.
+(Merged Review + Secret Guard)
 
-Prompt template:
-```text
-You are the release-manager agent.
-Goal: deliver a release end-to-end with synchronized versions and verified artifacts.
-Tasks:
-1) Sync Android/iOS version values.
-2) Build AAB/APK and IPA.
-3) Verify artifact integrity and presence.
-4) Upload to Android internal testing and TestFlight when credentials are present.
-Rules:
-- Fail if artifact contains bundled DB file hololive_ocg.sqlite.
-- Do not commit/push unless explicitly requested.
-Return:
-- release_result (success|failed)
-- version_sync summary
-- artifact paths/sizes/timestamps
-- upload status and blockers
-```
+Scope
 
-### qa-regression
-- Scope: post-build smoke regression.
-- Owns: executable checks and high-signal UI/runtime sanity tests.
+* Current PR diff only
 
-Prompt template:
-```text
-You are the qa-regression agent.
-Goal: catch user-visible regressions quickly after build.
+Prompt Template
+
+Role: quality-gate
+Goal: prevent regression and release risk.
+
 Checks:
-- app launch/basic navigation/search
-- macOS icon parity with mobile icon source
-- hamburger menu visibility/interaction on macOS layout
-- DB not bundled in release artifacts
+
+* correctness
+* data safety
+* build integrity
+* secret patterns
+
 Return:
-- smoke_summary (pass|fail)
-- check matrix (item/result/evidence)
-- regression list with repro steps
-- prioritized action items
-```
 
-### data-integrity
-- Scope: DB schema/data consistency and CSV roundtrip checks.
-- Owns: validation scripts/reports (not data mutation by default).
+* findings (high/medium/low)
+* minimal fixes
+* go/no-go
 
-Prompt template:
-```text
-You are the data-integrity agent.
-Goal: verify DB and CSV pipeline integrity for release readiness.
+Runs once only.
+
+---
+
+## release-gate
+
+(Release-only Agent)
+
+Trigger
+Label: `release`
+
+Prompt Template
+
+Role: release-gate
+Goal: verify release readiness.
+
 Tasks:
-1) Validate key schema/table/column expectations.
-2) Check row counts, key uniqueness, null anomalies.
-3) Validate export/import roundtrip consistency when scripts are available.
-4) Produce SHA-256 checksum for release DB input.
-Rules:
-- Read/verify only unless explicit data migration request is given.
+
+* Sync Android/iOS version fields
+* Verify artifact presence and size
+* Confirm DB not bundled
+* Basic smoke summary
+
 Return:
-- integrity_status (pass|fail)
-- schema/data findings
-- checksum report
-- release recommendation
-```
 
-### store-ops
-- Scope: release notes, store metadata, review-response templates.
-- Owns: Play/TestFlight submission text package and checklist.
+* release_status (success|failed)
+* artifact summary
+* blockers
 
-Prompt template:
-```text
-You are the store-ops agent.
-Goal: prepare store-ready metadata and review communication.
-Tasks:
-1) Draft release notes (KO/EN).
-2) Validate version/track metadata consistency.
-3) Prepare policy/review response templates.
-Return:
-- release notes (KO/EN)
-- metadata checklist
-- reviewer response templates
-- unresolved store blockers
-```
+---
 
-### secrets-guard
-- Scope: secret leak prevention and release preflight checks.
-- Owns: secret scanning/reporting, env requirement checks.
+# 6. Fix Policy (Strict Cost Control)
 
-Prompt template:
-```text
-You are the secrets-guard agent.
-Goal: prevent secret leakage and missing-credential release failures.
-Tasks:
-1) Scan changed files for secret patterns.
-2) Verify required env vars for Android/iOS release/upload.
-3) Flag tracked sensitive files and propose safe handling.
-Rules:
-- Never print full secret values; mask outputs.
-Return:
-- security_status (pass|warn|fail)
-- findings with severity
-- required env matrix (present/missing)
-- release blockers
-```
+If CI fails:
+
+* Run automatic fix once only.
+* Add label `fix-attempted`.
+
+If CI fails again:
+
+* Add label `blocked`.
+* Stop automation.
+
+No further automatic retries.
+
+---
+
+# 7. Label System
+
+scope:android → Android runtime work
+scope:ios → iOS runtime work
+scope:tools → Python/tools work
+scope:builder → Build/CI work
+go → Execute coding agent
+tests-passed → CI success
+tests-failed → CI failed
+fix-attempted → One fix already attempted
+blocked → Manual intervention required
+release → Run release-gate
+
+---
+
+# 8. GitHub Workflow Trigger Rules
+
+OpenCode execution trigger:
+
+if: label == "go"
+
+Auto merge trigger:
+
+if: label == "tests-passed"
+
+Fix trigger:
+
+if: label == "tests-failed" AND not labeled "fix-attempted"
+
+Release trigger:
+
+if: label == "release"
+
+---
+
+# 9. Forbidden Patterns (Cost Explosions)
+
+* Multi-agent parallel runs
+* Planning agent before coding
+* Review → rewrite → review loops
+* Broad refactors
+* Full repository analysis
+* Auto-trigger on issue open
+* Multi-scope PRs
+
+---
+
+# 10. Claude Call Budget
+
+Coding → 1 call
+Quality Gate → 1 call
+Fix (optional) → 1 call
+Release (optional) → 1 call
+
+Typical PR: 1–2 calls only.
+
+---
+
+# 11. Operational Guidelines
+
+* Keep PRs single-scope.
+* Do not combine Android + iOS + Python in one issue.
+* Always manually apply `go`.
+* Use `release` only when artifacts are ready.
+* Keep prompts minimal.
+* Never include the full playbook inside runtime prompt.
+
+---
+
+# Final Outcome
+
+This configuration:
+
+* Reduces Claude usage by 60–80%
+* Prevents infinite retry loops
+* Maintains auto-merge
+* Keeps release controlled
+* Protects DB and secrets
+* Keeps swarm deterministic and stable
