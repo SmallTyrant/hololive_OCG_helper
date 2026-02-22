@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -e
 
+# Required env vars:
+#   DEVELOPMENT_TEAM  – Apple Developer Team ID
+: "${DEVELOPMENT_TEAM:?Set DEVELOPMENT_TEAM env var}"
+
 SCHEME="HocgNative"
 PROJECT="HocgNative.xcodeproj"
 CONFIG="Release"
@@ -14,7 +18,7 @@ xcodebuild \
   -configuration "$CONFIG" \
   -archivePath build/$SCHEME.xcarchive \
   -destination "generic/platform=iOS" \
-  DEVELOPMENT_TEAM=R777443GCA \
+  DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
   CODE_SIGN_STYLE=Automatic \
   -allowProvisioningUpdates \
   archive
@@ -30,7 +34,7 @@ cat > build/ExportOptions.plist <<EOF
     <key>method</key>
     <string>app-store-connect</string>
     <key>teamID</key>
-    <string>R777443GCA</string>
+    <string>${DEVELOPMENT_TEAM}</string>
     <key>destination</key>
     <string>upload</string>
     <key>signingStyle</key>
