@@ -369,9 +369,17 @@ def normalize_raw_text(text: str, *, remove_private: bool = False) -> str:
     SECTION_START_RE = _re.compile(
         r"^(カードタイプ|レアリティ|色|LIFE|HP|推しスキル|SP推しスキル|アーツ|バトンタッチ|エクストラ|イラストレーター名|カードナンバー|キーワード)"
     )
+    JA_TAG_OBJECT_RE = _re.compile(r"^(#[^\s#を]+(?:\s+[^\s#を]+)*)(を.+)$")
 
     def _normalize_label(line: str) -> str:
         return line.replace("：", "").replace(":", "").strip()
+
+    def _split_ja_tag_object_line(line: str) -> tuple[str, str]:
+        text = line.strip()
+        matched = JA_TAG_OBJECT_RE.match(text)
+        if not matched:
+            return text, ""
+        return matched.group(1).strip(), matched.group(2).strip()
 
     while i < len(lines):
         line = lines[i]
@@ -385,13 +393,21 @@ def normalize_raw_text(text: str, *, remove_private: bool = False) -> str:
 
         if label == "タグ":
             tags = []
+            tail_lines = []
             j = i + 1
             while j < len(lines) and lines[j].strip().startswith("#"):
-                tags.append(lines[j].strip())
+                tag_part, tail_part = _split_ja_tag_object_line(lines[j])
+                if tag_part:
+                    tags.append(tag_part)
+                if tail_part:
+                    tail_lines.append(tail_part)
+                    j += 1
+                    break
                 j += 1
             if tags:
                 out.append("タグ")
                 out.append(" ".join(tags))
+                out.extend(tail_lines)
                 i = j
                 continue
 
