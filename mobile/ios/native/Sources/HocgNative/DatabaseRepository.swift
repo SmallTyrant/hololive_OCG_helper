@@ -443,6 +443,28 @@ final class DatabaseRepository {
         }
     }
 
+    func loadMultiWordTags() -> [String] {
+        do {
+            return try withSQLite(path: paths.dbURL.path, readOnly: true) { db in
+                guard try tableExists(db: db, table: "tags") else { return [] }
+                let sql = "SELECT tag FROM tags WHERE tag LIKE '% %' ORDER BY LENGTH(tag) DESC"
+                let stmt = try sqlitePrepare(db: db, sql: sql)
+                defer { sqlite3_finalize(stmt) }
+                var result: [String] = []
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    var tag = sqliteColumnString(stmt, index: 0).trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !tag.isEmpty {
+                        if !tag.hasPrefix("#") { tag = "#\(tag)" }
+                        result.append(tag)
+                    }
+                }
+                return result
+            }
+        } catch {
+            return []
+        }
+    }
+
     func localDbDate() -> String? {
         let path = paths.dbURL.path
         let fm = FileManager.default
@@ -653,16 +675,12 @@ final class DatabaseRepository {
             return text
         }
 
-        let existingTags = Set(
-            text
-                .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
-                .map(String.init)
-                .filter { $0.hasPrefix("#") }
-        )
-
-        if !existingTags.isEmpty {
+        let hasExistingTags = text.range(of: #"#[^\s#]+"#, options: .regularExpression) != nil
+        if hasExistingTags {
             return text
         }
+
+        let existingTags: Set<String> = []
 
         let missing = tags.filter { !existingTags.contains($0) }
         guard !missing.isEmpty else {

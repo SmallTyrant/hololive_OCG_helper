@@ -63,6 +63,71 @@ SECTION_LABELS_SORTED = tuple(sorted(SECTION_LABELS, key=len, reverse=True))
 JAPANESE_CHAR_RE = re.compile(r"[\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff々〆ヵヶ]")
 TAG_ONLY_LINE_RE = re.compile(r"^(?:#[^\s#]+(?:\s+|$))+(?:[A-Za-z0-9가-힣]+(?:\s+[A-Za-z0-9가-힣]+)*)?$")
 JA_TAG_OBJECT_SPLIT_RE = re.compile(r"^(#[^\s#を]+(?:\s+[^\s#を]+)*)(を.+)$")
+
+# --- Multi-word tag support ---
+_MULTI_WORD_TAGS: list[str] = []  # populated from DB, sorted by length desc
+
+_MW_PLACEHOLDER = "\x00"  # null byte as placeholder (won't appear in card text)
+
+
+def load_multi_word_tags(conn: sqlite3.Connection) -> None:
+    """Load tags containing spaces from all DB tag tables."""
+    global _MULTI_WORD_TAGS
+    try:
+        all_tags: list[str] = []
+        for table in ("tags", "tags_ja", "tags_ko"):
+            try:
+                rows = conn.execute(
+                    f"SELECT tag FROM {table} WHERE tag LIKE '% %' ORDER BY LENGTH(tag) DESC"
+                ).fetchall()
+                for r in rows:
+                    tag = r[0] if r[0].startswith("#") else "#" + r[0]
+                    if tag not in all_tags:
+                        all_tags.append(tag)
+            except Exception:
+                continue
+        _MULTI_WORD_TAGS = sorted(all_tags, key=len, reverse=True)
+    except Exception:
+        _MULTI_WORD_TAGS = []
+
+
+def _build_tag_token_re() -> re.Pattern:
+    """Build regex matching tag tokens, trying multi-word tags first."""
+    parts: list[str] = []
+    for mwt in _MULTI_WORD_TAGS:
+        parts.append(re.escape(mwt))
+    parts.append(r"#[^\s#]+")  # fallback: single-word tag
+    return re.compile("|".join(parts))
+
+
+def _is_tag_only_line(line: str) -> bool:
+    """Check if line consists entirely of tag tokens (optionally with trailing text)."""
+    tag_re = _build_tag_token_re()
+    remainder = line
+    found_tag = False
+    while remainder:
+        m = tag_re.match(remainder)
+        if m:
+            found_tag = True
+            remainder = remainder[m.end():].lstrip()
+        else:
+            break
+    if found_tag and (not remainder or re.fullmatch(r"[A-Za-z0-9가-힣]+(?:\s+[A-Za-z0-9가-힣]+)*", remainder)):
+        return True
+    return False
+
+
+def _protect_multiword_tags(text: str) -> str:
+    """Replace spaces in known multi-word tags with placeholder."""
+    for mwt in _MULTI_WORD_TAGS:
+        text = text.replace(mwt, mwt.replace(" ", _MW_PLACEHOLDER))
+    return text
+
+
+def _restore_multiword_tags(text: str) -> str:
+    """Restore placeholders back to spaces."""
+    return text.replace(_MW_PLACEHOLDER, " ")
+
 KO_SECTION_MARKER_RE = re.compile(
     r"SP 오시 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\s+[A-Za-z가-힣])|#"
 )
@@ -116,7 +181,7 @@ def _expand_tag_lines(lines: list[str], tag_label: str) -> list[str]:
                     expanded.append(tail)
             continue
 
-        if TAG_ONLY_LINE_RE.fullmatch(line):
+        if _is_tag_only_line(line):
             expanded.append(tag_label)
             expanded.append(line)
             continue
@@ -140,7 +205,7 @@ def _expand_tag_lines(lines: list[str], tag_label: str) -> list[str]:
                     expanded.extend(_expand_tag_lines([tail], tag_label))
                 else:
                     expanded.append(tail)
-        elif prefix_text and TAG_ONLY_LINE_RE.fullmatch(tag_text):
+        elif prefix_text and _is_tag_only_line(tag_text):
             expanded.append(prefix_text)
             expanded.append(tag_label)
             expanded.append(tag_text)
@@ -186,8 +251,10 @@ def _prettify_detail_text(
         if marker and marker.start() > 0 and marker.group() != "#":
             merged = merged[marker.start():]
 
+        merged = _protect_multiword_tags(merged)
         for pattern, replacement in section_break_rules:
             merged = re.sub(pattern, replacement, merged)
+        merged = _restore_multiword_tags(merged)
         lines = _normalize_nonempty_lines(merged)
 
     expanded = _expand_tag_lines(lines, tag_label)
@@ -859,6 +926,8 @@ def launch_app(db_path: str) -> None:
                 thread_local.conn = conn
                 thread_local.epoch = conn_epoch["value"]
                 thread_local.path = path
+                if not _MULTI_WORD_TAGS:
+                    load_multi_word_tags(conn)
             return conn
 
         def close_thread_conn() -> None:
@@ -1219,6 +1288,7 @@ def launch_app(db_path: str) -> None:
                 conn_epoch["value"] += 1
                 close_thread_conn()
                 invalidate_db_health_cache()
+                _MULTI_WORD_TAGS.clear()
 
                 set_update_status("DB 갱신 완료")
                 show_toast(

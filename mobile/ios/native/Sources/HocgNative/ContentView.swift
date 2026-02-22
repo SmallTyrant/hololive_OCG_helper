@@ -182,6 +182,7 @@ struct ContentView: View {
     @State private var savedDecks: [SavedDeckState] = []
     @State private var deckSearchQuery = ""
     @State private var deckCandidates: [DeckCardCandidate] = []
+    @State private var multiWordTags: [String] = []
     @AppStorage("theme_mode") private var themeModeRawValue: String = AppThemeMode.system.rawValue
     @AppStorage("preferred_language") private var preferredLanguageRawValue: String = PreferredLanguage.defaultFromSystem.rawValue
 
@@ -314,6 +315,12 @@ struct ContentView: View {
                 resetDetailExpansion()
             }
             .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
+            .task {
+                let tags = await Task.detached {
+                    DatabaseRepository(paths: AppPaths()).loadMultiWordTags()
+                }.value
+                multiWordTags = tags
+            }
             .preferredColorScheme(selectedThemeMode.colorScheme)
         }
     }
@@ -719,7 +726,8 @@ struct ContentView: View {
             lineBreakRules: koLineBreakRules,
             tagLabel: "태그",
             metadataTokens: koMetadataTokenSet,
-            stripJapaneseCharacters: true
+            stripJapaneseCharacters: true,
+            multiWordTags: multiWordTags
         )
     }
 
@@ -730,7 +738,8 @@ struct ContentView: View {
             sectionMarkerRegex: jaSectionMarkerRegex,
             lineBreakRules: jaLineBreakRules,
             tagLabel: "タグ",
-            metadataTokens: jaMetadataTokenSet
+            metadataTokens: jaMetadataTokenSet,
+            multiWordTags: multiWordTags
         )
     }
 
@@ -741,7 +750,8 @@ struct ContentView: View {
         lineBreakRules: [(String, String)],
         tagLabel: String,
         metadataTokens: Set<String>,
-        stripJapaneseCharacters: Bool = false
+        stripJapaneseCharacters: Bool = false,
+        multiWordTags: [String] = []
     ) -> String {
         var normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if normalized.isEmpty {
@@ -766,9 +776,11 @@ struct ContentView: View {
                 merged = String(merged[markerRange.lowerBound...])
             }
 
+            merged = protectMultiWordTags(merged, tags: multiWordTags)
             for (pattern, replacement) in lineBreakRules {
                 merged = merged.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)
             }
+            merged = restoreMultiWordTags(merged)
 
             lines = merged
                 .split(whereSeparator: { $0.isNewline })
@@ -923,10 +935,7 @@ struct ContentView: View {
     }
 
     private func highlightedTagText(_ text: String) -> Text {
-        let pattern = #"#[\p{L}\p{N}_]+"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
-            return Text(text)
-        }
+        let regex = buildTagTokenRegex(multiWordTags: multiWordTags)
 
         let ns = text as NSString
         let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
@@ -988,8 +997,9 @@ struct ContentView: View {
     }
 
     private func normalizeTagLine(_ line: String) -> String {
+        let dynamicRegex = buildTagTokenRegex(multiWordTags: multiWordTags)
         let nsRange = NSRange(line.startIndex..., in: line)
-        let matches = tagTokenRegex.matches(in: line, options: [], range: nsRange)
+        let matches = dynamicRegex.matches(in: line, options: [], range: nsRange)
         guard !matches.isEmpty else {
             return normalizeInlineWhitespace(line)
         }
@@ -1035,8 +1045,9 @@ struct ContentView: View {
     }
 
     private func tagStyledText(_ line: String) -> Text {
+        let dynamicRegex = buildTagTokenRegex(multiWordTags: multiWordTags)
         let nsRange = NSRange(line.startIndex..., in: line)
-        let matches = tagTokenRegex.matches(in: line, options: [], range: nsRange)
+        let matches = dynamicRegex.matches(in: line, options: [], range: nsRange)
         guard !matches.isEmpty else {
             return Text(line)
         }
@@ -1234,6 +1245,32 @@ struct ContentView: View {
 
     private func dismissKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
+    // MARK: - Multi-word tag helpers
+
+    private static let mwPlaceholder = "\u{FFFF}"
+
+    private func buildTagTokenRegex(multiWordTags: [String]) -> NSRegularExpression {
+        var parts: [String] = []
+        for tag in multiWordTags {
+            parts.append(NSRegularExpression.escapedPattern(for: tag))
+        }
+        parts.append("#[^\\s#]+")
+        let pattern = parts.joined(separator: "|")
+        return (try? NSRegularExpression(pattern: pattern)) ?? tagTokenRegex
+    }
+
+    private func protectMultiWordTags(_ text: String, tags: [String]) -> String {
+        var result = text
+        for tag in tags {
+            result = result.replacingOccurrences(of: tag, with: tag.replacingOccurrences(of: " ", with: Self.mwPlaceholder))
+        }
+        return result
+    }
+
+    private func restoreMultiWordTags(_ text: String) -> String {
+        text.replacingOccurrences(of: Self.mwPlaceholder, with: " ")
     }
 }
 
