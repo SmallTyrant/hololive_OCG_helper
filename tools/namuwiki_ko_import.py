@@ -191,6 +191,14 @@ def sanitize_ko_name(text: str) -> str:
     cleaned = re.split(r"\b(?:LIFE|HP)\b", cleaned, maxsplit=1)[0]
     cleaned = re.sub(r"\s*[|/]+\s*", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" -_.,:;|/\u2013\u2014\u2015\u30fc")
+
+    # Remove exact duplicate: "IRyS IRyS" → "IRyS", "FUWAMOCO FUWAMOCO" → "FUWAMOCO"
+    words = cleaned.split()
+    if len(words) >= 2 and len(words) % 2 == 0:
+        half = len(words) // 2
+        if words[:half] == words[half:]:
+            cleaned = " ".join(words[:half])
+
     return cleaned
 
 
@@ -839,11 +847,12 @@ def upsert_ko_text(
     if not name and cached:
         name = sanitize_ko_name(cached[0])
 
-    # Strip duplicate card name from the beginning of effect_text
+    # Strip duplicate card name from the beginning of effect_text (may repeat)
     if name and effect:
         stripped = effect.lstrip()
-        if stripped.startswith(name):
-            effect = stripped[len(name):].lstrip()
+        while stripped.startswith(name):
+            stripped = stripped[len(name):].lstrip()
+        effect = stripped
 
     if cached and not overwrite:
         if cached[1].strip():
