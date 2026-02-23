@@ -199,6 +199,15 @@ def sanitize_ko_name(text: str) -> str:
         if words[:half] == words[half:]:
             cleaned = " ".join(words[:half])
 
+    # Remove trailing name echo: "IRyS Buzz IRyS" → "IRyS Buzz"
+    # Pattern: name is repeated after a suffix like "Buzz"
+    if len(words) >= 3 and "Buzz" in words:
+        buzz_idx = words.index("Buzz")
+        prefix = words[:buzz_idx]
+        suffix = words[buzz_idx + 1:]
+        if prefix and prefix == suffix:
+            cleaned = " ".join(words[: buzz_idx + 1])
+
     return cleaned
 
 
