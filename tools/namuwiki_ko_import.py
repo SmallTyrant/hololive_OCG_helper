@@ -190,7 +190,7 @@ def sanitize_ko_name(text: str) -> str:
     cleaned = JAPANESE_CHAR_RE.sub(" ", raw)
     cleaned = re.split(r"\b(?:LIFE|HP)\b", cleaned, maxsplit=1)[0]
     cleaned = re.sub(r"\s*[|/]+\s*", " ", cleaned)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -_.,:;|/")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -_.,:;|/\u2013\u2014\u2015\u30fc")
     return cleaned
 
 
@@ -568,7 +568,7 @@ def parse_tables(
 
             effect_parts: list[str] = []
             for idx, cells in enumerate(table_rows):
-                if idx == card_row_idx:
+                if idx == card_row_idx or idx == 0:
                     continue
                 line = normalize_ws(" ".join(cells))
                 if not line:
@@ -838,6 +838,12 @@ def upsert_ko_text(
     cached = existing.get(print_id) if existing is not None else None
     if not name and cached:
         name = sanitize_ko_name(cached[0])
+
+    # Strip duplicate card name from the beginning of effect_text
+    if name and effect:
+        stripped = effect.lstrip()
+        if stripped.startswith(name):
+            effect = stripped[len(name):].lstrip()
 
     if cached and not overwrite:
         if cached[1].strip():

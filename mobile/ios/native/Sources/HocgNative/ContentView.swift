@@ -1122,9 +1122,10 @@ struct ContentView: View {
         let displayName: String
         switch selectedPreferredLanguage {
         case .korean:
-            displayName = !row.nameKo.isEmpty ? row.nameKo : (!row.nameJa.isEmpty ? row.nameJa : "(이름 없음)")
+            let cleanKo = DatabaseRepository.cleanDisplayName(row.nameKo)
+            displayName = !cleanKo.isEmpty ? cleanKo : (!row.nameJa.isEmpty ? row.nameJa : "(이름 없음)")
         case .japanese:
-            displayName = !row.nameJa.isEmpty ? row.nameJa : (!row.nameKo.isEmpty ? row.nameKo : "(이름 없음)")
+            displayName = !row.nameJa.isEmpty ? row.nameJa : (!row.nameKo.isEmpty ? DatabaseRepository.cleanDisplayName(row.nameKo) : "(이름 없음)")
         }
         if !row.cardNumber.isEmpty {
             return "\(row.cardNumber) | \(displayName)"
@@ -1251,10 +1252,18 @@ struct ContentView: View {
 
     private static let mwPlaceholder = "\u{FFFF}"
 
+    // Korean multi-word tag patterns (regex fragments)
+    private static let koMwTagPatterns = [
+        "#ID\\s+\\d+기생",     // #ID 1기생, #ID 2기생, #ID 3기생
+    ]
+
     private func buildTagTokenRegex(multiWordTags: [String]) -> NSRegularExpression {
         var parts: [String] = []
         for tag in multiWordTags {
             parts.append(NSRegularExpression.escapedPattern(for: tag))
+        }
+        for pat in Self.koMwTagPatterns {
+            parts.append(pat)
         }
         parts.append("#[^\\s#]+")
         let pattern = parts.joined(separator: "|")
@@ -1265,6 +1274,19 @@ struct ContentView: View {
         var result = text
         for tag in tags {
             result = result.replacingOccurrences(of: tag, with: tag.replacingOccurrences(of: " ", with: Self.mwPlaceholder))
+        }
+        // Also protect Korean multi-word tag patterns
+        for pat in Self.koMwTagPatterns {
+            if let regex = try? NSRegularExpression(pattern: pat) {
+                let nsRange = NSRange(result.startIndex..., in: result)
+                let matches = regex.matches(in: result, range: nsRange).reversed()
+                for match in matches {
+                    if let range = Range(match.range, in: result) {
+                        let matched = String(result[range])
+                        result = result.replacingCharacters(in: range, with: matched.replacingOccurrences(of: " ", with: Self.mwPlaceholder))
+                    }
+                }
+            }
         }
         return result
     }

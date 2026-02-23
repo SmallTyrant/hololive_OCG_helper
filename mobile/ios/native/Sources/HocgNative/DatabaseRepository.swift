@@ -367,7 +367,8 @@ final class DatabaseRepository {
                 """
                 SELECT
                     COALESCE(ko.effect_text,'') AS ko_text,
-                    COALESCE(ja.effect_text,'') AS ja_text
+                    COALESCE(ja.effect_text,'') AS ja_text,
+                    COALESCE(ko.name,'') AS ko_name
                 FROM prints p
                 LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
                 LEFT JOIN card_texts_ja ja ON ja.print_id = p.print_id
@@ -377,7 +378,8 @@ final class DatabaseRepository {
                 """
                 SELECT
                     COALESCE(ko.effect_text,'') AS ko_text,
-                    '' AS ja_text
+                    '' AS ja_text,
+                    COALESCE(ko.name,'') AS ko_name
                 FROM prints p
                 LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
                 WHERE p.print_id=?
@@ -389,8 +391,18 @@ final class DatabaseRepository {
                     return nil
                 }
 
-                let koTextRaw = sqliteColumnString(stmt, index: 0)
+                var koTextRaw = sqliteColumnString(stmt, index: 0)
                 let jaTextRaw = sqliteColumnString(stmt, index: 1)
+                let koName = Self.cleanDisplayName(sqliteColumnString(stmt, index: 2))
+
+                // Strip duplicate card name from start of effect_text
+                if !koName.isEmpty {
+                    let trimmed = koTextRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if trimmed.hasPrefix(koName) {
+                        koTextRaw = String(trimmed.dropFirst(koName.count))
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                }
                 let tags = try loadTagsForPrint(db: db, printId: printId, fingerprint: sessionFingerprint)
 
                 return CardDetail(
@@ -829,5 +841,15 @@ final class DatabaseRepository {
 
     private func sqlNormalizeExpr(_ column: String) -> String {
         "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(COALESCE(\(column),'')), ' ', ''), char(9), ''), char(10), ''), char(13), ''), '#', ''), '_', ''), '-', ''), '/', ''), '|', ''), ',', ''), '.', '')"
+    }
+
+    /// Strip trailing Unicode dashes from display name
+    static func cleanDisplayName(_ name: String) -> String {
+        var result = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let dashes: Set<Character> = ["-", "\u{2013}", "\u{2014}", "\u{2015}", "\u{30FC}"]
+        while let last = result.last, dashes.contains(last) {
+            result = String(result.dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return result
     }
 }

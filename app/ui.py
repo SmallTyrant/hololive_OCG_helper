@@ -91,11 +91,19 @@ def load_multi_word_tags(conn: sqlite3.Connection) -> None:
         _MULTI_WORD_TAGS = []
 
 
+# Korean multi-word tag patterns (regex, not literal)
+_KO_MW_TAG_PATTERNS = [
+    r"#ID\s+\d+기생",       # #ID 1기생, #ID 2기생, #ID 3기생
+]
+
+
 def _build_tag_token_re() -> re.Pattern:
     """Build regex matching tag tokens, trying multi-word tags first."""
     parts: list[str] = []
     for mwt in _MULTI_WORD_TAGS:
         parts.append(re.escape(mwt))
+    for pat in _KO_MW_TAG_PATTERNS:
+        parts.append(pat)
     parts.append(r"#[^\s#]+")  # fallback: single-word tag
     return re.compile("|".join(parts))
 
@@ -121,6 +129,8 @@ def _protect_multiword_tags(text: str) -> str:
     """Replace spaces in known multi-word tags with placeholder."""
     for mwt in _MULTI_WORD_TAGS:
         text = text.replace(mwt, mwt.replace(" ", _MW_PLACEHOLDER))
+    for pat in _KO_MW_TAG_PATTERNS:
+        text = re.sub(pat, lambda m: m.group().replace(" ", _MW_PLACEHOLDER), text)
     return text
 
 
@@ -1154,6 +1164,11 @@ def launch_app(db_path: str) -> None:
                 card = load_card_detail(conn, pid)
                 ko_text = (card.get("ko_text", "") if card else "")
                 ja_text = (card.get("ja_text", "") if card else "")
+                # Strip duplicate card name from start of effect_text
+                ko_name = (card.get("ko_name", "") if card else "").strip()
+                ko_name = ko_name.strip(" -\u2013\u2014\u2015\u30fc")
+                if ko_name and ko_text.lstrip().startswith(ko_name):
+                    ko_text = ko_text.lstrip()[len(ko_name):].lstrip()
                 set_detail_text(ko_text, ja_text)
 
             except Exception as ex:
