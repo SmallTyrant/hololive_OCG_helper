@@ -84,9 +84,10 @@ final class UpdateRepository {
         do {
             try validateSQLite(fileURL: tempTarget)
             if fm.fileExists(atPath: targetDBURL.path) {
-                try fm.removeItem(at: targetDBURL)
+                _ = try fm.replaceItemAt(targetDBURL, withItemAt: tempTarget)
+            } else {
+                try fm.moveItem(at: tempTarget, to: targetDBURL)
             }
-            try fm.moveItem(at: tempTarget, to: targetDBURL)
             try? writeReleaseMeta(dbURL: targetDBURL, info: releaseInfo)
             return releaseInfo
         } catch {
@@ -155,19 +156,6 @@ final class UpdateRepository {
         }
         let header = Data("SQLite format 3\u{0}".utf8)
         guard data.prefix(16) == header else {
-            throw URLError(.cannotDecodeContentData)
-        }
-
-        let hasPrints = try withSQLite(path: fileURL.path, readOnly: true) { db in
-            let stmt = try sqlitePrepare(
-                db: db,
-                sql: "SELECT 1 FROM sqlite_master WHERE type='table' AND name='prints'",
-            )
-            defer { sqlite3_finalize(stmt) }
-            return sqlite3_step(stmt) == SQLITE_ROW
-        }
-
-        if !hasPrints {
             throw URLError(.cannotDecodeContentData)
         }
     }
