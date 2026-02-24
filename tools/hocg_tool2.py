@@ -199,10 +199,8 @@ def upsert_tag(conn: sqlite3.Connection, tag: str) -> int:
             """,
             (tag, norm),
         )
-        row = conn.execute("SELECT tag_id FROM tags_ja WHERE tag=?", (tag,)).fetchone()
-        tag_id = int(row[0])
-    else:
-        tag_id = None
+
+    tag_id = None
 
     # Legacy tags table for backward compatibility with existing print_tags FK
     if _has_table(conn, "tags"):
@@ -214,9 +212,12 @@ def upsert_tag(conn: sqlite3.Connection, tag: str) -> int:
             """,
             (tag, norm),
         )
-        if tag_id is None:
-            row = conn.execute("SELECT tag_id FROM tags WHERE tag=?", (tag,)).fetchone()
-            tag_id = int(row[0])
+        row = conn.execute("SELECT tag_id FROM tags WHERE tag=?", (tag,)).fetchone()
+        tag_id = int(row[0])
+
+    if tag_id is None and _has_table(conn, "tags_ja"):
+        row = conn.execute("SELECT tag_id FROM tags_ja WHERE tag=?", (tag,)).fetchone()
+        tag_id = int(row[0])
 
     if tag_id is None:
         raise RuntimeError("No tags table available")
