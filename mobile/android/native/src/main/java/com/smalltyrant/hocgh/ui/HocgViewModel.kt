@@ -21,6 +21,7 @@ import com.smalltyrant.hocgh.model.UpdateDialogState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -37,6 +38,8 @@ private const val DB_RESTORED_TOAST = "번들 DB 복원완료"
 private const val APP_UPDATE_AVAILABLE_TOAST = "앱 업데이트가 있습니다"
 private const val BULK_IMAGE_MAX_CONCURRENCY = 10
 private const val BULK_IMAGE_RETRY_COUNT = 1
+private const val DETAIL_PREFETCH_MAX_CONCURRENCY = 4
+private const val DETAIL_PREFETCH_LIMIT = 20
 
 class HocgViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -63,6 +66,7 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
 
     private var searchJob: Job? = null
     private var detailJob: Job? = null
+    private var prefetchJob: Job? = null
     private var remotePromptShown = false
     private var appUpdatePromptShown = false
 
@@ -277,6 +281,7 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
         searchJob = viewModelScope.launch {
             val query = state.searchQuery.trim()
             if (query.isEmpty()) {
+                prefetchJob?.cancel()
                 state = state.copy(
                     results = emptyList(),
                     selectedPrintId = null,
@@ -294,6 +299,7 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
                 dbRepository.needsDbUpdate()
             }
             if (needsUpdate) {
+                prefetchJob?.cancel()
                 applyMissingDbState()
                 state = state.copy(
                     results = emptyList(),
@@ -318,11 +324,13 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
             )
 
             if (selectedBefore != null && rows.any { it.printId == selectedBefore }) {
+                prefetchCardDetails(rows = rows, excludingPrintId = selectedBefore)
                 return@launch
             }
 
             val first = rows.firstOrNull()
             if (first == null) {
+                prefetchJob?.cancel()
                 state = state.copy(
                     selectedPrintId = null,
                     detailKoText = "",
@@ -332,6 +340,7 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
                 )
             } else {
                 showDetail(first.printId)
+                prefetchCardDetails(rows = rows, excludingPrintId = first.printId)
             }
         }
     }
@@ -385,6 +394,35 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
 
             if (state.selectedPrintId == printId) {
                 state = state.copy(imageState = loadedImageState)
+            }
+        }
+    }
+
+    private fun prefetchCardDetails(rows: List<com.smalltyrant.hocgh.model.PrintRow>, excludingPrintId: Long?) {
+        prefetchJob?.cancel()
+
+        val targets = rows
+            .asSequence()
+            .map { it.printId }
+            .filter { printId -> excludingPrintId == null || printId != excludingPrintId }
+            .distinct()
+            .take(DETAIL_PREFETCH_LIMIT)
+            .toList()
+
+        if (targets.isEmpty()) {
+            return
+        }
+
+        prefetchJob = viewModelScope.launch(Dispatchers.IO) {
+            val semaphore = Semaphore(DETAIL_PREFETCH_MAX_CONCURRENCY)
+            coroutineScope {
+                targets.map { printId ->
+                    async {
+                        semaphore.withPermit {
+                            dbRepository.loadCardSnapshot(printId)
+                        }
+                    }
+                }.awaitAll()
             }
         }
     }

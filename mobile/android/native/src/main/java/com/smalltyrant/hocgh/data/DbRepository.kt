@@ -39,11 +39,19 @@ class DbRepository(private val paths: AppPaths) {
         var tagJoinSql: String? = null,
     )
 
+    private data class SnapshotCache(
+        val fingerprint: DbFingerprint,
+        val snapshots: LinkedHashMap<Long, CardSnapshot>,
+    )
+
     @Volatile
     private var dbHealthCache: DbHealthCache? = null
 
     @Volatile
     private var schemaCache: SchemaCache? = null
+
+    @Volatile
+    private var snapshotCache: SnapshotCache? = null
 
     fun needsDbUpdate(): Boolean {
         val fingerprint = dbFingerprint()
@@ -385,9 +393,14 @@ class DbRepository(private val paths: AppPaths) {
     }
 
     fun loadCardSnapshot(printId: Long): CardSnapshot? {
+        val fingerprint = dbFingerprint() ?: return null
+        cachedSnapshot(printId = printId, fingerprint = fingerprint)?.let {
+            return it
+        }
+
         return try {
             openReadOnly().useDb { db ->
-                val sessionFingerprint = dbFingerprint()
+                val sessionFingerprint = fingerprint
                 val jaColumns = tableColumns(db, "card_texts_ja", sessionFingerprint)
                 val hasJaEffectText = jaColumns.contains("effect_text")
                 val sql = if (hasJaEffectText) {
@@ -457,7 +470,9 @@ class DbRepository(private val paths: AppPaths) {
                         jaText = appendTagsIfNeeded(jaTextRaw, tags, "タグ"),
                     )
 
-                    CardSnapshot(brief = brief, detail = detail)
+                    val snapshot = CardSnapshot(brief = brief, detail = detail)
+                    storeSnapshot(printId = printId, snapshot = snapshot, fingerprint = fingerprint)
+                    snapshot
                 }
             }
         } catch (_: Throwable) {
@@ -670,6 +685,7 @@ class DbRepository(private val paths: AppPaths) {
     private fun clearCaches() {
         dbHealthCache = null
         schemaCache = null
+        snapshotCache = null
     }
 
     @Synchronized
@@ -684,6 +700,33 @@ class DbRepository(private val paths: AppPaths) {
     @Synchronized
     private fun storeNeedsDbUpdate(fingerprint: DbFingerprint, needsUpdate: Boolean) {
         dbHealthCache = DbHealthCache(fingerprint = fingerprint, needsUpdate = needsUpdate)
+    }
+
+    @Synchronized
+    private fun cachedSnapshot(printId: Long, fingerprint: DbFingerprint): CardSnapshot? {
+        val cache = snapshotCache
+        if (cache == null || cache.fingerprint != fingerprint) {
+            return null
+        }
+        return cache.snapshots[printId]
+    }
+
+    @Synchronized
+    private fun storeSnapshot(printId: Long, snapshot: CardSnapshot, fingerprint: DbFingerprint) {
+        val cache = snapshotCache
+        val target = if (cache != null && cache.fingerprint == fingerprint) {
+            cache.snapshots
+        } else {
+            LinkedHashMap<Long, CardSnapshot>(SNAPSHOT_CACHE_LIMIT, 0.75f, true)
+        }
+
+        target[printId] = snapshot
+        while (target.size > SNAPSHOT_CACHE_LIMIT) {
+            val oldestKey = target.entries.firstOrNull()?.key ?: break
+            target.remove(oldestKey)
+        }
+
+        snapshotCache = SnapshotCache(fingerprint = fingerprint, snapshots = target)
     }
 
     @Synchronized
@@ -805,6 +848,7 @@ class DbRepository(private val paths: AppPaths) {
     }
 
     companion object {
+        private const val SNAPSHOT_CACHE_LIMIT = 256
         private val EDGE_DASHES = setOf('-', '\u2013', '\u2014', '\u2015', '\u30FC')
 
         /** Strip leading and trailing Unicode dashes from display name */

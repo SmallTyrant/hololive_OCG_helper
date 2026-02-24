@@ -27,9 +27,18 @@ final class DatabaseRepository {
         var tagJoinSql: String?
     }
 
+    private struct SnapshotCache {
+        let fingerprint: DbFingerprint
+        var snapshots: [Int64: CardSnapshot] = [:]
+        var lru: [Int64] = []
+    }
+
     private let cacheLock = NSLock()
     private var dbHealthCache: DbHealthCache?
     private var schemaCache: SchemaCache?
+    private var snapshotCache: SnapshotCache?
+
+    private let snapshotCacheLimit = 256
 
     init(paths: AppPaths) {
         self.paths = paths
@@ -362,9 +371,17 @@ final class DatabaseRepository {
     }
 
     func loadCardSnapshot(printId: Int64) -> CardSnapshot? {
+        guard let fingerprint = dbFingerprint(path: paths.dbURL.path) else {
+            return nil
+        }
+
+        if let cached = cachedSnapshot(printId: printId, fingerprint: fingerprint) {
+            return cached
+        }
+
         do {
             return try withSQLite(path: paths.dbURL.path, readOnly: true) { db in
-                let sessionFingerprint = dbFingerprint(path: paths.dbURL.path)
+                let sessionFingerprint: DbFingerprint? = fingerprint
                 let jaColumns = try tableColumns(db: db, table: "card_texts_ja", fingerprint: sessionFingerprint)
                 let hasJaEffectText = jaColumns.contains("effect_text")
                 let sql = hasJaEffectText ?
@@ -432,7 +449,9 @@ final class DatabaseRepository {
                     jaText: appendTagsIfNeeded(to: jaTextRaw, tags: tags, sectionLabel: "タグ"),
                 )
 
-                return CardSnapshot(brief: brief, detail: detail)
+                let snapshot = CardSnapshot(brief: brief, detail: detail)
+                storeSnapshot(snapshot, printId: printId, fingerprint: fingerprint)
+                return snapshot
             }
         } catch {
             return nil
@@ -590,6 +609,7 @@ final class DatabaseRepository {
         cacheLock.lock()
         dbHealthCache = nil
         schemaCache = nil
+        snapshotCache = nil
         cacheLock.unlock()
     }
 
@@ -606,6 +626,47 @@ final class DatabaseRepository {
         cacheLock.lock()
         dbHealthCache = DbHealthCache(fingerprint: fingerprint, needsUpdate: needsUpdate)
         cacheLock.unlock()
+    }
+
+    private func cachedSnapshot(printId: Int64, fingerprint: DbFingerprint) -> CardSnapshot? {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+
+        guard var cache = snapshotCache, cache.fingerprint == fingerprint else {
+            return nil
+        }
+        guard let snapshot = cache.snapshots[printId] else {
+            return nil
+        }
+
+        cache.lru.removeAll(where: { $0 == printId })
+        cache.lru.append(printId)
+        snapshotCache = cache
+        return snapshot
+    }
+
+    private func storeSnapshot(_ snapshot: CardSnapshot, printId: Int64, fingerprint: DbFingerprint) {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+
+        var cache: SnapshotCache
+        if let current = snapshotCache, current.fingerprint == fingerprint {
+            cache = current
+        } else {
+            cache = SnapshotCache(fingerprint: fingerprint)
+        }
+
+        cache.snapshots[printId] = snapshot
+        cache.lru.removeAll(where: { $0 == printId })
+        cache.lru.append(printId)
+
+        while cache.lru.count > snapshotCacheLimit {
+            guard let oldest = cache.lru.first else { break }
+            cache.lru.removeFirst()
+            cache.snapshots.removeValue(forKey: oldest)
+        }
+
+        snapshotCache = cache
     }
 
     private func ensureSchemaCacheLocked(for fingerprint: DbFingerprint) {

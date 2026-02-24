@@ -6,6 +6,8 @@ private let dbUpdatedToast = "갱신완료"
 private let dbRestoredToast = "번들 DB 복원완료"
 private let bulkImageMaxConcurrency = 10
 private let bulkImageRetryCount = 1
+private let detailPrefetchLimit = 20
+private let detailPrefetchMaxConcurrency = 4
 
 @MainActor
 final class HocgViewModel: ObservableObject {
@@ -26,6 +28,7 @@ final class HocgViewModel: ObservableObject {
 
     private var searchTask: Task<Void, Never>?
     private var detailTask: Task<Void, Never>?
+    private var prefetchTask: Task<Void, Never>?
     private var remotePromptShown = false
 
     init(
@@ -224,6 +227,7 @@ final class HocgViewModel: ObservableObject {
         let query = state.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if query.isEmpty {
+            prefetchTask?.cancel()
             state.results = []
             state.selectedPrintId = nil
             state.detailKoText = ""
@@ -246,6 +250,7 @@ final class HocgViewModel: ObservableObject {
                 return
             }
             if needsUpdate {
+                prefetchTask?.cancel()
                 applyMissingDbState()
                 state.results = []
                 state.selectedPrintId = nil
@@ -269,12 +274,15 @@ final class HocgViewModel: ObservableObject {
 
             if let selectedBefore,
                rows.contains(where: { $0.printId == selectedBefore }) {
+                prefetchCardDetails(rows: rows, excludingPrintId: selectedBefore)
                 return
             }
 
             if let first = rows.first {
                 showDetail(first.printId)
+                prefetchCardDetails(rows: rows, excludingPrintId: first.printId)
             } else {
+                prefetchTask?.cancel()
                 state.selectedPrintId = nil
                 state.detailKoText = ""
                 state.detailJaText = ""
@@ -322,6 +330,50 @@ final class HocgViewModel: ObservableObject {
             let loaded = await imageRepository.downloadIfNeeded(cardNumber: cardNumber, imageURL: snapshot.brief.imageUrl)
             if state.selectedPrintId == printId {
                 state.imageState = loaded
+            }
+        }
+    }
+
+    private func prefetchCardDetails(rows: [PrintRow], excludingPrintId: Int64?) {
+        prefetchTask?.cancel()
+
+        let targets = Array(
+            rows
+                .map(\.printId)
+                .filter { id in
+                    if let excludingPrintId {
+                        return id != excludingPrintId
+                    }
+                    return true
+                }
+                .prefix(detailPrefetchLimit)
+        )
+
+        guard !targets.isEmpty else {
+            return
+        }
+
+        prefetchTask = Task {
+            var index = 0
+            while index < targets.count {
+                if Task.isCancelled {
+                    return
+                }
+
+                let end = min(index + detailPrefetchMaxConcurrency, targets.count)
+                let chunk = targets[index..<end]
+
+                await withTaskGroup(of: Void.self) { group in
+                    for printId in chunk {
+                        group.addTask {
+                            _ = await self.runIO {
+                                self.dbRepository.loadCardSnapshot(printId: printId)
+                            }
+                        }
+                    }
+                }
+
+                index = end
             }
         }
     }
