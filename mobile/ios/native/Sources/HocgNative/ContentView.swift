@@ -790,18 +790,50 @@ struct ContentView: View {
 
         var expanded: [String] = []
         for line in lines {
+            guard line.contains("#") else {
+                expanded.append(line)
+                continue
+            }
+
+            // Japanese tag boundary: split at を after tag
+            if let jaMatch = jaTagObjectSplit(line) {
+                expanded.append(tagLabel)
+                expanded.append(normalizeInlineWhitespace(jaMatch.tag))
+                let tail = normalizeInlineWhitespace(jaMatch.rest)
+                if !tail.isEmpty {
+                    if tail.contains("#") {
+                        expanded.append(contentsOf: expandTagLinesHelper([tail], tagLabel: tagLabel))
+                    } else {
+                        expanded.append(tail)
+                    }
+                }
+                continue
+            }
+
             guard let hashIndex = line.firstIndex(of: "#"), hashIndex != line.startIndex else {
                 expanded.append(line)
                 continue
             }
 
             let prefix = normalizeInlineWhitespace(String(line[..<hashIndex]))
-            let tags = normalizeInlineWhitespace(String(line[hashIndex...]))
-            if !prefix.isEmpty {
-                expanded.append(prefix)
-            }
-            if !tags.isEmpty {
-                expanded.append(tags)
+            let tagText = normalizeInlineWhitespace(String(line[hashIndex...]))
+
+            // Check if the tag portion has a Japanese boundary
+            if let jaMatch = jaTagObjectSplit(tagText) {
+                if !prefix.isEmpty { expanded.append(prefix) }
+                expanded.append(tagLabel)
+                expanded.append(normalizeInlineWhitespace(jaMatch.tag))
+                let tail = normalizeInlineWhitespace(jaMatch.rest)
+                if !tail.isEmpty {
+                    if tail.contains("#") {
+                        expanded.append(contentsOf: expandTagLinesHelper([tail], tagLabel: tagLabel))
+                    } else {
+                        expanded.append(tail)
+                    }
+                }
+            } else {
+                if !prefix.isEmpty { expanded.append(prefix) }
+                if !tagText.isEmpty { expanded.append(tagText) }
             }
         }
 
@@ -980,6 +1012,47 @@ struct ContentView: View {
             }
         }
         return nil
+    }
+
+    /// Japanese tag-object boundary: split `#TAG を...` into (tag, rest)
+    private func jaTagObjectSplit(_ text: String) -> (tag: String, rest: String)? {
+        guard let regex = try? NSRegularExpression(pattern: "^(#[^\\s#を]+(?:\\s+[^\\s#を]+)*)(を.+)$") else {
+            return nil
+        }
+        let nsText = text as NSString
+        let range = NSRange(location: 0, length: nsText.length)
+        guard let match = regex.firstMatch(in: text, range: range), match.numberOfRanges == 3 else {
+            return nil
+        }
+        let tag = nsText.substring(with: match.range(at: 1))
+        let rest = nsText.substring(with: match.range(at: 2))
+        return (tag, rest)
+    }
+
+    /// Recursive helper for expanding tag lines with Japanese boundary handling
+    private func expandTagLinesHelper(_ lines: [String], tagLabel: String) -> [String] {
+        var result: [String] = []
+        for line in lines {
+            guard line.contains("#") else {
+                result.append(line)
+                continue
+            }
+            if let jaMatch = jaTagObjectSplit(line) {
+                result.append(tagLabel)
+                result.append(normalizeInlineWhitespace(jaMatch.tag))
+                let tail = normalizeInlineWhitespace(jaMatch.rest)
+                if !tail.isEmpty {
+                    if tail.contains("#") {
+                        result.append(contentsOf: expandTagLinesHelper([tail], tagLabel: tagLabel))
+                    } else {
+                        result.append(tail)
+                    }
+                }
+            } else {
+                result.append(line)
+            }
+        }
+        return result
     }
 
     private func normalizeInlineWhitespace(_ text: String) -> String {

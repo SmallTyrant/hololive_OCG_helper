@@ -458,19 +458,24 @@ final class DatabaseRepository {
     func loadMultiWordTags() -> [String] {
         do {
             return try withSQLite(path: paths.dbURL.path, readOnly: true) { db in
-                guard try tableExists(db: db, table: "tags") else { return [] }
-                let sql = "SELECT tag FROM tags WHERE tag LIKE '% %' ORDER BY LENGTH(tag) DESC"
-                let stmt = try sqlitePrepare(db: db, sql: sql)
-                defer { sqlite3_finalize(stmt) }
-                var result: [String] = []
-                while sqlite3_step(stmt) == SQLITE_ROW {
-                    var tag = sqliteColumnString(stmt, index: 0).trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !tag.isEmpty {
-                        if !tag.hasPrefix("#") { tag = "#\(tag)" }
-                        result.append(tag)
+                var allTags: [String] = []
+                var seen = Set<String>()
+                for table in ["tags", "tags_ja", "tags_ko"] {
+                    guard try tableExists(db: db, table: table) else { continue }
+                    let sql = "SELECT tag FROM \(table) WHERE tag LIKE '% %' ORDER BY LENGTH(tag) DESC"
+                    let stmt = try sqlitePrepare(db: db, sql: sql)
+                    defer { sqlite3_finalize(stmt) }
+                    while sqlite3_step(stmt) == SQLITE_ROW {
+                        var tag = sqliteColumnString(stmt, index: 0).trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !tag.isEmpty {
+                            if !tag.hasPrefix("#") { tag = "#\(tag)" }
+                            if seen.insert(tag).inserted {
+                                allTags.append(tag)
+                            }
+                        }
                     }
                 }
-                return result
+                return allTags.sorted { $0.count > $1.count }
             }
         } catch {
             return []
@@ -843,12 +848,15 @@ final class DatabaseRepository {
         "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(COALESCE(\(column),'')), ' ', ''), char(9), ''), char(10), ''), char(13), ''), '#', ''), '_', ''), '-', ''), '/', ''), '|', ''), ',', ''), '.', '')"
     }
 
-    /// Strip trailing Unicode dashes from display name
+    /// Strip leading and trailing Unicode dashes from display name
     static func cleanDisplayName(_ name: String) -> String {
         var result = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let dashes: Set<Character> = ["-", "\u{2013}", "\u{2014}", "\u{2015}", "\u{30FC}"]
         while let last = result.last, dashes.contains(last) {
             result = String(result.dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        while let first = result.first, dashes.contains(first) {
+            result = String(result.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return result
     }

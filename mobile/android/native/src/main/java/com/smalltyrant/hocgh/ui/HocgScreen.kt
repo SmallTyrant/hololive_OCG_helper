@@ -127,6 +127,7 @@ private val JA_SECTION_MARKER_REGEX = Regex(
     "SP推しスキル|推しスキル|コラボエフェクト|ブルームエフェクト|ギフト|エクストラ|アーツ(?=\\s+\\S)|カードタイプ|タグ|レアリティ|能力テキスト|バトンタッチ|#",
 )
 private val TAG_TOKEN_REGEX = Regex("#[^\\s#]+")
+private val JA_TAG_OBJECT_SPLIT_REGEX = Regex("^(#[^\\s#を]+(?:\\s+[^\\s#を]+)*)(を.+)$")
 private val KO_METADATA_TOKEN_SET = setOf(
     "레벨",
     "속성",
@@ -1331,15 +1332,49 @@ private fun prettifyDetailText(
 
     val expanded = mutableListOf<String>()
     for (line in lines) {
+        if (!line.contains('#')) {
+            expanded += line
+            continue
+        }
+
+        // Japanese tag boundary: split at を after tag
+        val jaMatch = JA_TAG_OBJECT_SPLIT_REGEX.matchEntire(line)
+        if (jaMatch != null) {
+            expanded += tagLabel
+            expanded += normalizeInlineWhitespace(jaMatch.groupValues[1])
+            val tail = normalizeInlineWhitespace(jaMatch.groupValues[2])
+            if (tail.isNotEmpty()) {
+                if (tail.contains('#')) {
+                    expanded += expandTagLinesHelper(listOf(tail), tagLabel)
+                } else {
+                    expanded += tail
+                }
+            }
+            continue
+        }
+
         val hashIdx = line.indexOf('#')
         if (hashIdx > 0) {
             val prefix = normalizeInlineWhitespace(line.substring(0, hashIdx))
-            val tags = normalizeInlineWhitespace(line.substring(hashIdx))
-            if (prefix.isNotEmpty()) {
-                expanded += prefix
-            }
-            if (tags.isNotEmpty()) {
-                expanded += tags
+            val tagText = normalizeInlineWhitespace(line.substring(hashIdx))
+
+            // Check if the tag portion has a Japanese boundary
+            val jaTagMatch = JA_TAG_OBJECT_SPLIT_REGEX.matchEntire(tagText)
+            if (jaTagMatch != null) {
+                if (prefix.isNotEmpty()) expanded += prefix
+                expanded += tagLabel
+                expanded += normalizeInlineWhitespace(jaTagMatch.groupValues[1])
+                val tail = normalizeInlineWhitespace(jaTagMatch.groupValues[2])
+                if (tail.isNotEmpty()) {
+                    if (tail.contains('#')) {
+                        expanded += expandTagLinesHelper(listOf(tail), tagLabel)
+                    } else {
+                        expanded += tail
+                    }
+                }
+            } else {
+                if (prefix.isNotEmpty()) expanded += prefix
+                if (tagText.isNotEmpty()) expanded += tagText
             }
         } else {
             expanded += line
@@ -1374,6 +1409,32 @@ private fun prettifyDetailText(
 
 private fun normalizeInlineWhitespace(text: String): String {
     return text.replace(Regex("\\s+"), " ").trim()
+}
+
+private fun expandTagLinesHelper(lines: List<String>, tagLabel: String): List<String> {
+    val result = mutableListOf<String>()
+    for (line in lines) {
+        if (!line.contains('#')) {
+            result += line
+            continue
+        }
+        val jaMatch = JA_TAG_OBJECT_SPLIT_REGEX.matchEntire(line)
+        if (jaMatch != null) {
+            result += tagLabel
+            result += normalizeInlineWhitespace(jaMatch.groupValues[1])
+            val tail = normalizeInlineWhitespace(jaMatch.groupValues[2])
+            if (tail.isNotEmpty()) {
+                if (tail.contains('#')) {
+                    result += expandTagLinesHelper(listOf(tail), tagLabel)
+                } else {
+                    result += tail
+                }
+            }
+        } else {
+            result += line
+        }
+    }
+    return result
 }
 
 private fun normalizeTagLine(line: String, multiWordTags: List<String> = emptyList()): String {

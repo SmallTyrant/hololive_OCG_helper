@@ -501,21 +501,26 @@ class DbRepository(private val paths: AppPaths) {
     fun loadMultiWordTags(): List<String> {
         return try {
             openReadOnly().useDb { db ->
-                if (!tableExists(db, "tags")) return@useDb emptyList()
-                db.rawQuery(
-                    "SELECT tag FROM tags WHERE tag LIKE '% %' ORDER BY LENGTH(tag) DESC",
-                    null,
-                ).useCursor { cursor ->
-                    val result = mutableListOf<String>()
-                    while (cursor.moveToNext()) {
-                        var tag = cursor.getStringOrEmpty("tag").trim()
-                        if (tag.isNotEmpty()) {
-                            if (!tag.startsWith("#")) tag = "#$tag"
-                            result += tag
+                val allTags = mutableListOf<String>()
+                val seen = mutableSetOf<String>()
+                for (table in listOf("tags", "tags_ja", "tags_ko")) {
+                    if (!tableExists(db, table)) continue
+                    db.rawQuery(
+                        "SELECT tag FROM $table WHERE tag LIKE '% %' ORDER BY LENGTH(tag) DESC",
+                        null,
+                    ).useCursor { cursor ->
+                        while (cursor.moveToNext()) {
+                            var tag = cursor.getStringOrEmpty("tag").trim()
+                            if (tag.isNotEmpty()) {
+                                if (!tag.startsWith("#")) tag = "#$tag"
+                                if (seen.add(tag)) {
+                                    allTags += tag
+                                }
+                            }
                         }
                     }
-                    result
                 }
+                allTags.sortedByDescending { it.length }
             }
         } catch (_: Throwable) {
             emptyList()
@@ -775,13 +780,16 @@ class DbRepository(private val paths: AppPaths) {
     }
 
     companion object {
-        private val TRAILING_DASHES = setOf('-', '\u2013', '\u2014', '\u2015', '\u30FC')
+        private val EDGE_DASHES = setOf('-', '\u2013', '\u2014', '\u2015', '\u30FC')
 
-        /** Strip trailing Unicode dashes from display name */
+        /** Strip leading and trailing Unicode dashes from display name */
         fun cleanDisplayName(name: String): String {
             var result = name.trim()
-            while (result.isNotEmpty() && result.last() in TRAILING_DASHES) {
+            while (result.isNotEmpty() && result.last() in EDGE_DASHES) {
                 result = result.dropLast(1).trim()
+            }
+            while (result.isNotEmpty() && result.first() in EDGE_DASHES) {
+                result = result.drop(1).trim()
             }
             return result
         }
