@@ -198,13 +198,14 @@ private val JA_LINE_BREAK_PATTERNS = listOf(
 )
 
 private val DETAIL_PREFIX_PATTERN = Regex(
-    pattern = """^(?:(?:.+?)\s+)?(?:서포트|サポート)\s*[/／]\s*(?:아이템|스태프|이벤트|이벤타|툴|アイテム|スタッフ|イベント|ツール)\s+""",
+    pattern = """^(?:(?:.+?)\s+)?(?:서포트|サポート)\s*[/／]\s*(?:아이템|스태프|이벤트|이벤타|툴|마스코트|アイテム|スタッフ|イベント|ツール|マスコット)(?:\s+|$)""",
 )
 
 private val INLINE_TAG_PATTERN = Regex(pattern = """#[\p{L}\p{N}_]+""")
 private const val MW_PLACEHOLDER = "\uFFFF"
 private val KO_MW_TAG_PATTERNS = listOf(
     Regex("#ID\\s+\\d+기생"),
+    Regex("#[^\\s#]+['’]s\\s+[^\\s#]+"),
 )
 
 private enum class DetailTextLanguage {

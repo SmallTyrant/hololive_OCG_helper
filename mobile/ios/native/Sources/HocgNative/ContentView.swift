@@ -34,7 +34,7 @@ private let sectionLabels: [String] = [
     "LIFE",
     "HP",
 ]
-private let detailPrefixPattern = #"^(?:(?:.+?)\s+)?(?:서포트|サポート)\s*[/／]\s*(?:아이템|스태프|이벤트|이벤타|툴|アイテム|スタッフ|イベント|ツール)\s+"#
+private let detailPrefixPattern = #"^(?:(?:.+?)\s+)?(?:서포트|サポート)\s*[/／]\s*(?:아이템|스태프|이벤트|이벤타|툴|마스코트|アイテム|スタッフ|イベント|ツール|マスコット)(?:\s+|$)"#
 private let sectionLabelsSorted = sectionLabels.sorted { $0.count > $1.count }
 private let japaneseCharPattern = "[\\u3040-\\u30ff\\u31f0-\\u31ff\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff々〆ヵヶ]"
 private let koSectionMarkerRegex = try! NSRegularExpression(
@@ -1328,6 +1328,7 @@ struct ContentView: View {
     // Korean multi-word tag patterns (regex fragments)
     private static let koMwTagPatterns = [
         "#ID\\s+\\d+기생",     // #ID 1기생, #ID 2기생, #ID 3기생
+        "#[^\\s#]+['’]s\\s+[^\\s#]+", // #시라카미's 캐릭터
     ]
 
     private func buildTagTokenRegex(multiWordTags: [String]) -> NSRegularExpression {

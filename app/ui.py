@@ -94,6 +94,7 @@ def load_multi_word_tags(conn: sqlite3.Connection) -> None:
 # Korean multi-word tag patterns (regex, not literal)
 _KO_MW_TAG_PATTERNS = [
     r"#ID\s+\d+기생",       # #ID 1기생, #ID 2기생, #ID 3기생
+    r"#[^\s#]+['’]s\s+[^\s#]+",  # #시라카미's 캐릭터
 ]
 
 
@@ -147,7 +148,7 @@ JA_SECTION_MARKER_RE = re.compile(
 
 
 DETAIL_PREFIX_RE = re.compile(
-    r"^(?:(?:.+?)\s+)?(?:서포트|サポート)\s*[\/／]\s*(?:아이템|스태프|이벤트|이벤타|툴|アイテム|スタッフ|イベント|ツール)\s+"
+    r"^(?:(?:.+?)\s+)?(?:서포트|サポート)\s*[\/／]\s*(?:아이템|스태프|이벤트|이벤타|툴|마스코트|アイテム|スタッフ|イベント|ツール|マスコット)(?:\s+|$)"
 )
 
 DB_MISSING_TOAST = "DB파일이 존재하지 않습니다. 메뉴에서 DB 수동갱신을 실행해주세요"

@@ -127,6 +127,10 @@ EFFECT_START_PREFIXES = (
     "엑스트라",
 )
 
+SUPPORT_DETAIL_PREFIX_RE = re.compile(
+    r"^(?:서포트|サポート)\s*[\/／]\s*(?:아이템|스태프|이벤트|이벤타|툴|마스코트|팬|アイテム|スタッフ|イベント|ツール|マスコット|ファン)(?:\s+|$)"
+)
+
 SECTION_END_PREFIXES = (
     "카드 넘버",
     "카드번호",
@@ -457,6 +461,8 @@ def parse_card_sections_from_ids(html: str, source_url: str) -> list[KoRow]:
                 continue
             if CARDNO_RE.search(line):
                 continue
+            if SUPPORT_DETAIL_PREFIX_RE.match(line):
+                continue
             if is_section_heading_line(line):
                 continue
             if is_noise_metadata_line(line):
@@ -483,7 +489,12 @@ def parse_card_sections_from_ids(html: str, source_url: str) -> list[KoRow]:
                 continue
 
             if not started:
-                if line.startswith("#") or line.startswith("[홀로 파워") or line.startswith(EFFECT_START_PREFIXES):
+                if (
+                    line.startswith("#")
+                    or line.startswith("[홀로 파워")
+                    or line.startswith(EFFECT_START_PREFIXES)
+                    or SUPPORT_DETAIL_PREFIX_RE.match(line)
+                ):
                     started = True
                     effect_lines.append(line)
                 continue
@@ -512,7 +523,7 @@ def row_quality_score(row: KoRow) -> float:
         score -= 20.0
 
     effect = row.effect or ""
-    if any(marker in effect for marker in EFFECT_START_PREFIXES) or "#" in effect:
+    if any(marker in effect for marker in EFFECT_START_PREFIXES) or "#" in effect or SUPPORT_DETAIL_PREFIX_RE.match(effect):
         score += 8.0
 
     refs = {normalize_card_number(m.group(0)) for m in CARDNO_RE.finditer(effect)}
