@@ -87,7 +87,7 @@ final class UpdateRepository {
                 try fm.removeItem(at: targetDBURL)
             }
             try fm.moveItem(at: tempTarget, to: targetDBURL)
-            try writeReleaseMeta(dbURL: targetDBURL, info: releaseInfo)
+            try? writeReleaseMeta(dbURL: targetDBURL, info: releaseInfo)
             return releaseInfo
         } catch {
             try? fm.removeItem(at: tempTarget)
