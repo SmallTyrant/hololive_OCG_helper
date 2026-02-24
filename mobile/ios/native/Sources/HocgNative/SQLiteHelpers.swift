@@ -10,6 +10,21 @@ enum SQLiteError: Error {
     case execute(String)
 }
 
+extension SQLiteError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .open(let message):
+            return "SQLite open failed: \(message)"
+        case .prepare(let message):
+            return "SQLite prepare failed: \(message)"
+        case .step(let message):
+            return "SQLite step failed: \(message)"
+        case .execute(let message):
+            return "SQLite execute failed: \(message)"
+        }
+    }
+}
+
 enum SQLiteBindValue {
     case text(String)
     case int64(Int64)

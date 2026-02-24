@@ -195,17 +195,20 @@ final class UpdateRepository {
             sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil)
             do {
                 for (key, value) in values where !value.isEmpty {
-                    let stmt = try sqlitePrepare(
+                    let deleteStmt = try sqlitePrepare(db: db, sql: "DELETE FROM meta WHERE key=?")
+                    defer { sqlite3_finalize(deleteStmt) }
+                    try sqliteBind([.text(key)], to: deleteStmt)
+                    if sqlite3_step(deleteStmt) != SQLITE_DONE {
+                        throw SQLiteError.step(sqliteErrorMessage(db))
+                    }
+
+                    let insertStmt = try sqlitePrepare(
                         db: db,
-                        sql: """
-                        INSERT INTO meta(key, value)
-                        VALUES(?, ?)
-                        ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                        """,
+                        sql: "INSERT INTO meta(key, value) VALUES(?, ?)",
                     )
-                    defer { sqlite3_finalize(stmt) }
-                    try sqliteBind([.text(key), .text(value)], to: stmt)
-                    if sqlite3_step(stmt) != SQLITE_DONE {
+                    defer { sqlite3_finalize(insertStmt) }
+                    try sqliteBind([.text(key), .text(value)], to: insertStmt)
+                    if sqlite3_step(insertStmt) != SQLITE_DONE {
                         throw SQLiteError.step(sqliteErrorMessage(db))
                     }
                 }
