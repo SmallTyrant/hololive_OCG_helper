@@ -18,7 +18,7 @@ on:
       model:
         description: "OpenCode model"
         required: false
-        default: "anthropic/claude-sonnet-4-20250514"
+        default: "openai/gpt-5.3-codex"
   issues:
     types: [labeled]
   issue_comment:
@@ -89,6 +89,7 @@ jobs:
       - uses: anomalyco/opencode/github@latest
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         with:
           model: ${{ github.event.inputs.model }}
@@ -97,7 +98,7 @@ jobs:
             ${{ github.event.inputs.prompt }}
 
   # ============================================================
-  # 1) OPENCODE RUN (Issue label = go)  → Claude 1회
+  # 1) OPENCODE RUN (Issue label = go)
   # ============================================================
 
   opencode_go:
@@ -112,9 +113,10 @@ jobs:
       - uses: anomalyco/opencode/github@latest
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         with:
-          model: anthropic/claude-sonnet-4-20250514
+          model: openai/gpt-5.3-codex
           use_github_token: true
           prompt: |
             Create PR(s) for this request.
@@ -298,7 +300,7 @@ jobs:
             });
 
   # ============================================================
-  # 7) FIX ONCE (Claude 최대 1회 추가)
+  # 7) FIX ONCE (최대 1회 추가)
   # ============================================================
 
   fix_once:
@@ -330,9 +332,10 @@ jobs:
         if: steps.guard.outputs.attempted != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         with:
-          model: anthropic/claude-sonnet-4-20250514
+          model: openai/gpt-5.3-codex
           use_github_token: true
           prompt: |
             FIX MODE (single attempt).
