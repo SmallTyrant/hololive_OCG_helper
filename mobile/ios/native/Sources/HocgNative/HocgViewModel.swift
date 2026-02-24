@@ -49,6 +49,9 @@ final class HocgViewModel: ObservableObject {
     }
 
     func onSelectPrint(_ printId: Int64) {
+        if state.selectedPrintId == printId, state.detailLoading {
+            return
+        }
         showDetail(printId)
     }
 
@@ -225,13 +228,22 @@ final class HocgViewModel: ObservableObject {
             state.selectedPrintId = nil
             state.detailKoText = ""
             state.detailJaText = ""
+            state.detailLoading = false
             state.imageState = .placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다.")
             return
         }
 
         searchTask = Task {
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            guard !Task.isCancelled else {
+                return
+            }
+
             let needsUpdate = await runIO {
                 self.dbRepository.needsDbUpdate()
+            }
+            guard !Task.isCancelled else {
+                return
             }
             if needsUpdate {
                 applyMissingDbState()
@@ -239,6 +251,7 @@ final class HocgViewModel: ObservableObject {
                 state.selectedPrintId = nil
                 state.detailKoText = ""
                 state.detailJaText = ""
+                state.detailLoading = false
                 state.imageState = .placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다.")
                 return
             }
@@ -246,9 +259,18 @@ final class HocgViewModel: ObservableObject {
             let rows = await runIO {
                 self.dbRepository.querySuggest(query)
             }
+            guard !Task.isCancelled else {
+                return
+            }
 
+            let selectedBefore = state.selectedPrintId
             state.results = rows
             state.persistentMessage = nil
+
+            if let selectedBefore,
+               rows.contains(where: { $0.printId == selectedBefore }) {
+                return
+            }
 
             if let first = rows.first {
                 showDetail(first.printId)
@@ -256,6 +278,7 @@ final class HocgViewModel: ObservableObject {
                 state.selectedPrintId = nil
                 state.detailKoText = ""
                 state.detailJaText = ""
+                state.detailLoading = false
                 state.imageState = .placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다.")
             }
         }
@@ -265,27 +288,30 @@ final class HocgViewModel: ObservableObject {
         detailTask?.cancel()
         detailTask = Task {
             state.selectedPrintId = printId
-            let repository = dbRepository
-
-            async let briefValue = runIO {
-                repository.getPrintBrief(printId: printId)
+            state.detailKoText = ""
+            state.detailJaText = ""
+            state.detailLoading = true
+            let snapshot = await runIO {
+                self.dbRepository.loadCardSnapshot(printId: printId)
             }
-            async let detailValue = runIO {
-                repository.loadCardDetail(printId: printId)
-            }
-            let (brief, detail) = await (briefValue, detailValue)
 
-            guard let brief else {
+            guard !Task.isCancelled, state.selectedPrintId == printId else {
+                return
+            }
+
+            guard let snapshot else {
                 state.detailKoText = "[ERROR] 상세 로드 실패"
                 state.detailJaText = ""
+                state.detailLoading = false
                 state.imageState = .error("이미지 로딩 실패")
                 return
             }
 
-            state.detailKoText = detail?.koText ?? ""
-            state.detailJaText = detail?.jaText ?? ""
+            state.detailKoText = snapshot.detail.koText
+            state.detailJaText = snapshot.detail.jaText
+            state.detailLoading = false
 
-            let cardNumber = brief.cardNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cardNumber = snapshot.brief.cardNumber.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !cardNumber.isEmpty else {
                 state.imageState = .placeholder("이미지 없음")
                 return
@@ -293,7 +319,7 @@ final class HocgViewModel: ObservableObject {
 
             state.imageState = .loading
 
-            let loaded = await imageRepository.downloadIfNeeded(cardNumber: cardNumber, imageURL: brief.imageUrl)
+            let loaded = await imageRepository.downloadIfNeeded(cardNumber: cardNumber, imageURL: snapshot.brief.imageUrl)
             if state.selectedPrintId == printId {
                 state.imageState = loaded
             }

@@ -72,6 +72,9 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onSelectPrint(printId: Long) {
+        if (state.selectedPrintId == printId && state.detailLoading) {
+            return
+        }
         showDetail(printId)
     }
 
@@ -257,10 +260,13 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
                     selectedPrintId = null,
                     detailKoText = "",
                     detailJaText = "",
+                    detailLoading = false,
                     imageState = ImageState.Placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다."),
                 )
                 return@launch
             }
+
+            delay(120)
 
             val needsUpdate = withContext(Dispatchers.IO) {
                 dbRepository.needsDbUpdate()
@@ -272,6 +278,7 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
                     selectedPrintId = null,
                     detailKoText = "",
                     detailJaText = "",
+                    detailLoading = false,
                     imageState = ImageState.Placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다."),
                 )
                 return@launch
@@ -281,10 +288,16 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
                 dbRepository.querySuggest(query)
             }
 
+            val selectedBefore = state.selectedPrintId
+
             state = state.copy(
                 results = rows,
                 persistentMessage = null,
             )
+
+            if (selectedBefore != null && rows.any { it.printId == selectedBefore }) {
+                return@launch
+            }
 
             val first = rows.firstOrNull()
             if (first == null) {
@@ -292,6 +305,7 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
                     selectedPrintId = null,
                     detailKoText = "",
                     detailJaText = "",
+                    detailLoading = false,
                     imageState = ImageState.Placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다."),
                 )
             } else {
@@ -303,42 +317,48 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
     private fun showDetail(printId: Long) {
         detailJob?.cancel()
         detailJob = viewModelScope.launch {
-            state = state.copy(selectedPrintId = printId)
+            state = state.copy(
+                selectedPrintId = printId,
+                detailKoText = "",
+                detailJaText = "",
+                detailLoading = true,
+            )
 
-            val briefDeferred = async(Dispatchers.IO) {
-                dbRepository.getPrintBrief(printId)
+            val snapshot = withContext(Dispatchers.IO) {
+                dbRepository.loadCardSnapshot(printId)
             }
-            val detailDeferred = async(Dispatchers.IO) {
-                dbRepository.loadCardDetail(printId)
-            }
-            val brief = briefDeferred.await()
-            val detail = detailDeferred.await()
 
-            if (brief == null) {
+            if (state.selectedPrintId != printId) {
+                return@launch
+            }
+
+            if (snapshot == null) {
                 state = state.copy(
                     detailKoText = "[ERROR] 상세 로드 실패",
                     detailJaText = "",
+                    detailLoading = false,
                     imageState = ImageState.Error("이미지 로딩 실패"),
                 )
                 return@launch
             }
 
             state = state.copy(
-                detailKoText = detail?.koText.orEmpty(),
-                detailJaText = detail?.jaText.orEmpty(),
-                imageState = if (brief.cardNumber.isBlank()) {
+                detailKoText = snapshot.detail.koText,
+                detailJaText = snapshot.detail.jaText,
+                detailLoading = false,
+                imageState = if (snapshot.brief.cardNumber.isBlank()) {
                     ImageState.Placeholder("이미지 없음")
                 } else {
                     ImageState.Loading
                 },
             )
 
-            if (brief.cardNumber.isBlank()) {
+            if (snapshot.brief.cardNumber.isBlank()) {
                 return@launch
             }
 
             val loadedImageState = withContext(Dispatchers.IO) {
-                imageRepository.downloadIfNeeded(brief.cardNumber, brief.imageUrl)
+                imageRepository.downloadIfNeeded(snapshot.brief.cardNumber, snapshot.brief.imageUrl)
             }
 
             if (state.selectedPrintId == printId) {

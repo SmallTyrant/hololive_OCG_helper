@@ -670,6 +670,7 @@ private fun MobileLayout(
             DetailPanel(
                 koText = state.detailKoText,
                 jaText = state.detailJaText,
+                detailLoading = state.detailLoading,
                 preferredLanguage = preferredLanguage,
                 scrollable = false,
                 multiWordTags = multiWordTags,
@@ -822,6 +823,7 @@ private fun DesktopLayout(
                             DetailPanel(
                                 koText = state.detailKoText,
                                 jaText = state.detailJaText,
+                                detailLoading = state.detailLoading,
                                 preferredLanguage = preferredLanguage,
                                 scrollable = true,
                                 multiWordTags = multiWordTags,
@@ -856,6 +858,7 @@ private fun DesktopLayout(
                         DetailPanel(
                             koText = state.detailKoText,
                             jaText = state.detailJaText,
+                            detailLoading = state.detailLoading,
                             preferredLanguage = preferredLanguage,
                             scrollable = true,
                             multiWordTags = multiWordTags,
@@ -1039,6 +1042,7 @@ private fun Placeholder(message: String, error: Boolean) {
 private fun DetailPanel(
     koText: String,
     jaText: String,
+    detailLoading: Boolean,
     preferredLanguage: PreferredLanguage,
     scrollable: Boolean,
     multiWordTags: List<String> = emptyList(),
@@ -1071,7 +1075,17 @@ private fun DetailPanel(
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (!hasKo && !hasJa) {
-            Text("(본문 없음)", style = MaterialTheme.typography.bodyMedium)
+            if (detailLoading) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Text("(본문 로딩 중...)", style = MaterialTheme.typography.bodyMedium)
+                }
+            } else {
+                Text("(본문 없음)", style = MaterialTheme.typography.bodyMedium)
+            }
             return@Column
         }
 

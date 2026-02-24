@@ -358,6 +358,10 @@ final class DatabaseRepository {
     }
 
     func loadCardDetail(printId: Int64) -> CardDetail? {
+        loadCardSnapshot(printId: printId)?.detail
+    }
+
+    func loadCardSnapshot(printId: Int64) -> CardSnapshot? {
         do {
             return try withSQLite(path: paths.dbURL.path, readOnly: true) { db in
                 let sessionFingerprint = dbFingerprint(path: paths.dbURL.path)
@@ -366,6 +370,11 @@ final class DatabaseRepository {
                 let sql = hasJaEffectText ?
                 """
                 SELECT
+                    p.print_id,
+                    COALESCE(p.card_number,'') AS card_number,
+                    COALESCE(p.name_ja,'') AS name_ja,
+                    COALESCE(ko.name,'') AS name_ko,
+                    COALESCE(p.image_url,'') AS image_url,
                     COALESCE(ko.effect_text,'') AS ko_text,
                     COALESCE(ja.effect_text,'') AS ja_text,
                     COALESCE(ko.name,'') AS ko_name
@@ -377,6 +386,11 @@ final class DatabaseRepository {
                 :
                 """
                 SELECT
+                    p.print_id,
+                    COALESCE(p.card_number,'') AS card_number,
+                    COALESCE(p.name_ja,'') AS name_ja,
+                    COALESCE(ko.name,'') AS name_ko,
+                    COALESCE(p.image_url,'') AS image_url,
                     COALESCE(ko.effect_text,'') AS ko_text,
                     '' AS ja_text,
                     COALESCE(ko.name,'') AS ko_name
@@ -391,9 +405,17 @@ final class DatabaseRepository {
                     return nil
                 }
 
-                var koTextRaw = sqliteColumnString(stmt, index: 0)
-                let jaTextRaw = sqliteColumnString(stmt, index: 1)
-                let koName = Self.cleanDisplayName(sqliteColumnString(stmt, index: 2))
+                let brief = PrintBrief(
+                    printId: sqliteColumnInt64(stmt, index: 0),
+                    cardNumber: sqliteColumnString(stmt, index: 1),
+                    nameJa: sqliteColumnString(stmt, index: 2),
+                    nameKo: sqliteColumnString(stmt, index: 3),
+                    imageUrl: sqliteColumnString(stmt, index: 4),
+                )
+
+                var koTextRaw = sqliteColumnString(stmt, index: 5)
+                let jaTextRaw = sqliteColumnString(stmt, index: 6)
+                let koName = Self.cleanDisplayName(sqliteColumnString(stmt, index: 7))
 
                 // Strip duplicate card name from start of effect_text
                 if !koName.isEmpty {
@@ -405,10 +427,12 @@ final class DatabaseRepository {
                 }
                 let tags = try loadTagsForPrint(db: db, printId: printId, fingerprint: sessionFingerprint)
 
-                return CardDetail(
+                let detail = CardDetail(
                     koText: appendTagsIfNeeded(to: koTextRaw, tags: tags, sectionLabel: "태그"),
                     jaText: appendTagsIfNeeded(to: jaTextRaw, tags: tags, sectionLabel: "タグ"),
                 )
+
+                return CardSnapshot(brief: brief, detail: detail)
             }
         } catch {
             return nil

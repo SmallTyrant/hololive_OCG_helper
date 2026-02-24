@@ -631,7 +631,16 @@ struct ContentView: View {
 
         return VStack(alignment: .leading, spacing: 6) {
             if !hasKo && !hasJa {
-                Text("(본문 없음)")
+                if viewModel.state.detailLoading {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("(본문 로딩 중...)")
+                            .foregroundColor(.secondary)
+                    }
+                } else {
+                    Text("(본문 없음)")
+                }
             } else if hasKo && hasJa {
                 detailSection(title: "한국어", lines: koLines, expanded: $koExpanded)
                 detailSection(title: "일본어", lines: jaLines, expanded: $jaExpanded)

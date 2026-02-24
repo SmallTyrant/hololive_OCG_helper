@@ -3,6 +3,7 @@ package com.smalltyrant.hocgh.data
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import com.smalltyrant.hocgh.model.CardDetail
+import com.smalltyrant.hocgh.model.CardSnapshot
 import com.smalltyrant.hocgh.model.PrintBrief
 import com.smalltyrant.hocgh.model.PrintRow
 import java.time.Instant
@@ -380,6 +381,10 @@ class DbRepository(private val paths: AppPaths) {
     }
 
     fun loadCardDetail(printId: Long): CardDetail? {
+        return loadCardSnapshot(printId)?.detail
+    }
+
+    fun loadCardSnapshot(printId: Long): CardSnapshot? {
         return try {
             openReadOnly().useDb { db ->
                 val sessionFingerprint = dbFingerprint()
@@ -388,6 +393,11 @@ class DbRepository(private val paths: AppPaths) {
                 val sql = if (hasJaEffectText) {
                     """
                     SELECT
+                        p.print_id,
+                        COALESCE(p.card_number,'') AS card_number,
+                        COALESCE(p.name_ja,'') AS name_ja,
+                        COALESCE(ko.name,'') AS name_ko,
+                        COALESCE(p.image_url,'') AS image_url,
                         COALESCE(ko.effect_text,'') AS ko_text,
                         COALESCE(ja.effect_text,'') AS ja_text,
                         COALESCE(ko.name,'') AS ko_name
@@ -399,6 +409,11 @@ class DbRepository(private val paths: AppPaths) {
                 } else {
                     """
                     SELECT
+                        p.print_id,
+                        COALESCE(p.card_number,'') AS card_number,
+                        COALESCE(p.name_ja,'') AS name_ja,
+                        COALESCE(ko.name,'') AS name_ko,
+                        COALESCE(p.image_url,'') AS image_url,
                         COALESCE(ko.effect_text,'') AS ko_text,
                         '' AS ja_text,
                         COALESCE(ko.name,'') AS ko_name
@@ -415,6 +430,14 @@ class DbRepository(private val paths: AppPaths) {
                         return@useCursor null
                     }
 
+                    val brief = PrintBrief(
+                        printId = cursor.getLongOrZero("print_id"),
+                        cardNumber = cursor.getStringOrEmpty("card_number"),
+                        nameJa = cursor.getStringOrEmpty("name_ja"),
+                        nameKo = cursor.getStringOrEmpty("name_ko"),
+                        imageUrl = cursor.getStringOrEmpty("image_url"),
+                    )
+
                     var koTextRaw = cursor.getStringOrEmpty("ko_text")
                     val jaTextRaw = cursor.getStringOrEmpty("ja_text")
                     val koName = cleanDisplayName(cursor.getStringOrEmpty("ko_name"))
@@ -429,10 +452,12 @@ class DbRepository(private val paths: AppPaths) {
 
                     val tags = loadTagsForPrint(db, printId, sessionFingerprint)
 
-                    CardDetail(
+                    val detail = CardDetail(
                         koText = appendTagsIfNeeded(koTextRaw, tags, "태그"),
                         jaText = appendTagsIfNeeded(jaTextRaw, tags, "タグ"),
                     )
+
+                    CardSnapshot(brief = brief, detail = detail)
                 }
             }
         } catch (_: Throwable) {

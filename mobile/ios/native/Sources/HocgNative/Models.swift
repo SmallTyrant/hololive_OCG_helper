@@ -27,6 +27,11 @@ struct CardDetail {
     let jaText: String
 }
 
+struct CardSnapshot {
+    let brief: PrintBrief
+    let detail: CardDetail
+}
+
 struct DeckCardCandidate: Identifiable {
     let printId: Int64
     let cardNumber: String
@@ -61,6 +66,7 @@ struct HocgUiState {
     var selectedPrintId: Int64?
     var detailKoText: String = ""
     var detailJaText: String = ""
+    var detailLoading: Bool = false
     var imageState: CardImageState = .placeholder("카드를 검색 후 선택하면 이미지가 표시됩니다.")
     var imageCollapsed: Bool = false
     var updateRunning: Bool = false
