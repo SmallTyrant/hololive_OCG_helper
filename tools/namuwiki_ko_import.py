@@ -103,6 +103,7 @@ CARDNO_HEADER_KEYWORDS = (
 BULLET_MARKERS = ("■", "●", "◆", "◇", "•", "·")
 
 CARD_ID_ATTR_RE = re.compile(r"id=['\"](?P<id>[hH][A-Za-z]{1,5}\d{2}-\d{3})['\"]")
+CARD_ID_EXACT_RE = re.compile(r"^[hH][A-Za-z]{1,5}\d{2}-\d{3}$")
 RARITY_LINE_RE = re.compile(r"^(?:OSR|OUR|SEC|UR|SR|RR|R|C|U|P|S|PR|HR|AR|SP|SPR|\-)$", re.IGNORECASE)
 
 BAD_NAME_LABELS = {
@@ -383,6 +384,14 @@ def collect_card_numbers_in_table(table_rows: list[list[str]]) -> set[str]:
     return numbers
 
 
+def infer_card_number_from_table_context(table) -> str:
+    for node in table.find_all_previous(attrs={"id": True}, limit=128):
+        raw_id = normalize_ws(str(node.get("id") or ""))
+        if CARD_ID_EXACT_RE.fullmatch(raw_id):
+            return normalize_card_number(raw_id)
+    return ""
+
+
 def is_section_heading_line(line: str) -> bool:
     normalized = normalize_ws(line)
     if not normalized:
@@ -564,6 +573,7 @@ def parse_tables(
     best_by_card: dict[str, KoRow] = {}
 
     for table in soup.select("table"):
+        context_card_no = infer_card_number_from_table_context(table)
         table_rows: list[list[str]] = []
         for tr in table.select("tr"):
             cells = [normalize_ws(c.get_text(" ", strip=True)) for c in tr.find_all(["th", "td"])]
@@ -587,6 +597,9 @@ def parse_tables(
                     break
             if card_no:
                 break
+
+        if len(table_card_numbers) == 1 and context_card_no and context_card_no != card_no:
+            card_no = context_card_no
 
         if card_no and len(table_card_numbers) == 1:
             first_row = table_rows[0]
