@@ -1,6 +1,9 @@
 package com.smalltyrant.hocgh.ui
 
 import android.app.Application
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -10,6 +13,7 @@ import com.smalltyrant.hocgh.data.AppPaths
 import com.smalltyrant.hocgh.data.DbRepository
 import com.smalltyrant.hocgh.data.ImageRepository
 import com.smalltyrant.hocgh.data.UpdateRepository
+import com.smalltyrant.hocgh.model.AppUpdateDialogState
 import com.smalltyrant.hocgh.model.DeckCardCandidate
 import com.smalltyrant.hocgh.model.HocgUiState
 import com.smalltyrant.hocgh.model.ImageState
@@ -30,6 +34,7 @@ private const val DB_MISSING_TOAST = "DB파일이 존재하지 않습니다. 메
 private const val DB_UPDATING_TOAST = "갱신중..."
 private const val DB_UPDATED_TOAST = "갱신완료"
 private const val DB_RESTORED_TOAST = "번들 DB 복원완료"
+private const val APP_UPDATE_AVAILABLE_TOAST = "앱 업데이트가 있습니다"
 private const val BULK_IMAGE_MAX_CONCURRENCY = 10
 private const val BULK_IMAGE_RETRY_COUNT = 1
 
@@ -59,6 +64,7 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
     private var searchJob: Job? = null
     private var detailJob: Job? = null
     private var remotePromptShown = false
+    private var appUpdatePromptShown = false
 
     init {
         viewModelScope.launch {
@@ -89,6 +95,21 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
     fun onUpdateDialogConfirm() {
         state = state.copy(updateDialog = null)
         onManualUpdate()
+    }
+
+    fun onAppUpdateDialogDismiss() {
+        state = state.copy(appUpdateDialog = null)
+    }
+
+    fun onAppUpdateDialogConfirm() {
+        val dialog = state.appUpdateDialog ?: return
+        state = state.copy(appUpdateDialog = null)
+
+        val uri = runCatching { Uri.parse(dialog.downloadUrl) }.getOrNull() ?: return
+        val intent = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching {
+            getApplication<Application>().startActivity(intent)
+        }
     }
 
     fun onManualUpdate() {
@@ -247,6 +268,7 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         refreshList()
+        checkAppUpdateOnce()
         checkRemoteUpdateOnce()
     }
 
@@ -367,6 +389,55 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun checkAppUpdateOnce() {
+        if (appUpdatePromptShown) {
+            return
+        }
+
+        viewModelScope.launch {
+            val application = getApplication<Application>()
+            val localPackageInfo = runCatching {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    application.packageManager.getPackageInfo(
+                        application.packageName,
+                        PackageManager.PackageInfoFlags.of(0),
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    application.packageManager.getPackageInfo(application.packageName, 0)
+                }
+            }.getOrNull() ?: return@launch
+
+            val localCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                localPackageInfo.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                localPackageInfo.versionCode.toLong()
+            }
+            val localName = localPackageInfo.versionName.orEmpty()
+
+            val remoteInfo = withContext(Dispatchers.IO) {
+                updateRepository.fetchLatestApkInfo()
+            }
+
+            if (remoteInfo.versionCode <= localCode) {
+                return@launch
+            }
+
+            appUpdatePromptShown = true
+            state = state.copy(
+                appUpdateDialog = AppUpdateDialogState(
+                    localVersionName = localName,
+                    localVersionCode = localCode,
+                    remoteVersionName = remoteInfo.versionName,
+                    remoteVersionCode = remoteInfo.versionCode,
+                    downloadUrl = remoteInfo.assetUrl,
+                ),
+            )
+            pushToast(APP_UPDATE_AVAILABLE_TOAST)
+        }
+    }
+
     private fun checkRemoteUpdateOnce() {
         if (remotePromptShown) {
             return
@@ -389,6 +460,10 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             if (remoteDate == localDate) {
+                return@launch
+            }
+
+            if (state.appUpdateDialog != null) {
                 return@launch
             }
 

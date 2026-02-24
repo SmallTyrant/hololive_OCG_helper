@@ -277,34 +277,66 @@ fun HocgScreen(
         }
     }
 
-    state.updateDialog?.let { dialog ->
+    state.appUpdateDialog?.let { dialog ->
         AlertDialog(
-            onDismissRequest = viewModel::onUpdateDialogDismiss,
-            title = { Text("DB 업데이트") },
+            onDismissRequest = viewModel::onAppUpdateDialogDismiss,
+            title = { Text("앱 업데이트") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("DB 업데이트가 있습니다. 업데이트 하시겠습니까?")
+                    Text("앱 업데이트가 있습니다. 업데이트 하시겠습니까?")
                     Text(
-                        text = "로컬 DB 날짜: ${dialog.localDate ?: "없음"}",
+                        text = "현재 버전: ${dialog.localVersionName} (${dialog.localVersionCode})",
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Text(
-                        text = "GitHub DB 날짜: ${dialog.remoteDate}",
+                        text = "GitHub 버전: ${dialog.remoteVersionName.ifBlank { "알 수 없음" }} (${dialog.remoteVersionCode})",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
             },
             confirmButton = {
-                ElevatedButton(onClick = viewModel::onUpdateDialogConfirm) {
+                ElevatedButton(onClick = viewModel::onAppUpdateDialogConfirm) {
                     Text("업데이트")
                 }
             },
             dismissButton = {
-                TextButton(onClick = viewModel::onUpdateDialogDismiss) {
+                TextButton(onClick = viewModel::onAppUpdateDialogDismiss) {
                     Text("나중에")
                 }
             },
         )
+    }
+
+    if (state.appUpdateDialog == null) {
+        state.updateDialog?.let { dialog ->
+            AlertDialog(
+                onDismissRequest = viewModel::onUpdateDialogDismiss,
+                title = { Text("DB 업데이트") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("DB 업데이트가 있습니다. 업데이트 하시겠습니까?")
+                        Text(
+                            text = "로컬 DB 날짜: ${dialog.localDate ?: "없음"}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Text(
+                            text = "GitHub DB 날짜: ${dialog.remoteDate}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                },
+                confirmButton = {
+                    ElevatedButton(onClick = viewModel::onUpdateDialogConfirm) {
+                        Text("업데이트")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = viewModel::onUpdateDialogDismiss) {
+                        Text("나중에")
+                    }
+                },
+            )
+        }
     }
 
     ModalNavigationDrawer(

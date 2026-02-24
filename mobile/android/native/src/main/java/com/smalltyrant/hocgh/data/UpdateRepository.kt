@@ -13,6 +13,10 @@ import java.time.Duration
 private const val GITHUB_REPO = "SmallTyrant/hololive_OCG_helper"
 private const val LATEST_RELEASE_API = "https://api.github.com/repos/$GITHUB_REPO/releases/latest"
 private const val LATEST_DB_DIRECT_URL = "https://github.com/$GITHUB_REPO/releases/latest/download/hololive_ocg.sqlite"
+private const val APP_RELEASE_TAG = "install_file1"
+private const val APP_APK_ASSET_NAME = "app-release.apk"
+private const val APP_APK_DIRECT_URL = "https://github.com/$GITHUB_REPO/releases/download/$APP_RELEASE_TAG/$APP_APK_ASSET_NAME"
+private const val APP_VERSION_JSON_URL = "https://github.com/$GITHUB_REPO/releases/download/$APP_RELEASE_TAG/version.json"
 private val DB_EXTENSIONS = listOf(".sqlite", ".sqlite3", ".db")
 
 data class ReleaseDbInfo(
@@ -22,6 +26,15 @@ data class ReleaseDbInfo(
     val assetUpdatedAt: String,
     val publishedAt: String,
     val createdAt: String,
+)
+
+data class ReleaseApkInfo(
+    val tag: String,
+    val assetName: String,
+    val assetUrl: String,
+    val assetUpdatedAt: String,
+    val versionName: String,
+    val versionCode: Long,
 )
 
 class UpdateRepository {
@@ -43,6 +56,21 @@ class UpdateRepository {
                 },
             )
         }.getOrNull()
+    }
+
+    fun fetchLatestApkInfo(): ReleaseApkInfo {
+        return runCatching {
+            fetchVersionJsonApkInfo()
+        }.getOrElse {
+            ReleaseApkInfo(
+                tag = APP_RELEASE_TAG,
+                assetName = APP_APK_ASSET_NAME,
+                assetUrl = APP_APK_DIRECT_URL,
+                assetUpdatedAt = "",
+                versionName = "1.0",
+                versionCode = 100,
+            )
+        }
     }
 
     fun downloadLatestDb(targetDbFile: File): ReleaseDbInfo {
@@ -91,8 +119,12 @@ class UpdateRepository {
     }
 
     private fun fetchLatestReleasePayload(): JSONObject {
+        return fetchReleasePayload(LATEST_RELEASE_API)
+    }
+
+    private fun fetchReleasePayload(url: String): JSONObject {
         val request = Request.Builder()
-            .url(LATEST_RELEASE_API)
+            .url(url)
             .header("User-Agent", "hOCG_H/1.1")
             .header("Accept", "application/vnd.github+json")
             .build()
@@ -162,6 +194,55 @@ class UpdateRepository {
         }
 
         return "hololive_ocg.sqlite" to LATEST_DB_DIRECT_URL
+    }
+
+    private fun fetchVersionJsonApkInfo(): ReleaseApkInfo {
+        val request = Request.Builder()
+            .url(APP_VERSION_JSON_URL)
+            .header("User-Agent", "hOCG_H/1.1")
+            .header("Accept", "application/json")
+            .build()
+
+        val payload = http.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("Version JSON HTTP ${response.code}")
+            }
+            val body = response.body?.string().orEmpty()
+            if (body.isBlank()) {
+                throw IOException("Version JSON body is empty")
+            }
+            JSONObject(body)
+        }
+
+        val versionName = payload.optString("versionName", "").ifBlank {
+            payload.optString("version", "1.0")
+        }
+        val fallbackCode = versionCodeFromName(versionName)
+        val versionCode = payload.optLong("versionCode", fallbackCode).takeIf { it > 0 } ?: fallbackCode
+        val downloadUrl = payload.optString("apkUrl", "").ifBlank {
+            payload.optString("downloadUrl", APP_APK_DIRECT_URL)
+        }
+
+        return ReleaseApkInfo(
+            tag = payload.optString("tag", APP_RELEASE_TAG),
+            assetName = APP_APK_ASSET_NAME,
+            assetUrl = downloadUrl,
+            assetUpdatedAt = payload.optString("updatedAt", ""),
+            versionName = versionName,
+            versionCode = versionCode,
+        )
+    }
+
+    private fun versionCodeFromName(versionName: String): Long {
+        val parts = versionName.split('.')
+            .mapNotNull { it.toIntOrNull() }
+        if (parts.isEmpty()) {
+            return 100
+        }
+        val major = parts.getOrElse(0) { 1 }
+        val minor = parts.getOrElse(1) { 0 }
+        val patch = parts.getOrElse(2) { 0 }
+        return major * 100L + minor * 10L + patch
     }
 
     private fun validateSqlite(dbFile: File) {

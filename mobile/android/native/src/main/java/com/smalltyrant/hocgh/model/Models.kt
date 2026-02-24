@@ -37,6 +37,14 @@ data class UpdateDialogState(
     val remoteDate: String,
 )
 
+data class AppUpdateDialogState(
+    val localVersionName: String,
+    val localVersionCode: Long,
+    val remoteVersionName: String,
+    val remoteVersionCode: Long,
+    val downloadUrl: String,
+)
+
 
 data class DeckCardCandidate(
     val printId: Long,
@@ -73,4 +81,5 @@ data class HocgUiState(
     val updateStatusError: Boolean = false,
     val persistentMessage: String? = null,
     val updateDialog: UpdateDialogState? = null,
+    val appUpdateDialog: AppUpdateDialogState? = null,
 )
