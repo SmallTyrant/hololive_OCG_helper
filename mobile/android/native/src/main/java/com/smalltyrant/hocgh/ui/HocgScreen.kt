@@ -1358,12 +1358,12 @@ private fun prettifyDetailText(
         .map(::normalizeInlineWhitespace)
         .filter { it.isNotEmpty() }
 
-    if (lines.size <= 2) {
-        var merged = normalizeInlineWhitespace(lines.joinToString(" "))
-        val marker = sectionMarkerRegex.find(merged)
-        if (marker != null && marker.range.first > 0) {
-            merged = merged.substring(marker.range.first)
-        }
+        if (lines.size <= 2) {
+            var merged = normalizeInlineWhitespace(lines.joinToString(" "))
+            val marker = sectionMarkerRegex.find(merged)
+            if (marker != null && marker.range.first > 0 && !marker.value.startsWith("#")) {
+                merged = merged.substring(marker.range.first)
+            }
 
         merged = protectMultiWordTags(merged, multiWordTags)
         lineBreakPatterns.forEach { (pattern, replacement) ->
@@ -1427,7 +1427,7 @@ private fun prettifyDetailText(
         }
     }
 
-    val markerIndex = expanded.indexOfFirst { it.startsWith("#") || splitSectionLabel(it) != null }
+    val markerIndex = expanded.indexOfFirst { splitSectionLabel(it) != null }
     val trimmed = if (markerIndex >= 0) expanded.drop(markerIndex) else expanded
     val filtered = trimmed.filterNot { isNoiseMetadataLine(it, metadataTokens) }
 

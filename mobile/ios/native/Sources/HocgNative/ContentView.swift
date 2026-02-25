@@ -776,7 +776,10 @@ struct ContentView: View {
         if lines.count <= 2 {
             var merged = normalizeInlineWhitespace(lines.joined(separator: " "))
             if let markerRange = firstSectionRange(in: merged, regex: sectionMarkerRegex), markerRange.lowerBound > merged.startIndex {
-                merged = String(merged[markerRange.lowerBound...])
+                let markerChar = merged[markerRange.lowerBound]
+                if markerChar != "#" {
+                    merged = String(merged[markerRange.lowerBound...])
+                }
             }
 
             merged = protectMultiWordTags(merged, tags: multiWordTags)
@@ -840,7 +843,7 @@ struct ContentView: View {
             }
         }
 
-        let markerIndex = expanded.firstIndex(where: { $0.hasPrefix("#") || splitSectionLabel($0) != nil })
+        let markerIndex = expanded.firstIndex(where: { splitSectionLabel($0) != nil })
         let trimmed = markerIndex.map { Array(expanded[$0...]) } ?? expanded
         let filtered = trimmed.filter { !isNoiseMetadataLine($0, metadataTokens: metadataTokens) }
 
