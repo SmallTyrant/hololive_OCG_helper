@@ -360,14 +360,8 @@ struct ContentView: View {
         }
 
         if hasKo && hasJa {
-            let expandBoth = koLines.count <= 2 && jaLines.count >= 4
-            if expandBoth {
-                koExpanded = true
-                jaExpanded = true
-            } else {
-                koExpanded = selectedPreferredLanguage == .korean
-                jaExpanded = selectedPreferredLanguage == .japanese
-            }
+            koExpanded = selectedPreferredLanguage == .korean
+            jaExpanded = selectedPreferredLanguage == .japanese
         } else {
             koExpanded = hasKo
             jaExpanded = hasJa
