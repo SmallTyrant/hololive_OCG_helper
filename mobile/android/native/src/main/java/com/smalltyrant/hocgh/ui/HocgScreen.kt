@@ -197,7 +197,7 @@ private val JA_LINE_BREAK_PATTERNS = listOf(
 )
 
 private val DETAIL_PREFIX_PATTERN = Regex(
-    pattern = """^(?:(?:.+?)\s+)?(?:서포트|サポート)\s*[/／]\s*(?:아이템|스태프|이벤트|이벤타|툴|마스코트|アイテム|スタッフ|イベント|ツール|マスコット)(?=$|\s|[/／:：(\[])""",
+    pattern = """^(?:(?:.+?)\s+)?(?:서포트|サポート)\s*[/／]\s*(?:아이템|스태프|이벤트|이벤타|툴|마스코트|팬|アイテム|スタッフ|イベント|ツール|マスコット|ファン)(?=$|\s|[/／:：(\[])""",
 )
 
 private val INLINE_TAG_PATTERN = Regex(pattern = """#[\p{L}\p{N}_]+""")
@@ -1368,7 +1368,12 @@ private fun prettifyDetailText(
         if (lines.size <= 2) {
             var merged = normalizeInlineWhitespace(lines.joinToString(" "))
             val marker = sectionMarkerRegex.find(merged)
-            if (marker != null && marker.range.first > 0 && !marker.value.startsWith("#")) {
+            if (
+                marker != null &&
+                marker.range.first > 0 &&
+                !marker.value.startsWith("#") &&
+                !DETAIL_PREFIX_PATTERN.containsMatchIn(merged)
+            ) {
                 merged = merged.substring(marker.range.first)
             }
 

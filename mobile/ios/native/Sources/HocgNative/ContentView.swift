@@ -34,7 +34,7 @@ private let sectionLabels: [String] = [
     "LIFE",
     "HP",
 ]
-private let detailPrefixPattern = #"^(?:(?:.+?)\s+)?(?:서포트|サポート)\s*[/／]\s*(?:아이템|스태프|이벤트|이벤타|툴|마스코트|アイテム|スタッフ|イベント|ツール|マスコット)(?=$|\s|[/／:：(\[])"#
+private let detailPrefixPattern = #"^(?:(?:.+?)\s+)?(?:서포트|サポート)\s*[/／]\s*(?:아이템|스태프|이벤트|이벤타|툴|마스코트|팬|アイテム|スタッフ|イベント|ツール|マスコット|ファン)(?=$|\s|[/／:：(\[])"#
 private let sectionLabelsSorted = sectionLabels.sorted { $0.count > $1.count }
 private let japaneseCharPattern = "[\\u3040-\\u30ff\\u31f0-\\u31ff\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff々〆ヵヶ]"
 private let koSectionMarkerRegex = try! NSRegularExpression(
@@ -783,7 +783,7 @@ struct ContentView: View {
             var merged = normalizeInlineWhitespace(lines.joined(separator: " "))
             if let markerRange = firstSectionRange(in: merged, regex: sectionMarkerRegex), markerRange.lowerBound > merged.startIndex {
                 let markerChar = merged[markerRange.lowerBound]
-                if markerChar != "#" {
+                if markerChar != "#" && !matchesDetailPrefix(merged) {
                     merged = String(merged[markerRange.lowerBound...])
                 }
             }
@@ -1097,6 +1097,17 @@ struct ContentView: View {
             return nil
         }
         return Range(match.range, in: text)
+    }
+
+    private func matchesDetailPrefix(_ text: String) -> Bool {
+        guard let regex = try? NSRegularExpression(pattern: detailPrefixPattern) else {
+            return false
+        }
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = regex.firstMatch(in: text, options: [], range: range) else {
+            return false
+        }
+        return match.range.location == 0
     }
 
     private func normalizeTagLine(_ line: String) -> String {

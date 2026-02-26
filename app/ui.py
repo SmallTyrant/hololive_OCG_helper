@@ -148,7 +148,7 @@ JA_SECTION_MARKER_RE = re.compile(
 
 
 DETAIL_PREFIX_RE = re.compile(
-    r"^(?:(?:.+?)\s+)?(?:서포트|サポート)\s*[\/／]\s*(?:아이템|스태프|이벤트|이벤타|툴|마스코트|アイテム|スタッフ|イベント|ツール|マスコット)(?=$|\s|[\/／:：(\[])"
+    r"^(?:(?:.+?)\s+)?(?:서포트|サポート)\s*[\/／]\s*(?:아이템|스태프|이벤트|이벤타|툴|마스코트|팬|アイテム|スタッフ|イベント|ツール|マスコット|ファン)(?=$|\s|[\/／:：(\[])"
 )
 
 HTML_TAG_RE = re.compile(r"<[^>]+>", re.IGNORECASE)
@@ -263,7 +263,7 @@ def _prettify_detail_text(
     if len(lines) <= 2:
         merged = normalize_inline_ws(" ".join(lines) if lines else normalized)
         marker = section_marker_re.search(merged)
-        if marker and marker.start() > 0 and marker.group() != "#":
+        if marker and marker.start() > 0 and marker.group() != "#" and not DETAIL_PREFIX_RE.match(merged):
             merged = merged[marker.start():]
 
         merged = _protect_multiword_tags(merged)
