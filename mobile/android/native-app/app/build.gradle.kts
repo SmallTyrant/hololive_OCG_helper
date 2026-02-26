@@ -31,8 +31,8 @@ android {
         applicationId = "com.smalltyrant.hocgh"
         minSdk = 26
         targetSdk = 35
-        versionCode = 127
-        versionName = "1.2.7"
+        versionCode = 128
+        versionName = "1.2.8"
     }
 
     if (hasReleaseSigning) {

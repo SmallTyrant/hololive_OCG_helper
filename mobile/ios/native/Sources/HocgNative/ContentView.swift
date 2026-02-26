@@ -38,10 +38,10 @@ private let detailPrefixPattern = #"^(?:(?:.+?)\s+)?(?:서포트|サポート)\s
 private let sectionLabelsSorted = sectionLabels.sorted { $0.count > $1.count }
 private let japaneseCharPattern = "[\\u3040-\\u30ff\\u31f0-\\u31ff\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff々〆ヵヶ]"
 private let koSectionMarkerRegex = try! NSRegularExpression(
-    pattern: "SP 오시 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\\s+\\S)|#"
+    pattern: "SP 오시 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\\s+(?![+\\-]\\d)\\S)|#"
 )
 private let jaSectionMarkerRegex = try! NSRegularExpression(
-    pattern: "SP推しスキル|推しスキル|コラボエフェクト|ブルームエフェクト|ギフト|エクストラ|アーツ(?=\\s+\\S)|カードタイプ|タグ|レアリティ|能力テキスト|バトンタッチ|#"
+    pattern: "SP推しスキル|推しスキル|コラボエフェクト|ブルームエフェクト|ギフト|エクストラ|アーツ(?=\\s+(?![+\\-]\\d)\\S)|カードタイプ|タグ|レアリティ|能力テキスト|バトンタッチ|#"
 )
 private let tagTokenRegex = try! NSRegularExpression(pattern: "#[^\\s#]+")
 private let koMetadataTokenSet: Set<String> = [
@@ -92,7 +92,7 @@ private let koLineBreakRules: [(String, String)] = [
     ("\\s*콜라보 이펙트\\s*", "\n콜라보 이펙트\n"),
     ("\\s*기프트\\s*", "\n기프트\n"),
     ("\\s*엑스트라\\s*", "\n엑스트라\n"),
-    ("\\s*아츠(?=\\s+\\S)\\s*", "\n아츠\n"),
+    ("\\s*아츠(?=\\s+(?![+\\-]\\d)\\S)\\s*", "\n아츠\n"),
     ("\\s+#", "\n#"),
 ]
 private let jaLineBreakRules: [(String, String)] = [
@@ -102,7 +102,7 @@ private let jaLineBreakRules: [(String, String)] = [
     ("\\s*ブルームエフェクト\\s*", "\nブルームエフェクト\n"),
     ("\\s*ギフト\\s*", "\nギフト\n"),
     ("\\s*エクストラ\\s*", "\nエクストラ\n"),
-    ("\\s*アーツ(?=\\s+\\S)\\s*", "\nアーツ\n"),
+    ("\\s*アーツ(?=\\s+(?![+\\-]\\d)\\S)\\s*", "\nアーツ\n"),
     ("\\s*カードタイプ\\s*", "\nカードタイプ\n"),
     ("\\s*タグ\\s*", "\nタグ\n"),
     ("\\s*レアリティ\\s*", "\nレアリティ\n"),

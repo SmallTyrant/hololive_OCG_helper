@@ -121,10 +121,10 @@ private val SECTION_LABELS = listOf(
 private val SECTION_LABELS_SORTED = SECTION_LABELS.sortedByDescending { it.length }
 private val JAPANESE_CHAR_REGEX = Regex("[\\u3040-\\u30ff\\u31f0-\\u31ff\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff々〆ヵヶ]")
 private val KO_SECTION_MARKER_REGEX = Regex(
-    "SP 오시 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\\s+\\S)|#",
+    "SP 오시 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\\s+(?![+\\-]\\d)\\S)|#",
 )
 private val JA_SECTION_MARKER_REGEX = Regex(
-    "SP推しスキル|推しスキル|コラボエフェクト|ブルームエフェクト|ギフト|エクストラ|アーツ(?=\\s+\\S)|カードタイプ|タグ|レアリティ|能力テキスト|バトンタッチ|#",
+    "SP推しスキル|推しスキル|コラボエフェクト|ブルームエフェクト|ギフト|エクストラ|アーツ(?=\\s+(?![+\\-]\\d)\\S)|カードタイプ|タグ|レアリティ|能力テキスト|バトンタッチ|#",
 )
 private val TAG_TOKEN_REGEX = Regex("#[^\\s#]+")
 private val JA_TAG_OBJECT_SPLIT_REGEX = Regex("^(#[^\\s#を]+(?:\\s+[^\\s#を]+)*)(を.+)$")
@@ -176,7 +176,7 @@ private val KO_LINE_BREAK_PATTERNS = listOf(
     Regex("\\s*콜라보 이펙트\\s*") to "\n콜라보 이펙트\n",
     Regex("\\s*기프트\\s*") to "\n기프트\n",
     Regex("\\s*엑스트라\\s*") to "\n엑스트라\n",
-    Regex("\\s*아츠(?=\\s+\\S)\\s*") to "\n아츠\n",
+    Regex("\\s*아츠(?=\\s+(?![+\\-]\\d)\\S)\\s*") to "\n아츠\n",
     Regex("\\s+#") to "\n#",
 )
 private val JA_LINE_BREAK_PATTERNS = listOf(
@@ -186,7 +186,7 @@ private val JA_LINE_BREAK_PATTERNS = listOf(
     Regex("\\s*ブルームエフェクト\\s*") to "\nブルームエフェクト\n",
     Regex("\\s*ギフト\\s*") to "\nギフト\n",
     Regex("\\s*エクストラ\\s*") to "\nエクストラ\n",
-    Regex("\\s*アーツ(?=\\s+\\S)\\s*") to "\nアーツ\n",
+    Regex("\\s*アーツ(?=\\s+(?![+\\-]\\d)\\S)\\s*") to "\nアーツ\n",
     Regex("\\s*カードタイプ\\s*") to "\nカードタイプ\n",
     Regex("\\s*タグ\\s*") to "\nタグ\n",
     Regex("\\s*レアリティ\\s*") to "\nレアリティ\n",
