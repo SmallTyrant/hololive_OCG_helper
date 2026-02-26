@@ -38,7 +38,7 @@ private let detailPrefixPattern = #"^(?:(?:.+?)\s+)?(?:서포트|サポート)\s
 private let sectionLabelsSorted = sectionLabels.sorted { $0.count > $1.count }
 private let japaneseCharPattern = "[\\u3040-\\u30ff\\u31f0-\\u31ff\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff々〆ヵヶ]"
 private let koSectionMarkerRegex = try! NSRegularExpression(
-    pattern: "SP 오시 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\\s+[A-Za-z가-힣])|#"
+    pattern: "SP 오시 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\\s+\\S)|#"
 )
 private let jaSectionMarkerRegex = try! NSRegularExpression(
     pattern: "SP推しスキル|推しスキル|コラボエフェクト|ブルームエフェクト|ギフト|エクストラ|アーツ(?=\\s+\\S)|カードタイプ|タグ|レアリティ|能力テキスト|バトンタッチ|#"
@@ -90,10 +90,9 @@ private let koLineBreakRules: [(String, String)] = [
     ("\\s*SP 오시 스킬\\s*", "\nSP 오시 스킬\n"),
     ("\\s*(?<!SP )오시 스킬\\s*", "\n오시 스킬\n"),
     ("\\s*콜라보 이펙트\\s*", "\n콜라보 이펙트\n"),
-    ("\\s*블룸 이펙트\\s*", "\n블룸 이펙트\n"),
     ("\\s*기프트\\s*", "\n기프트\n"),
     ("\\s*엑스트라\\s*", "\n엑스트라\n"),
-    ("\\s*아츠(?=\\s+[A-Za-z가-힣])\\s*", "\n아츠\n"),
+    ("\\s*아츠(?=\\s+\\S)\\s*", "\n아츠\n"),
     ("\\s+#", "\n#"),
 ]
 private let jaLineBreakRules: [(String, String)] = [
@@ -112,6 +111,8 @@ private let jaLineBreakRules: [(String, String)] = [
     ("(?:^|\\s)色(?=\\s+\\S)", "\n色\n"),
     ("\\s+#", "\n#"),
 ]
+private let htmlTagPattern = "<[^>]+>"
+private let widthArtifactPattern = "(?i)\\bwidth\\s*=\\s*\\d+%?>?"
 
 private enum AppThemeMode: String, CaseIterable, Identifiable {
     case system
@@ -712,7 +713,9 @@ struct ContentView: View {
     }
 
     private func sanitizeDetailLine(_ line: String) -> String {
-        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        let noHtml = line.replacingOccurrences(of: htmlTagPattern, with: " ", options: .regularExpression)
+        let noWidth = noHtml.replacingOccurrences(of: widthArtifactPattern, with: " ", options: .regularExpression)
+        let trimmed = noWidth.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let regex = try? NSRegularExpression(pattern: detailPrefixPattern) else {
             return trimmed
         }
@@ -727,6 +730,7 @@ struct ContentView: View {
             replacements: koDetailReplacements,
             sectionMarkerRegex: koSectionMarkerRegex,
             lineBreakRules: koLineBreakRules,
+            sectionBreakOnceLabels: ["블룸 이펙트"],
             tagLabel: "태그",
             metadataTokens: koMetadataTokenSet,
             stripJapaneseCharacters: true,
@@ -740,6 +744,7 @@ struct ContentView: View {
             replacements: jaDetailReplacements,
             sectionMarkerRegex: jaSectionMarkerRegex,
             lineBreakRules: jaLineBreakRules,
+            sectionBreakOnceLabels: ["ブルームエフェクト"],
             tagLabel: "タグ",
             metadataTokens: jaMetadataTokenSet,
             multiWordTags: multiWordTags
@@ -751,6 +756,7 @@ struct ContentView: View {
         replacements: [(String, String)],
         sectionMarkerRegex: NSRegularExpression,
         lineBreakRules: [(String, String)],
+        sectionBreakOnceLabels: [String],
         tagLabel: String,
         metadataTokens: Set<String>,
         stripJapaneseCharacters: Bool = false,
@@ -783,6 +789,9 @@ struct ContentView: View {
             }
 
             merged = protectMultiWordTags(merged, tags: multiWordTags)
+            for label in sectionBreakOnceLabels {
+                merged = insertSectionBreakOnce(merged, label: label)
+            }
             for (pattern, replacement) in lineBreakRules {
                 merged = merged.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)
             }
@@ -973,7 +982,9 @@ struct ContentView: View {
     }
 
     private func highlightedTagText(_ text: String) -> Text {
-        let regex = buildTagTokenRegex(multiWordTags: multiWordTags)
+        let tagRegex = buildTagTokenRegex(multiWordTags: multiWordTags)
+        let pattern = "\(tagRegex.pattern)|블룸 이펙트|ブルームエフェクト"
+        let regex = (try? NSRegularExpression(pattern: pattern)) ?? tagRegex
 
         let ns = text as NSString
         let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
@@ -997,6 +1008,19 @@ struct ContentView: View {
             result = result + Text(tail)
         }
         return result
+    }
+
+    private func insertSectionBreakOnce(_ text: String, label: String) -> String {
+        let escaped = NSRegularExpression.escapedPattern(for: label)
+        guard let regex = try? NSRegularExpression(pattern: "\\s*\(escaped)\\s*") else {
+            return text
+        }
+        let ns = text as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        guard let first = regex.firstMatch(in: text, range: range) else {
+            return text
+        }
+        return ns.replacingCharacters(in: first.range, with: "\n\(label)\n")
     }
 
     private func splitSectionLabel(_ line: String) -> (String, String)? {

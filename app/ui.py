@@ -140,7 +140,7 @@ def _restore_multiword_tags(text: str) -> str:
     return text.replace(_MW_PLACEHOLDER, " ")
 
 KO_SECTION_MARKER_RE = re.compile(
-    r"SP 오시 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\s+[A-Za-z가-힣])|#"
+    r"SP 오시 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\s+\S)|#"
 )
 JA_SECTION_MARKER_RE = re.compile(
     r"SP推しスキル|推しスキル|コラボエフェクト|ブルームエフェクト|ギフト|エクストラ|アーツ(?=\s+\S)|カードタイプ|レアリティ|能力テキスト|タグ|バトンタッチ|#"
@@ -150,6 +150,9 @@ JA_SECTION_MARKER_RE = re.compile(
 DETAIL_PREFIX_RE = re.compile(
     r"^(?:(?:.+?)\s+)?(?:서포트|サポート)\s*[\/／]\s*(?:아이템|스태프|이벤트|이벤타|툴|마스코트|アイテム|スタッフ|イベント|ツール|マスコット)(?=$|\s|[\/／:：(\[])"
 )
+
+HTML_TAG_RE = re.compile(r"<[^>]+>", re.IGNORECASE)
+WIDTH_ARTIFACT_RE = re.compile(r"(?i)\bwidth\s*=\s*\d+%?>?")
 
 DB_MISSING_TOAST = "DB파일이 존재하지 않습니다. 메뉴에서 DB 수동갱신을 실행해주세요"
 DB_UPDATING_TOAST = "갱신중..."
@@ -244,6 +247,7 @@ def _prettify_detail_text(
     section_break_rules: tuple[tuple[str, str], ...],
     tag_label: str,
     strip_japanese_chars: bool = False,
+    section_break_once_labels: tuple[str, ...] = (),
 ) -> str:
     raw = (text or "").strip()
     if not raw:
@@ -263,6 +267,8 @@ def _prettify_detail_text(
             merged = merged[marker.start():]
 
         merged = _protect_multiword_tags(merged)
+        for label in section_break_once_labels:
+            merged = re.sub(rf"\s*{re.escape(label)}\s*", f"\n{label}\n", merged, count=1)
         for pattern, replacement in section_break_rules:
             merged = re.sub(pattern, replacement, merged)
         merged = _restore_multiword_tags(merged)
@@ -286,14 +292,14 @@ def prettify_ko_detail_text(text: str) -> str:
             (r"\s*SP 오시 스킬\s*", "\nSP 오시 스킬\n"),
             (r"\s*(?<!SP )오시 스킬\s*", "\n오시 스킬\n"),
             (r"\s*콜라보 이펙트\s*", "\n콜라보 이펙트\n"),
-            (r"\s*블룸 이펙트\s*", "\n블룸 이펙트\n"),
             (r"\s*기프트\s*", "\n기프트\n"),
             (r"\s*엑스트라\s*", "\n엑스트라\n"),
-            (r"\s*아츠(?=\s+[A-Za-z가-힣])\s*", "\n아츠\n"),
+            (r"\s*아츠(?=\s+\S)\s*", "\n아츠\n"),
             (r"\s+#", "\n#"),
         ),
         tag_label="태그",
         strip_japanese_chars=True,
+        section_break_once_labels=("블룸 이펙트",),
     )
 
 
@@ -320,7 +326,6 @@ def prettify_ja_detail_text(text: str) -> str:
             (r"\s*SP推しスキル\s*", "\nSP推しスキル\n"),
             (r"\s*(?<!SP)推しスキル\s*", "\n推しスキル\n"),
             (r"\s*コラボエフェクト\s*", "\nコラボエフェクト\n"),
-            (r"\s*ブルームエフェクト\s*", "\nブルームエフェクト\n"),
             (r"\s*ギフト\s*", "\nギフト\n"),
             (r"\s*エクストラ\s*", "\nエクストラ\n"),
             (r"\s*アーツ(?=\s+\S)\s*", "\nアーツ\n"),
@@ -333,6 +338,7 @@ def prettify_ja_detail_text(text: str) -> str:
             (r"\s+#", "\n#"),
         ),
         tag_label="タグ",
+        section_break_once_labels=("ブルームエフェクト",),
     )
 
 def _center_alignment():
@@ -1057,7 +1063,9 @@ def launch_app(db_path: str) -> None:
             return ft.Text(line)
 
         def sanitize_detail_line(line: str) -> str:
-            trimmed = line.strip()
+            no_html = HTML_TAG_RE.sub(" ", line)
+            no_width = WIDTH_ARTIFACT_RE.sub(" ", no_html)
+            trimmed = no_width.strip()
             return DETAIL_PREFIX_RE.sub("", trimmed).strip()
 
         def append_detail_lines(text: str, *, lang: str | None = None) -> None:
