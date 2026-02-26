@@ -634,6 +634,8 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                // 내부 ScrollView 스크롤이 외부 ScrollView(전체 페이지)로 전파되는 것을 방지
+                .simultaneousGesture(DragGesture(), including: .all)
             }
         }
     }
