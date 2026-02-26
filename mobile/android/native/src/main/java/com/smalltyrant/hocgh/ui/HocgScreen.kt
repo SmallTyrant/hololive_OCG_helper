@@ -206,8 +206,10 @@ private val WIDTH_ARTIFACT_REGEX = Regex("""(?i)\bwidth\s*=\s*\d+%?>?""")
 private const val MW_PLACEHOLDER = "\uFFFF"
 private val KO_MW_TAG_PATTERNS = listOf(
     Regex("#ID\\s+\\d+기생"),
-    Regex("#[^\\s#]+['’]s\\s+[^\\s#]+"),
+    Regex("#[^\\s#]+['']s\\s+[^\\s#]+"),
 )
+private val SCALAR_METADATA_PATTERN = Regex("^(hp\\s*\\d{2,3}|(1st|2nd)\\s*\\d{2,3})$", RegexOption.IGNORE_CASE)
+private val DIGIT_TOKEN_PATTERN = Regex("^\\d{2,3}$")
 
 private enum class DetailTextLanguage {
     KOREAN,
@@ -1083,6 +1085,12 @@ private fun DetailPanel(
     val koLines = remember(koText, multiWordTags) { splitDetailLines(koText, language = DetailTextLanguage.KOREAN, multiWordTags = multiWordTags) }
     val jaLines = remember(jaText, multiWordTags) { splitDetailLines(jaText, language = DetailTextLanguage.JAPANESE, multiWordTags = multiWordTags) }
 
+    // Build highlight regex once per multiWordTags change, reuse for all lines
+    val highlightRegex = remember(multiWordTags) {
+        val base = buildTagTokenRegex(multiWordTags)
+        Regex("${base.pattern}|블룸 이펙트|ブルームエフェクト")
+    }
+
     val hasKo = koLines.isNotEmpty()
     val hasJa = jaLines.isNotEmpty()
     val showJaFirst = !hasKo
@@ -1127,14 +1135,14 @@ private fun DetailPanel(
                 lines = koLines,
                 expanded = koExpanded,
                 onToggle = { koExpanded = !koExpanded },
-                multiWordTags = multiWordTags,
+                highlightRegex = highlightRegex,
             )
             ExpandableDetailSection(
                 title = "일본어",
                 lines = jaLines,
                 expanded = jaExpanded,
                 onToggle = { jaExpanded = !jaExpanded },
-                multiWordTags = multiWordTags,
+                highlightRegex = highlightRegex,
             )
             return@Column
         }
@@ -1143,7 +1151,7 @@ private fun DetailPanel(
         val singleLines = if (showJaFirst) jaLines else koLines
         SectionChip(singleTitle)
         for (line in singleLines) {
-            DetailLine(line, multiWordTags)
+            DetailLine(line, highlightRegex)
         }
     }
 }
@@ -1154,7 +1162,7 @@ private fun ExpandableDetailSection(
     lines: List<String>,
     expanded: Boolean,
     onToggle: () -> Unit,
-    multiWordTags: List<String> = emptyList(),
+    highlightRegex: Regex,
 ) {
     Row(
         modifier = Modifier
@@ -1176,7 +1184,7 @@ private fun ExpandableDetailSection(
     }
 
     for (line in lines) {
-        DetailLine(line, multiWordTags)
+        DetailLine(line, highlightRegex)
     }
 }
 
@@ -1192,27 +1200,25 @@ private fun SectionChip(text: String) {
 }
 
 @Composable
-private fun DetailLine(line: String, multiWordTags: List<String> = emptyList()) {
+private fun DetailLine(line: String, highlightRegex: Regex) {
     splitSectionLabel(line)?.let { (label, rest) ->
         if (rest.isBlank()) {
             SectionChip(label)
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 SectionChip(label)
-                Text(buildHighlightedTagText(rest, MaterialTheme.colorScheme.primary, multiWordTags), style = MaterialTheme.typography.bodyMedium)
+                Text(buildHighlightedTagText(rest, MaterialTheme.colorScheme.primary, highlightRegex), style = MaterialTheme.typography.bodyMedium)
             }
         }
         return
     }
 
-    Text(buildHighlightedTagText(line, MaterialTheme.colorScheme.primary, multiWordTags), style = MaterialTheme.typography.bodyMedium)
+    Text(buildHighlightedTagText(line, MaterialTheme.colorScheme.primary, highlightRegex), style = MaterialTheme.typography.bodyMedium)
 }
 
-private fun buildHighlightedTagText(text: String, highlightColor: androidx.compose.ui.graphics.Color, multiWordTags: List<String> = emptyList()) = buildAnnotatedString {
-    val tagRegex = buildTagTokenRegex(multiWordTags)
-    val regex = Regex("${tagRegex.pattern}|블룸 이펙트|ブルームエフェクト")
+private fun buildHighlightedTagText(text: String, highlightColor: androidx.compose.ui.graphics.Color, highlightRegex: Regex) = buildAnnotatedString {
     var cursor = 0
-    for (match in regex.findAll(text)) {
+    for (match in highlightRegex.findAll(text)) {
         if (match.range.first > cursor) {
             append(text.substring(cursor, match.range.first))
         }
@@ -1259,7 +1265,7 @@ private fun sanitizeDetailLine(line: String): String {
     return DETAIL_PREFIX_PATTERN.replace(trimmed, "")
 }
 
-private fun mergeBrokenTagLines(lines: List<String>): List<String> {
+private fun mergeBrokenTagLines(lines: List<String>, tagRegex: Regex? = null): List<String> {
     val output = mutableListOf<String>()
     var index = 0
 
@@ -1299,9 +1305,11 @@ private fun mergeBrokenTagLines(lines: List<String>): List<String> {
 }
 
 private fun splitDetailLines(text: String, language: DetailTextLanguage, multiWordTags: List<String> = emptyList()): List<String> {
+    // Build tag regex once for this call — reused in normalizeTagLine
+    val tagRegex = buildTagTokenRegex(multiWordTags)
     val payload = when (language) {
-        DetailTextLanguage.KOREAN -> prettifyKoDetailText(text, multiWordTags)
-        DetailTextLanguage.JAPANESE -> prettifyJaDetailText(text, multiWordTags)
+        DetailTextLanguage.KOREAN -> prettifyKoDetailText(text, multiWordTags, tagRegex)
+        DetailTextLanguage.JAPANESE -> prettifyJaDetailText(text, multiWordTags, tagRegex)
     }
     val lines = payload.lines()
         .map(::sanitizeDetailLine)
@@ -1311,7 +1319,7 @@ private fun splitDetailLines(text: String, language: DetailTextLanguage, multiWo
     return mergeBrokenTagLines(lines)
 }
 
-private fun prettifyKoDetailText(text: String, multiWordTags: List<String> = emptyList()): String {
+private fun prettifyKoDetailText(text: String, multiWordTags: List<String> = emptyList(), tagRegex: Regex? = null): String {
     return prettifyDetailText(
         text = text,
         replacements = KO_DETAIL_REPLACEMENTS,
@@ -1322,10 +1330,11 @@ private fun prettifyKoDetailText(text: String, multiWordTags: List<String> = emp
         metadataTokens = KO_METADATA_TOKEN_SET,
         stripJapaneseChars = true,
         multiWordTags = multiWordTags,
+        tagRegex = tagRegex,
     )
 }
 
-private fun prettifyJaDetailText(text: String, multiWordTags: List<String> = emptyList()): String {
+private fun prettifyJaDetailText(text: String, multiWordTags: List<String> = emptyList(), tagRegex: Regex? = null): String {
     return prettifyDetailText(
         text = text,
         replacements = JA_DETAIL_REPLACEMENTS,
@@ -1335,6 +1344,7 @@ private fun prettifyJaDetailText(text: String, multiWordTags: List<String> = emp
         tagLabel = "タグ",
         metadataTokens = JA_METADATA_TOKEN_SET,
         multiWordTags = multiWordTags,
+        tagRegex = tagRegex,
     )
 }
 
@@ -1348,7 +1358,9 @@ private fun prettifyDetailText(
     metadataTokens: Set<String>,
     stripJapaneseChars: Boolean = false,
     multiWordTags: List<String> = emptyList(),
+    tagRegex: Regex? = null,
 ): String {
+    val effectiveTagRegex = tagRegex ?: buildTagTokenRegex(multiWordTags)
     var normalized = text.trim()
     if (normalized.isEmpty()) {
         return ""
@@ -1452,7 +1464,7 @@ private fun prettifyDetailText(
             if (result.lastOrNull() != tagLabel) {
                 result += tagLabel
             }
-            result += normalizeTagLine(line, multiWordTags)
+            result += normalizeTagLine(line, effectiveTagRegex)
             continue
         }
 
@@ -1503,9 +1515,8 @@ private fun expandTagLinesHelper(lines: List<String>, tagLabel: String): List<St
     return result
 }
 
-private fun normalizeTagLine(line: String, multiWordTags: List<String> = emptyList()): String {
-    val dynamicRegex = buildTagTokenRegex(multiWordTags)
-    val tags = dynamicRegex.findAll(line).map { it.value }.toList()
+private fun normalizeTagLine(line: String, tagRegex: Regex): String {
+    val tags = tagRegex.findAll(line).map { it.value }.toList()
     if (tags.isEmpty()) {
         return normalizeInlineWhitespace(line)
     }
@@ -1529,13 +1540,13 @@ private fun isNoiseMetadataLine(line: String, metadataTokens: Set<String>): Bool
     }
 
     val lowered = normalized.lowercase(Locale.ROOT)
-    if (Regex("^(hp\\s*\\d{2,3}|(1st|2nd)\\s*\\d{2,3})$").matches(lowered)) {
+    if (SCALAR_METADATA_PATTERN.matches(lowered)) {
         return true
     }
 
     val tokens = lowered.split(" ").filter { it.isNotBlank() }
     if (tokens.isNotEmpty() && tokens.all { token ->
-            token in metadataTokens || Regex("^\\d{2,3}$").matches(token)
+            token in metadataTokens || DIGIT_TOKEN_PATTERN.matches(token)
         }) {
         return true
     }

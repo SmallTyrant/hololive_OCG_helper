@@ -113,6 +113,21 @@ private let jaLineBreakRules: [(String, String)] = [
 ]
 private let htmlTagPattern = "<[^>]+>"
 private let widthArtifactPattern = "(?i)\\bwidth\\s*=\\s*\\d+%?>?"
+private let detailPrefixRegex = try! NSRegularExpression(
+    pattern: #"^(?:(?:.+?)\s+)?(?:서포트|サポート)\s*[/／]\s*(?:아이템|스태프|이벤트|이벤타|툴|마스코트|팬|アイテム|スタッフ|イベント|ツール|マスコット|ファン)(?=$|\s|[/／:：(\[])"#
+)
+private let jaTagObjectSplitRegex = try! NSRegularExpression(
+    pattern: #"^(#[^\s#を]+(?:\s+[^\s#を]+)*)(を.+)$"#
+)
+private let scalarMetadataPattern = try! NSRegularExpression(
+    pattern: #"^(hp\s*\d{2,3}|(1st|2nd)\s*\d{2,3})$"#,
+    options: .caseInsensitive
+)
+private let digitTokenPattern = try! NSRegularExpression(pattern: #"^\d{2,3}$"#)
+private let koMwTagCompiledPatterns: [NSRegularExpression] = [
+    try! NSRegularExpression(pattern: "#ID\\s+\\d+기생"),
+    try! NSRegularExpression(pattern: "#[^\\s#]+['\\u2019]s\\s+[^\\s#]+"),
+]
 
 private enum AppThemeMode: String, CaseIterable, Identifiable {
     case system
@@ -186,6 +201,20 @@ struct ContentView: View {
     @State private var multiWordTags: [String] = []
     @AppStorage("theme_mode") private var themeModeRawValue: String = AppThemeMode.system.rawValue
     @AppStorage("preferred_language") private var preferredLanguageRawValue: String = PreferredLanguage.defaultFromSystem.rawValue
+
+    // Cached tag token regex — rebuilt only when multiWordTags changes
+    @State private var cachedTagRegexKey: [String] = []
+    @State private var cachedTagRegex: NSRegularExpression = tagTokenRegex
+    @State private var cachedHighlightRegex: NSRegularExpression = tagTokenRegex
+
+    private var tagRegexForHighlight: NSRegularExpression {
+        cachedHighlightRegex
+    }
+
+    // Cached detail lines — computed off main thread
+    @State private var cachedKoLines: [String] = []
+    @State private var cachedJaLines: [String] = []
+    @State private var cachedDetailKey: String = ""
 
     private struct DeckEntryState: Identifiable {
         let id: Int64
@@ -307,13 +336,17 @@ struct ContentView: View {
                 Text("DB 업데이트가 있습니다. 업데이트 하시겠습니까?\n로컬 DB 날짜: \(dialog.localDate ?? "없음")\nGitHub DB 날짜: \(dialog.remoteDate)")
             }
             .onChange(of: viewModel.state.detailKoText) { _ in
-                resetDetailExpansion()
+                refreshDetailLines()
             }
             .onChange(of: viewModel.state.detailJaText) { _ in
-                resetDetailExpansion()
+                refreshDetailLines()
             }
             .onChange(of: preferredLanguageRawValue) { _ in
-                resetDetailExpansion()
+                refreshDetailLines()
+            }
+            .onChange(of: multiWordTags) { tags in
+                rebuildTagRegexCache(tags)
+                refreshDetailLines()
             }
             .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
             .task {
@@ -349,10 +382,8 @@ struct ContentView: View {
     }
 
     private func resetDetailExpansion() {
-        let koLines = splitDetailLines(viewModel.state.detailKoText, language: .korean)
-        let jaLines = splitDetailLines(viewModel.state.detailJaText, language: .japanese)
-        let hasKo = !koLines.isEmpty
-        let hasJa = !jaLines.isEmpty
+        let hasKo = !cachedKoLines.isEmpty
+        let hasJa = !cachedJaLines.isEmpty
 
         guard hasKo || hasJa else {
             koExpanded = false
@@ -367,6 +398,42 @@ struct ContentView: View {
             koExpanded = hasKo
             jaExpanded = hasJa
         }
+    }
+
+    private func refreshDetailLines() {
+        let koText = viewModel.state.detailKoText
+        let jaText = viewModel.state.detailJaText
+        let lang = selectedPreferredLanguage
+        let tags = multiWordTags
+        let key = "\(koText.hashValue)|\(jaText.hashValue)|\(lang.rawValue)|\(tags.count)"
+        guard key != cachedDetailKey else { return }
+        cachedDetailKey = key
+
+        // Capture value-type copy of self so computation runs off main thread safely
+        let snapshot = self
+        Task.detached(priority: .userInitiated) {
+            let ko = snapshot.splitDetailLines(koText, language: .korean)
+            let ja = snapshot.splitDetailLines(jaText, language: .japanese)
+            await MainActor.run {
+                self.cachedKoLines = ko
+                self.cachedJaLines = ja
+                self.resetDetailExpansion()
+            }
+        }
+    }
+
+    private func rebuildTagRegexCache(_ tags: [String]) {
+        var parts: [String] = tags.map { NSRegularExpression.escapedPattern(for: $0) }
+        for pat in Self.koMwTagPatterns {
+            parts.append(pat)
+        }
+        parts.append("#[^\\s#]+")
+        let pattern = parts.joined(separator: "|")
+        let base = (try? NSRegularExpression(pattern: pattern)) ?? tagTokenRegex
+        let highlightPattern = "\(pattern)|블룸 이펙트|ブルームエフェクト"
+        let highlight = (try? NSRegularExpression(pattern: highlightPattern)) ?? base
+        cachedTagRegex = base
+        cachedHighlightRegex = highlight
     }
 
     private func mobileLayout(screenHeight: CGFloat) -> some View {
@@ -604,8 +671,8 @@ struct ContentView: View {
     }
 
     private func detailPanel(scrollable: Bool) -> some View {
-        let koLines = splitDetailLines(viewModel.state.detailKoText, language: .korean)
-        let jaLines = splitDetailLines(viewModel.state.detailJaText, language: .japanese)
+        let koLines = cachedKoLines
+        let jaLines = cachedJaLines
 
         return Group {
             if scrollable {
@@ -716,11 +783,8 @@ struct ContentView: View {
         let noHtml = line.replacingOccurrences(of: htmlTagPattern, with: " ", options: .regularExpression)
         let noWidth = noHtml.replacingOccurrences(of: widthArtifactPattern, with: " ", options: .regularExpression)
         let trimmed = noWidth.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let regex = try? NSRegularExpression(pattern: detailPrefixPattern) else {
-            return trimmed
-        }
         let range = NSRange(location: 0, length: trimmed.utf16.count)
-        return regex.stringByReplacingMatches(in: trimmed, range: range, withTemplate: "")
+        return detailPrefixRegex.stringByReplacingMatches(in: trimmed, range: range, withTemplate: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -982,9 +1046,7 @@ struct ContentView: View {
     }
 
     private func highlightedTagText(_ text: String) -> Text {
-        let tagRegex = buildTagTokenRegex(multiWordTags: multiWordTags)
-        let pattern = "\(tagRegex.pattern)|블룸 이펙트|ブルームエフェクト"
-        let regex = (try? NSRegularExpression(pattern: pattern)) ?? tagRegex
+        let regex = cachedHighlightRegex
 
         let ns = text as NSString
         let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
@@ -1046,12 +1108,9 @@ struct ContentView: View {
 
     /// Japanese tag-object boundary: split `#TAG を...` into (tag, rest)
     private func jaTagObjectSplit(_ text: String) -> (tag: String, rest: String)? {
-        guard let regex = try? NSRegularExpression(pattern: "^(#[^\\s#を]+(?:\\s+[^\\s#を]+)*)(を.+)$") else {
-            return nil
-        }
         let nsText = text as NSString
         let range = NSRange(location: 0, length: nsText.length)
-        guard let match = regex.firstMatch(in: text, range: range), match.numberOfRanges == 3 else {
+        guard let match = jaTagObjectSplitRegex.firstMatch(in: text, range: range), match.numberOfRanges == 3 else {
             return nil
         }
         let tag = nsText.substring(with: match.range(at: 1))
@@ -1100,18 +1159,15 @@ struct ContentView: View {
     }
 
     private func matchesDetailPrefix(_ text: String) -> Bool {
-        guard let regex = try? NSRegularExpression(pattern: detailPrefixPattern) else {
-            return false
-        }
         let range = NSRange(text.startIndex..., in: text)
-        guard let match = regex.firstMatch(in: text, options: [], range: range) else {
+        guard let match = detailPrefixRegex.firstMatch(in: text, options: [], range: range) else {
             return false
         }
         return match.range.location == 0
     }
 
     private func normalizeTagLine(_ line: String) -> String {
-        let dynamicRegex = buildTagTokenRegex(multiWordTags: multiWordTags)
+        let dynamicRegex = cachedTagRegex
         let nsRange = NSRange(line.startIndex..., in: line)
         let matches = dynamicRegex.matches(in: line, options: [], range: nsRange)
         guard !matches.isEmpty else {
@@ -1143,14 +1199,17 @@ struct ContentView: View {
         }
 
         let lowered = normalized.lowercased()
-        let scalarPattern = "^(hp\\s*\\d{2,3}|(1st|2nd)\\s*\\d{2,3})$"
-        if lowered.range(of: scalarPattern, options: .regularExpression) != nil {
+        let nsLowered = lowered as NSString
+        let fullRange = NSRange(location: 0, length: nsLowered.length)
+        if scalarMetadataPattern.firstMatch(in: lowered, range: fullRange) != nil {
             return true
         }
 
         let tokens = lowered.split(separator: " ").map(String.init)
         if !tokens.isEmpty && tokens.allSatisfy({ token in
-            metadataTokens.contains(token) || token.range(of: "^\\d{2,3}$", options: .regularExpression) != nil
+            if metadataTokens.contains(token) { return true }
+            let nsToken = token as NSString
+            return digitTokenPattern.firstMatch(in: token, range: NSRange(location: 0, length: nsToken.length)) != nil
         }) {
             return true
         }
@@ -1159,7 +1218,7 @@ struct ContentView: View {
     }
 
     private func tagStyledText(_ line: String) -> Text {
-        let dynamicRegex = buildTagTokenRegex(multiWordTags: multiWordTags)
+        let dynamicRegex = cachedTagRegex
         let nsRange = NSRange(line.startIndex..., in: line)
         let matches = dynamicRegex.matches(in: line, options: [], range: nsRange)
         guard !matches.isEmpty else {
@@ -1391,15 +1450,13 @@ struct ContentView: View {
             result = result.replacingOccurrences(of: tag, with: tag.replacingOccurrences(of: " ", with: Self.mwPlaceholder))
         }
         // Also protect Korean multi-word tag patterns
-        for pat in Self.koMwTagPatterns {
-            if let regex = try? NSRegularExpression(pattern: pat) {
-                let nsRange = NSRange(result.startIndex..., in: result)
-                let matches = regex.matches(in: result, range: nsRange).reversed()
-                for match in matches {
-                    if let range = Range(match.range, in: result) {
-                        let matched = String(result[range])
-                        result = result.replacingCharacters(in: range, with: matched.replacingOccurrences(of: " ", with: Self.mwPlaceholder))
-                    }
+        for regex in koMwTagCompiledPatterns {
+            let nsRange = NSRange(result.startIndex..., in: result)
+            let matches = regex.matches(in: result, range: nsRange).reversed()
+            for match in matches {
+                if let range = Range(match.range, in: result) {
+                    let matched = String(result[range])
+                    result = result.replacingCharacters(in: range, with: matched.replacingOccurrences(of: " ", with: Self.mwPlaceholder))
                 }
             }
         }
