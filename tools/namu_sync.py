@@ -85,17 +85,15 @@ def extract_content(html: str) -> tuple[str, str]:
         title = soup.title.get_text(" ", strip=True)
         title = title.replace(" - 나무위키", "").strip()
 
-    # Try common content containers, fallback to full text
-    content = None
-    for sel in ["article", "#content", ".wiki-content", ".wiki-article"]:
-        el = soup.select_one(sel)
-        if el:
-            content = el.get_text("\n", strip=True)
-            break
-    if not content:
-        content = soup.get_text("\n", strip=True)
+    # 나무위키는 서버사이드 렌더링 HTML이지만 동적 클래스명을 사용하여
+    # CSS 셀렉터로 컨텐츠 영역을 특정하기 어렵다.
+    # head/script/style 제거 후 전체 텍스트를 사용한다.
+    for tag in soup(["head", "script", "style", "noscript", "nav", "footer"]):
+        tag.decompose()
 
-    # Reduce excessive blank lines
+    content = soup.get_text("\n", strip=True)
+
+    # 빈 줄 압축
     content = "\n".join([ln.strip() for ln in content.splitlines() if ln.strip()])
     return title, content
 
@@ -162,6 +160,10 @@ def main() -> int:
 
     conn = sqlite3.connect(args.db)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    conn.execute("PRAGMA cache_size=-32768;")
+    conn.execute("PRAGMA temp_store=MEMORY;")
     ensure_table(conn)
     include_source = has_source_column(conn)
 
@@ -211,14 +213,16 @@ def main() -> int:
                 continue
 
             upsert_ko(conn, print_id, title or card_no, content, include_source=include_source)
-            conn.commit()
             processed += 1
             print(f"[OK] {card_no} -> {title}")
+            if processed % 20 == 0:
+                conn.commit()
         except Exception as ex:
             print(f"[ERROR] {card_no} {ex}")
         finally:
             time.sleep(args.delay)
 
+    conn.commit()
     conn.close()
     print(f"[DONE] namu sync processed={processed}")
     return 0

@@ -1007,6 +1007,14 @@ def import_rows(
     return updated
 
 
+def _apply_db_pragmas(conn: sqlite3.Connection) -> None:
+    """DB 쓰기 성능 향상을 위한 PRAGMA 설정."""
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    conn.execute("PRAGMA cache_size=-32768;")  # 32 MiB page cache
+    conn.execute("PRAGMA temp_store=MEMORY;")
+
+
 def import_from_pages(
     db_path: str,
     pages: list[str],
@@ -1018,9 +1026,11 @@ def import_from_pages(
     crawl_linked: bool,
     link_include: re.Pattern[str] | None,
     link_exclude: re.Pattern[str] | None,
+    delay: float = 0.5,
 ) -> int:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    _apply_db_pragmas(conn)
     session = build_session()
     print_map = load_print_map(conn)
     existing_ko = load_existing_ko(conn)
@@ -1034,7 +1044,11 @@ def import_from_pages(
         if source_url in seen_pages:
             continue
         seen_pages.add(source_url)
-        html = fetch_html(session, page, timeout=timeout)
+        try:
+            html = fetch_html(session, page, timeout=timeout)
+        except requests.RequestException as exc:
+            print(f"[WARN] fetch failed for {source_url}: {exc}")
+            continue
         fallback_card_numbers = extract_card_numbers(html)
         updated += import_rows(
             conn,
@@ -1051,6 +1065,9 @@ def import_from_pages(
                 if url in seen_pages:
                     continue
                 seen_pages.add(url)
+                if delay > 0:
+                    import time as _time
+                    _time.sleep(delay)
                 try:
                     page_html = fetch_html(session, url, timeout=timeout)
                 except requests.RequestException as exc:
@@ -1068,9 +1085,12 @@ def import_from_pages(
                 )
 
     if search_card_numbers:
+        import time as _time
         for card_no in iter_card_numbers_for_search(print_map, existing_ko, overwrite=overwrite):
             query = normalize_card_number(card_no)
             search_url = f"{NAMU_BASE}/Search?q={quote(query)}"
+            if delay > 0:
+                _time.sleep(delay)
             try:
                 html = fetch_html(session, search_url, timeout=timeout)
             except requests.RequestException as exc:
@@ -1085,6 +1105,8 @@ def import_from_pages(
                 if url in seen_pages:
                     continue
                 seen_pages.add(url)
+                if delay > 0:
+                    _time.sleep(delay)
                 try:
                     page_html = fetch_html(session, url, timeout=timeout)
                 except requests.RequestException as exc:
@@ -1108,6 +1130,7 @@ def import_from_pages(
 def import_from_sheet(db_path: str, sheet_url: str, *, timeout: float, overwrite: bool, gid: str | None) -> int:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    _apply_db_pragmas(conn)
     session = build_session()
     csv_url = build_sheet_csv_url(sheet_url, gid)
     print_map = load_print_map(conn)
@@ -1143,6 +1166,7 @@ def main() -> int:
     ap.add_argument("--sheet-url", help="Google Sheets URL (share or export CSV)")
     ap.add_argument("--sheet-gid", help="Google Sheets gid (optional)")
     ap.add_argument("--timeout", type=float, default=15.0, help="HTTP timeout seconds")
+    ap.add_argument("--delay", type=float, default=0.5, help="Delay seconds between linked/search page requests")
     ap.add_argument("--overwrite", action="store_true", help="Overwrite existing Korean texts")
     ap.add_argument("--crawl-linked", action="store_true", help="Crawl linked NamuWiki pages from sources")
     ap.add_argument("--link-include", help="Regex for linked URLs to include")
@@ -1175,6 +1199,7 @@ def main() -> int:
             crawl_linked=args.crawl_linked,
             link_include=link_include,
             link_exclude=link_exclude,
+            delay=args.delay,
         )
     if args.sheet_url:
         updated += import_from_sheet(

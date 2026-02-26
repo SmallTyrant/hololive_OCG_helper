@@ -286,8 +286,8 @@ def _write_release_meta(db_path: Path, release_info: dict) -> None:
                 (key, value),
             )
         conn.commit()
-    except Exception:
-        pass
+    except Exception as _meta_err:
+        print(f"[WARN] release meta 저장 실패 (무시): {_meta_err}", flush=True)
     finally:
         conn.close()
 

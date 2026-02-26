@@ -66,6 +66,10 @@ def _get_thread_session() -> requests.Session:
     return sess
 
 def init_db(conn: sqlite3.Connection) -> None:
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    conn.execute("PRAGMA cache_size=-32768;")  # 32 MiB page cache
+    conn.execute("PRAGMA temp_store=MEMORY;")
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.execute(
         """
@@ -769,14 +773,14 @@ def process_list_page(expansion: str | None, page: int, html: bytes, args, sessi
                     added = _handle_detail(detail, card_number, card_id, detail_url)
                     if added:
                         args._seen_total += 1
-                    if args.max_cards and args._seen_total >= args.max_cards:
-                        log(f"[DONE] reached max_cards={args.max_cards}", True)
-                        return new_items, 1
                         if args._seen_total % 50 == 0:
                             elapsed = max(1e-6, time.time() - args._t0)
                             rate = args._seen_total / elapsed
                             log(f"[PROGRESS] total={args._seen_total} rate={rate:.2f}/s", True)
                             conn.commit()
+                    if args.max_cards and args._seen_total >= args.max_cards:
+                        log(f"[DONE] reached max_cards={args.max_cards}", True)
+                        return new_items, 1
 
                 if args.detail_timeout > 0 and pending:
                     now = time.monotonic()
@@ -959,8 +963,8 @@ def main() -> int:
     s.add_argument("--max-pages", type=int, default=999)
     s.add_argument("--max-cards", type=int, default=0)
     s.add_argument("--connect-timeout", type=float, default=5.0, help="Connect timeout seconds")
-    s.add_argument("--read-timeout", type=float, default=10.0, help="Read timeout seconds")
-    s.add_argument("--retries", type=int, default=0, help="Retry count for network errors")
+    s.add_argument("--read-timeout", type=float, default=20.0, help="Read timeout seconds")
+    s.add_argument("--retries", type=int, default=1, help="Retry count for network errors")
     s.add_argument("--detail-timeout", type=float, default=15.0, help="Max seconds to wait per detail page")
     s.add_argument("--verbose", action="store_true")
 
