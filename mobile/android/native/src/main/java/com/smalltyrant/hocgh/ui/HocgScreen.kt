@@ -121,7 +121,7 @@ private val SECTION_LABELS = listOf(
 private val SECTION_LABELS_SORTED = SECTION_LABELS.sortedByDescending { it.length }
 private val JAPANESE_CHAR_REGEX = Regex("[\\u3040-\\u30ff\\u31f0-\\u31ff\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff々〆ヵヶ]")
 private val KO_SECTION_MARKER_REGEX = Regex(
-    "SP 오시 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\\s+[A-Za-z가-힣])|#",
+    "SP 오시 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\\s+\\S)|#",
 )
 private val JA_SECTION_MARKER_REGEX = Regex(
     "SP推しスキル|推しスキル|コラボエフェクト|ブルームエフェクト|ギフト|エクストラ|アーツ(?=\\s+\\S)|カードタイプ|タグ|レアリティ|能力テキスト|バトンタッチ|#",
@@ -174,10 +174,9 @@ private val KO_LINE_BREAK_PATTERNS = listOf(
     Regex("\\s*SP 오시 스킬\\s*") to "\nSP 오시 스킬\n",
     Regex("\\s*(?<!SP )오시 스킬\\s*") to "\n오시 스킬\n",
     Regex("\\s*콜라보 이펙트\\s*") to "\n콜라보 이펙트\n",
-    Regex("\\s*블룸 이펙트\\s*") to "\n블룸 이펙트\n",
     Regex("\\s*기프트\\s*") to "\n기프트\n",
     Regex("\\s*엑스트라\\s*") to "\n엑스트라\n",
-    Regex("\\s*아츠(?=\\s+[A-Za-z가-힣])\\s*") to "\n아츠\n",
+    Regex("\\s*아츠(?=\\s+\\S)\\s*") to "\n아츠\n",
     Regex("\\s+#") to "\n#",
 )
 private val JA_LINE_BREAK_PATTERNS = listOf(
@@ -202,6 +201,8 @@ private val DETAIL_PREFIX_PATTERN = Regex(
 )
 
 private val INLINE_TAG_PATTERN = Regex(pattern = """#[\p{L}\p{N}_]+""")
+private val HTML_TAG_REGEX = Regex("<[^>]+>", RegexOption.IGNORE_CASE)
+private val WIDTH_ARTIFACT_REGEX = Regex("""(?i)\bwidth\s*=\s*\d+%?>?""")
 private const val MW_PLACEHOLDER = "\uFFFF"
 private val KO_MW_TAG_PATTERNS = listOf(
     Regex("#ID\\s+\\d+기생"),
@@ -1208,7 +1209,8 @@ private fun DetailLine(line: String, multiWordTags: List<String> = emptyList()) 
 }
 
 private fun buildHighlightedTagText(text: String, highlightColor: androidx.compose.ui.graphics.Color, multiWordTags: List<String> = emptyList()) = buildAnnotatedString {
-    val regex = buildTagTokenRegex(multiWordTags)
+    val tagRegex = buildTagTokenRegex(multiWordTags)
+    val regex = Regex("${tagRegex.pattern}|블룸 이펙트|ブルームエフェクト")
     var cursor = 0
     for (match in regex.findAll(text)) {
         if (match.range.first > cursor) {
@@ -1251,7 +1253,9 @@ private fun splitSectionLabel(line: String): Pair<String, String>? {
 }
 
 private fun sanitizeDetailLine(line: String): String {
-    val trimmed = line.trim()
+    val strippedHtml = HTML_TAG_REGEX.replace(line, " ")
+    val strippedWidth = WIDTH_ARTIFACT_REGEX.replace(strippedHtml, " ")
+    val trimmed = strippedWidth.trim()
     return DETAIL_PREFIX_PATTERN.replace(trimmed, "")
 }
 
@@ -1313,6 +1317,7 @@ private fun prettifyKoDetailText(text: String, multiWordTags: List<String> = emp
         replacements = KO_DETAIL_REPLACEMENTS,
         sectionMarkerRegex = KO_SECTION_MARKER_REGEX,
         lineBreakPatterns = KO_LINE_BREAK_PATTERNS,
+        sectionBreakOnceLabels = listOf("블룸 이펙트"),
         tagLabel = "태그",
         metadataTokens = KO_METADATA_TOKEN_SET,
         stripJapaneseChars = true,
@@ -1326,6 +1331,7 @@ private fun prettifyJaDetailText(text: String, multiWordTags: List<String> = emp
         replacements = JA_DETAIL_REPLACEMENTS,
         sectionMarkerRegex = JA_SECTION_MARKER_REGEX,
         lineBreakPatterns = JA_LINE_BREAK_PATTERNS,
+        sectionBreakOnceLabels = listOf("ブルームエフェクト"),
         tagLabel = "タグ",
         metadataTokens = JA_METADATA_TOKEN_SET,
         multiWordTags = multiWordTags,
@@ -1337,6 +1343,7 @@ private fun prettifyDetailText(
     replacements: List<Pair<String, String>>,
     sectionMarkerRegex: Regex,
     lineBreakPatterns: List<Pair<Regex, String>>,
+    sectionBreakOnceLabels: List<String>,
     tagLabel: String,
     metadataTokens: Set<String>,
     stripJapaneseChars: Boolean = false,
@@ -1366,6 +1373,9 @@ private fun prettifyDetailText(
             }
 
         merged = protectMultiWordTags(merged, multiWordTags)
+        sectionBreakOnceLabels.forEach { label ->
+            merged = insertSectionBreakOnce(merged, label)
+        }
         lineBreakPatterns.forEach { (pattern, replacement) ->
             merged = merged.replace(pattern, replacement)
         }
@@ -1451,6 +1461,11 @@ private fun prettifyDetailText(
     }
 
     return result.joinToString("\n")
+}
+
+private fun insertSectionBreakOnce(text: String, label: String): String {
+    val pattern = Regex("\\s*${Regex.escape(label)}\\s*")
+    return pattern.replaceFirst(text, "\n$label\n")
 }
 
 private fun normalizeInlineWhitespace(text: String): String {
