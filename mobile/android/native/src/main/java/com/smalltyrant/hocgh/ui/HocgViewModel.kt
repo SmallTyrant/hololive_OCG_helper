@@ -263,7 +263,18 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
             paths.copyBundledDbIfMissing()
         }
 
-        if (withContext(Dispatchers.IO) { dbRepository.needsDbUpdate() }) {
+        var missing = withContext(Dispatchers.IO) { dbRepository.needsDbUpdate() }
+        if (missing) {
+            val recovered = withContext(Dispatchers.IO) {
+                paths.restoreBundledDb() && !dbRepository.needsDbUpdate()
+            }
+            missing = !recovered
+            if (recovered) {
+                state = state.copy(persistentMessage = null)
+            }
+        }
+
+        if (missing) {
             applyMissingDbState()
         }
 

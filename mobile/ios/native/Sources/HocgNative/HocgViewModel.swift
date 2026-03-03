@@ -211,8 +211,17 @@ final class HocgViewModel: ObservableObject {
     private func bootstrap() async {
         _ = paths.copyBundledDbIfMissing()
 
-        let missing = await runIO {
+        var missing = await runIO {
             self.dbRepository.needsDbUpdate()
+        }
+        if missing {
+            let recovered = await runIO {
+                self.paths.restoreBundledDb() && !self.dbRepository.needsDbUpdate()
+            }
+            missing = !recovered
+            if recovered {
+                state.persistentMessage = nil
+            }
         }
         if missing {
             applyMissingDbState()
