@@ -75,6 +75,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.input.ImeAction
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -1658,11 +1659,17 @@ private fun restoreMultiWordTags(text: String): String {
 }
 
 /**
- * Consumes all scroll delta before it reaches any parent scrollable container,
- * preventing the inner list from propagating scroll events upward.
+ * Lets LazyColumn consume drag/fling first, then swallows leftover delta so
+ * the parent Column( verticalScroll ) does not move from inner-list gestures.
  */
 private val ConsumeScrollNestedScrollConnection = object : NestedScrollConnection {
-    override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset = available
+    override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset = Offset.Zero
+
+    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset = available
+
+    override suspend fun onPreFling(available: Velocity): Velocity = Velocity.Zero
+
+    override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity = available
 }
 
 private fun Modifier.clearFocusOnTap(focusManager: FocusManager): Modifier {
