@@ -106,6 +106,15 @@ BULLET_MARKERS = ("■", "●", "◆", "◇", "•", "·")
 CARD_ID_ATTR_RE = re.compile(r"id=['\"](?P<id>[hH][A-Za-z]{1,5}\d{2}-\d{3})['\"]")
 CARD_ID_EXACT_RE = re.compile(r"^[hH][A-Za-z]{1,5}\d{2}-\d{3}$")
 RARITY_LINE_RE = re.compile(r"^(?:OSR|OUR|SEC|UR|SR|RR|R|C|U|P|S|PR|HR|AR|SP|SPR|\-)$", re.IGNORECASE)
+# 복수 레어도 조합 ("SR UR", "R C" 등)
+RARITY_COMBO_RE = re.compile(
+    r"^(?:(?:OSR|OUR|SEC|UR|SR|RR|R|C|U|P|S|PR|HR|AR|SP|SPR|\-)[\s/]+){1,4}(?:OSR|OUR|SEC|UR|SR|RR|R|C|U|P|S|PR|HR|AR|SP|SPR|\-)$",
+    re.IGNORECASE,
+)
+# 태그 전용 줄 패턴: '태그'로 시작하거나 '#'으로 시작하는 줄 (태그 메타데이터)
+# 예: "태그 #JP # # holoX", "#JP #holoX", "태그 #JP #ゲーマーズ"
+# holoX처럼 '#' 없는 토큰이 섞여도 '태그'로 시작하면 태그 줄로 판단
+TAG_ONLY_RE = re.compile(r"^(?:태그\b.{0,120}|(?:#+\S*\s*)+)$")
 
 BAD_NAME_LABELS = {
     "카드넘버",
@@ -320,6 +329,11 @@ def pick_effect(cells: list[str], header_map: dict[str, int]) -> str:
             continue
         if CARDNO_RE.search(normalized):
             continue
+        # 레어도/태그만 있는 셀은 effect 후보에서 제외
+        if RARITY_LINE_RE.fullmatch(normalized) or RARITY_COMBO_RE.fullmatch(normalized):
+            continue
+        if TAG_ONLY_RE.fullmatch(normalized):
+            continue
         candidates.append(normalized)
     if not candidates:
         return ""
@@ -333,6 +347,23 @@ def _is_bad_name(candidate: str) -> bool:
         return True
     # '서포트 / ...' 패턴: 카드 타입 표시
     if SUPPORT_DETAIL_PREFIX_RE.match(candidate):
+        return True
+    # 레어도 단독 또는 조합 (예: "SR UR")
+    if RARITY_LINE_RE.fullmatch(candidate.strip()) or RARITY_COMBO_RE.fullmatch(candidate.strip()):
+        return True
+    return False
+
+
+def _is_bad_effect(effect: str) -> bool:
+    """유효한 카드 효과 텍스트가 아닌 경우 판별 (최종 안전망)."""
+    stripped = effect.strip()
+    if not stripped:
+        return True
+    # 레어도만 있는 경우
+    if RARITY_LINE_RE.fullmatch(stripped) or RARITY_COMBO_RE.fullmatch(stripped):
+        return True
+    # 태그 줄만 있는 경우 (예: "태그 #JP # # holoX")
+    if TAG_ONLY_RE.fullmatch(stripped):
         return True
     return False
 
@@ -449,6 +480,8 @@ def is_noise_metadata_line(line: str) -> bool:
     if lowered in NOISE_METADATA_LINES:
         return True
     if RARITY_LINE_RE.fullmatch(normalized):
+        return True
+    if RARITY_COMBO_RE.fullmatch(normalized):
         return True
     if re.fullmatch(r"\d+(?:\.\d+)*\.?", normalized):
         return True
@@ -945,6 +978,17 @@ def upsert_ko_text(
         while stripped.startswith(name):
             stripped = stripped[len(name):].lstrip()
         effect = stripped
+
+    # 최종 안전망: 레어도/태그만 있는 effect는 빈 문자열로 처리
+    if _is_bad_effect(effect):
+        effect = ""
+
+    # 유효한 effect가 없으면 기존 값 유지 (새 데이터로 덮어쓰지 않음)
+    if not effect:
+        if cached and cached[1].strip():
+            return False  # 기존 정상 effect 보존
+        if not name:
+            return False  # name도 effect도 없으면 스킵
 
     if cached and not overwrite:
         if cached[1].strip():
