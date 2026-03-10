@@ -368,6 +368,29 @@ def _is_bad_effect(effect: str) -> bool:
     return False
 
 
+# 나무위키 카드 테이블 메타데이터 헤더 + 값 뭉침 패턴
+# 예: "레벨 속성 HP 배턴 터치 1st 120 아츠 ..."
+#     "레벨 속성 LIFE 배턴 터치 Debut 90 오시 스킬 ..."
+_META_PREFIX_RE = re.compile(
+    r"^레벨\s+속성\s+(?:HP|LIFE|hp|life)\s+배턴\s+터치\s+"  # 헤더
+    r"(?:(?:Debut|1st|2nd|Spot|Buzz|spot|buzz|DEBUT)\s+)?"   # 레벨 값 (선택)
+    r"(?:\d+\s+)?"                                             # HP 숫자 (선택)
+    r"(?:\d+\s+)?",                                            # 추가 숫자 (선택)
+    re.IGNORECASE,
+)
+
+
+def strip_meta_prefix(effect: str) -> str:
+    """effect 앞에 붙은 '레벨 속성 HP 배턴 터치 ...' 메타데이터를 제거한다."""
+    stripped = effect.strip()
+    m = _META_PREFIX_RE.match(stripped)
+    if m:
+        remainder = stripped[m.end():].strip()
+        if remainder:
+            return remainder
+    return stripped
+
+
 def pick_name(cells: list[str], header_map: dict[str, int]) -> str:
     def _clean_name_line(line: str) -> str:
         cleaned = re.split(r"\b(?:LIFE|HP)\b", line)[0].strip()
@@ -628,6 +651,10 @@ def row_quality_score(row: KoRow) -> float:
     if "카드넘버 카드명 종류" in lowered_effect or "카드 넘버 카드명 종류" in lowered_effect:
         score -= 60.0
 
+    # 메타데이터 뭉침 패턴 감지: "레벨 속성 hp 배턴 터치" 등이 effect에 포함되면 강한 페널티
+    if "레벨 속성" in lowered_effect and ("배턴 터치" in lowered_effect or "hp" in lowered_effect):
+        score -= 50.0
+
     score += min(len(effect), 1200) / 120.0
     return score
 
@@ -694,29 +721,65 @@ def parse_tables(
                 if not _is_bad_name(candidate):
                     name = candidate
 
-            effect_parts: list[str] = []
+            # 단일 카드 테이블 파서: 행 구조를 인식해 메타데이터를 제외하고 효과만 추출
+            # 나무위키 카드 테이블 구조:
+            #   행0: 카드명
+            #   행1: 홀로멤 (카드 타입)
+            #   행2: 레벨 | 속성 | HP | 배턴 터치  ← 메타데이터 헤더
+            #   행3: 1st  |      | 160|             ← 메타데이터 값
+            #   행4: 아츠 | 딸기 정말 좋아! | 40   ← 효과
+            #   행5: 아츠 | 플러스메이트... | 70   ← 효과
+            #   행6: #JP #비밀 결사 holoX #슈터    ← 태그
+            #   행7: 카드 넘버 | hBP04-056         ← 카드번호
+
+            # 메타데이터 헤더 행 감지용 패턴
+            META_HEADER_CELLS = {"레벨", "속성", "hp", "배턴 터치", "level", "color", "baton touch"}
+            LEVEL_VALUES = {"debut", "1st", "2nd", "spot", "buzz"}
+            # 행이 메타데이터 헤더인지 (레벨/속성/HP/배턴터치 셀들)
+            def _is_meta_header_row(cells: list[str]) -> bool:
+                lowered = {normalize_header(c) for c in cells}
+                return len(lowered & META_HEADER_CELLS) >= 2
+
+            # 행이 메타데이터 값인지 (레벨값+HP숫자+빈셀들)
+            def _is_meta_value_row(cells: list[str]) -> bool:
+                lowered = [normalize_header(c) for c in cells if c]
+                if not lowered:
+                    return True
+                # 레벨 값(debut/1st/2nd/spot/buzz) + 숫자만으로 구성된 행
+                non_empty = [v for v in lowered if v]
+                if all(v in LEVEL_VALUES or re.fullmatch(r"\d+", v) or v == "-" for v in non_empty):
+                    return True
+                return False
+
+            effect_lines: list[str] = []
             for idx, cells in enumerate(table_rows):
                 if idx == card_row_idx or idx == 0:
                     continue
-                line = normalize_ws(" ".join(cells))
+                # 카드 타입 행 스킵
+                normalized_joined = normalize_header(normalize_ws(" ".join(cells)))
+                if normalized_joined in {"홀로멤", "오시 홀로멤", "서포트", "이벤트"}:
+                    continue
+                # 메타데이터 헤더/값 행 스킵
+                if _is_meta_header_row(cells) or _is_meta_value_row(cells):
+                    continue
+                # 섹션 종료 행 (카드번호, 수록팩 등) 스킵
+                if any(normalize_header(c).startswith(p) for c in cells
+                       for p in ("카드 넘버", "카드번호", "수록 팩", "레어도")):
+                    continue
+                # 태그 행: '#'으로 시작하는 토큰들 → 스킵 (효과 아님)
+                if TAG_ONLY_RE.fullmatch(normalize_ws(" ".join(cells))):
+                    continue
+                # 빈 행 스킵
+                line = normalize_ws(" ".join(c for c in cells if c))
                 if not line:
                     continue
-                normalized_line = normalize_header(line)
-                if normalized_line in {
-                    "홀로멤",
-                    "오시 홀로멤",
-                    "레벨 속성",
-                    "레벨",
-                    "속성",
-                    "debut",
-                    "1st",
-                    "2nd",
-                    "spot",
-                }:
+                # noise 라인 스킵
+                if is_noise_metadata_line(line):
                     continue
-                effect_parts.append(line)
+                effect_lines.append(line)
 
-            effect = normalize_ws(" ".join(effect_parts))
+            # 효과 라인들을 줄바꿈으로 결합 (기존 공백 join에서 변경)
+            effect = "\n".join(effect_lines).strip()
             if not effect:
                 continue
 
@@ -978,6 +1041,9 @@ def upsert_ko_text(
         while stripped.startswith(name):
             stripped = stripped[len(name):].lstrip()
         effect = stripped
+
+    # 메타데이터 뭉침 프리픽스 제거: "레벨 속성 HP 배턴 터치 1st 120 ..." → 실제 효과만
+    effect = strip_meta_prefix(effect)
 
     # 최종 안전망: 레어도/태그만 있는 effect는 빈 문자열로 처리
     if _is_bad_effect(effect):
