@@ -19,6 +19,25 @@ def has_source_column(conn: sqlite3.Connection) -> bool:
     return any((row[1] or "") == "source" for row in rows)
 
 
+def resolve_print_id(conn: sqlite3.Connection, row: dict[str, str]) -> int | None:
+    card_number = (row.get("card_number") or "").strip()
+    if card_number:
+        mapped = conn.execute(
+            "SELECT print_id FROM prints WHERE UPPER(card_number)=UPPER(?)",
+            (card_number,),
+        ).fetchone()
+        if mapped:
+            return int(mapped[0])
+
+    pid_raw = (row.get("print_id") or "").strip()
+    if not pid_raw:
+        return None
+    try:
+        return int(pid_raw)
+    except ValueError:
+        return None
+
+
 def import_csv(db_path: str, csv_path: str) -> None:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -32,12 +51,8 @@ def import_csv(db_path: str, csv_path: str) -> None:
     with p.open("r", newline="", encoding="utf-8") as f:
         r = csv.DictReader(f)
         for row in r:
-            pid_raw = (row.get("print_id") or "").strip()
-            if not pid_raw:
-                continue
-            try:
-                pid = int(pid_raw)
-            except ValueError:
+            pid = resolve_print_id(conn, row)
+            if pid is None:
                 continue
 
             ko_name = (row.get("ko_name") or "").strip()

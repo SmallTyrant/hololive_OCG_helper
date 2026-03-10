@@ -33,6 +33,25 @@ def normalize(tag: str) -> str:
         t = t[1:]
     return "".join(t.split()).lower()
 
+
+def resolve_print_id(conn: sqlite3.Connection, row: dict[str, str]) -> int | None:
+    card_number = (row.get("card_number") or "").strip()
+    if card_number:
+        mapped = conn.execute(
+            "SELECT print_id FROM prints WHERE UPPER(card_number)=UPPER(?)",
+            (card_number,),
+        ).fetchone()
+        if mapped:
+            return int(mapped[0])
+
+    pid_raw = (row.get("print_id") or "").strip()
+    if not pid_raw:
+        return None
+    try:
+        return int(pid_raw)
+    except ValueError:
+        return None
+
 def import_csv(db_path: str, csv_path: str) -> None:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -51,12 +70,8 @@ def import_csv(db_path: str, csv_path: str) -> None:
         for row in r:
             row_type = (row.get("type") or "").strip().lower()
             if row_type == "card":
-                pid_raw = (row.get("print_id") or "").strip()
-                if not pid_raw:
-                    continue
-                try:
-                    pid = int(pid_raw)
-                except ValueError:
+                pid = resolve_print_id(conn, row)
+                if pid is None:
                     continue
 
                 ko_name = (row.get("ko_name") or "").strip()
