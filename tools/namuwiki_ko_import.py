@@ -115,6 +115,27 @@ BAD_NAME_LABELS = {
     "card no",
     "card_no",
     "print",
+    # 카드 타입 레이블 (서포트/이벤트 등이 name으로 오인되는 버그 방지)
+    "홀로멤",
+    "오시 홀로멤",
+    "debut 홀로멤",
+    "1st 홀로멤",
+    "2nd 홀로멤",
+    "spot 홀로멤",
+    "서포트",
+    "이벤트",
+    "서포트 / 이벤트",
+    "서포트 / 아이템",
+    "서포트 / 스태프",
+    "서포트 / 마스코트",
+    "서포트 / 팬",
+    "서포트 / 툴",
+    "support / event",
+    "support / item",
+    "support / staff",
+    "support / mascot",
+    "support / fan",
+    "support / tool",
 }
 
 EFFECT_START_PREFIXES = (
@@ -305,6 +326,17 @@ def pick_effect(cells: list[str], header_map: dict[str, int]) -> str:
     return max(candidates, key=len)
 
 
+def _is_bad_name(candidate: str) -> bool:
+    """카드명으로 쓸 수 없는 텍스트인지 판별."""
+    normalized = normalize_header(candidate)
+    if normalized in BAD_NAME_LABELS:
+        return True
+    # '서포트 / ...' 패턴: 카드 타입 표시
+    if SUPPORT_DETAIL_PREFIX_RE.match(candidate):
+        return True
+    return False
+
+
 def pick_name(cells: list[str], header_map: dict[str, int]) -> str:
     def _clean_name_line(line: str) -> str:
         cleaned = re.split(r"\b(?:LIFE|HP)\b", line)[0].strip()
@@ -317,13 +349,15 @@ def pick_name(cells: list[str], header_map: dict[str, int]) -> str:
             cleaned = line.strip()
         if CARDNO_RE.search(cleaned):
             return ""
+        if _is_bad_name(cleaned):
+            return ""
         return cleaned
 
     if "name" in header_map:
         idx = header_map["name"]
         if 0 <= idx < len(cells):
             named = normalize_ws(cells[idx])
-            if named:
+            if named and not _is_bad_name(named):
                 return named
 
     lines: list[str] = []
@@ -492,10 +526,12 @@ def parse_card_sections_from_ids(html: str, source_url: str) -> list[KoRow]:
                 continue
             if line.startswith(EFFECT_START_PREFIXES):
                 continue
+            if _is_bad_name(line):
+                continue
             candidate_name = pick_name([line], {})
             if not candidate_name:
                 continue
-            if normalize_header(candidate_name) in BAD_NAME_LABELS:
+            if _is_bad_name(candidate_name):
                 continue
             name = candidate_name
             break
@@ -621,7 +657,9 @@ def parse_tables(
             first_row = table_rows[0]
             name = pick_name([first_row[0]] if first_row else [], {})
             if not name and first_row:
-                name = normalize_ws(first_row[0].split("/", 1)[0])
+                candidate = normalize_ws(first_row[0].split("/", 1)[0])
+                if not _is_bad_name(candidate):
+                    name = candidate
 
             effect_parts: list[str] = []
             for idx, cells in enumerate(table_rows):
@@ -892,9 +930,14 @@ def upsert_ko_text(
     existing: dict[int, tuple[str, str, int]] | None = None,
 ) -> bool:
     name = sanitize_ko_name(name)
+    # 최종 안전망: 카드 타입 텍스트가 name으로 들어오는 것을 차단
+    if _is_bad_name(name):
+        name = ""
     cached = existing.get(print_id) if existing is not None else None
     if not name and cached:
         name = sanitize_ko_name(cached[0])
+        if _is_bad_name(name):
+            name = ""
 
     # Strip duplicate card name from the beginning of effect_text (may repeat)
     if name and effect:
