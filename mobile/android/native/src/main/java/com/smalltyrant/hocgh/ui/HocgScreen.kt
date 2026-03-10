@@ -93,6 +93,7 @@ import java.util.Locale
 
 private val SECTION_LABELS = listOf(
     "SP 오시 스킬",
+    "오시 스테이지 스킬",
     "오시 스킬",
     "콜라보 이펙트",
     "블룸 이펙트",
@@ -109,6 +110,7 @@ private val SECTION_LABELS = listOf(
     "레벨",
     "배턴 터치",
     "SP推しスキル",
+    "推しステージスキル",
     "推しスキル",
     "カードタイプ",
     "タグ",
@@ -126,10 +128,10 @@ private val SECTION_LABELS = listOf(
 private val SECTION_LABELS_SORTED = SECTION_LABELS.sortedByDescending { it.length }
 private val JAPANESE_CHAR_REGEX = Regex("[\\u3040-\\u30ff\\u31f0-\\u31ff\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff々〆ヵヶ]")
 private val KO_SECTION_MARKER_REGEX = Regex(
-    "SP 오시 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\\s+(?![+\\-]\\d)\\S)|#",
+    "SP 오시 스킬|오시 스테이지 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\\s+(?![+\\-]\\d)\\S)|#",
 )
 private val JA_SECTION_MARKER_REGEX = Regex(
-    "SP推しスキル|推しスキル|コラボエフェクト|ブルームエフェクト|ギフト|エクストラ|アーツ(?=\\s+(?![+\\-]\\d)\\S)|カードタイプ|タグ|レアリティ|能力テキスト|バトンタッチ|#",
+    "SP推しスキル|推しステージスキル|推しスキル|コラボエフェクト|ブルームエフェクト|ギフト|エクストラ|アーツ(?=\\s+(?![+\\-]\\d)\\S)|カードタイプ|タグ|レアリティ|能力テキスト|バトンタッチ|#",
 )
 private val TAG_TOKEN_REGEX = Regex("#[^\\s#]+")
 private val JA_TAG_OBJECT_SPLIT_REGEX = Regex("^(#[^\\s#を]+(?:\\s+[^\\s#を]+)*)(を.+)$")
@@ -177,6 +179,7 @@ private val JA_DETAIL_REPLACEMENTS = listOf(
 )
 private val KO_LINE_BREAK_PATTERNS = listOf(
     Regex("\\s*SP 오시 스킬\\s*") to "\nSP 오시 스킬\n",
+    Regex("\\s*오시 스테이지 스킬\\s*") to "\n오시 스테이지 스킬\n",
     Regex("\\s*(?<!SP )오시 스킬\\s*") to "\n오시 스킬\n",
     Regex("\\s*콜라보 이펙트\\s*") to "\n콜라보 이펙트\n",
     Regex("\\s*기프트\\s*") to "\n기프트\n",
@@ -186,6 +189,7 @@ private val KO_LINE_BREAK_PATTERNS = listOf(
 )
 private val JA_LINE_BREAK_PATTERNS = listOf(
     Regex("\\s*SP推しスキル\\s*") to "\nSP推しスキル\n",
+    Regex("\\s*推しステージスキル\\s*") to "\n推しステージスキル\n",
     Regex("\\s*(?<!SP)推しスキル\\s*") to "\n推しスキル\n",
     Regex("\\s*コラボエフェクト\\s*") to "\nコラボエフェクト\n",
     Regex("\\s*ブルームエフェクト\\s*") to "\nブルームエフェクト\n",

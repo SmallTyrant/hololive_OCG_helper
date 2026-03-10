@@ -119,8 +119,10 @@ BAD_NAME_LABELS = {
 
 EFFECT_START_PREFIXES = (
     "SP 오시 스킬",
+    "오시 스테이지 스킬",
     "오시 스킬",
     "SP推しスキル",
+    "推しステージスキル",
     "推しスキル",
     "아츠",
     "콜라보 이펙트",
@@ -307,7 +309,7 @@ def pick_name(cells: list[str], header_map: dict[str, int]) -> str:
     def _clean_name_line(line: str) -> str:
         cleaned = re.split(r"\b(?:LIFE|HP)\b", line)[0].strip()
         cleaned = re.split(
-            r"(레벨|속성|오시 스킬|SP 오시 스킬|SP오시스킬|아츠|배턴 터치|레어도|코스트|에너지|카드 넘버|카드번호|카드 번호|카드넘버)",
+            r"(레벨|속성|오시 스테이지 스킬|오시 스킬|SP 오시 스킬|SP오시스킬|아츠|배턴 터치|레어도|코스트|에너지|카드 넘버|카드번호|카드 번호|카드넘버)",
             cleaned,
         )[0].strip()
         cleaned = re.sub(r"\s+\d+.*$", "", cleaned).strip()
@@ -426,9 +428,20 @@ def merge_split_skill_tokens(lines: list[str]) -> list[str]:
         cur = lines[idx]
         nxt = lines[idx + 1] if idx + 1 < len(lines) else ""
         nxt2 = lines[idx + 2] if idx + 2 < len(lines) else ""
+        nxt3 = lines[idx + 3] if idx + 3 < len(lines) else ""
 
         if cur.upper() == "SP" and nxt in {"오시", "推し"} and nxt2 in {"스킬", "スキル"}:
             merged.append("SP 오시 스킬" if nxt == "오시" else "SP推しスキル")
+            idx += 3
+            continue
+
+        if cur in {"오시", "推し"} and nxt == "스테이지" and nxt2 == "스킬":
+            merged.append("오시 스테이지 스킬")
+            idx += 3
+            continue
+
+        if cur == "推し" and nxt == "ステージ" and nxt2 == "スキル":
+            merged.append("推しステージスキル")
             idx += 3
             continue
 
@@ -476,6 +489,8 @@ def parse_card_sections_from_ids(html: str, source_url: str) -> list[KoRow]:
             if is_section_heading_line(line):
                 continue
             if is_noise_metadata_line(line):
+                continue
+            if line.startswith(EFFECT_START_PREFIXES):
                 continue
             candidate_name = pick_name([line], {})
             if not candidate_name:
