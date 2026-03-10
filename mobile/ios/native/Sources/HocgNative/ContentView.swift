@@ -1101,11 +1101,12 @@ struct ContentView: View {
             guard trimmed.hasPrefix(label) else {
                 continue
             }
-            let rest = String(trimmed.dropFirst(label.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            let suffix = String(trimmed.dropFirst(label.count))
+            let rest = suffix.trimmingCharacters(in: .whitespacesAndNewlines)
             if rest.isEmpty {
                 return (label, "")
             }
-            if separators.contains(where: { rest.hasPrefix($0) }) {
+            if separators.contains(where: { suffix.hasPrefix($0) }) {
                 return (label, rest)
             }
         }
@@ -1435,6 +1436,8 @@ struct ContentView: View {
     private static let koMwTagPatterns = [
         "#ID\\s+\\d+기생",     // #ID 1기생, #ID 2기생, #ID 3기생
         "#[^\\s#]+['’]s\\s+[^\\s#]+", // #시라카미's 캐릭터
+        "#비밀\\s+결사\\s+[Hh]oloX", // #비밀 결사 holoX
+        "#FLOW\\s+GLOW", // #FLOW GLOW
     ]
 
     private func buildTagTokenRegex(multiWordTags: [String]) -> NSRegularExpression {

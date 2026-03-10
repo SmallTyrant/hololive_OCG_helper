@@ -216,6 +216,8 @@ private const val MW_PLACEHOLDER = "\uFFFF"
 private val KO_MW_TAG_PATTERNS = listOf(
     Regex("#ID\\s+\\d+기생"),
     Regex("#[^\\s#]+['']s\\s+[^\\s#]+"),
+    Regex("#비밀\\s+결사\\s+[Hh]oloX"),
+    Regex("#FLOW\\s+GLOW"),
 )
 private val SCALAR_METADATA_PATTERN = Regex("^(hp\\s*\\d{2,3}|(1st|2nd)\\s*\\d{2,3})$", RegexOption.IGNORE_CASE)
 private val DIGIT_TOKEN_PATTERN = Regex("^\\d{2,3}$")
@@ -1258,11 +1260,12 @@ private fun splitSectionLabel(line: String): Pair<String, String>? {
         if (!trimmed.startsWith(label)) {
             continue
         }
-        val rest = trimmed.removePrefix(label).trim()
+        val suffix = trimmed.removePrefix(label)
+        val rest = suffix.trim()
         if (rest.isEmpty()) {
             return label to ""
         }
-        if (separators.any { rest.startsWith(it) }) {
+        if (separators.any { suffix.startsWith(it) }) {
             return label to rest
         }
     }
