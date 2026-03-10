@@ -60,6 +60,7 @@ DEFAULT_SOURCE_PAGES: tuple[str, ...] = (
     "https://namu.wiki/w/%ED%81%90%EB%A6%AC%EC%96%B4%EC%8A%A4%20%EC%9C%A0%EB%8B%88%EB%B2%84%EC%8A%A4/%EC%B9%B4%EB%93%9C",
     "https://namu.wiki/w/%EC%9D%B8%EC%B1%88%ED%8A%B8%20%EB%A0%88%EA%B0%88%EB%A6%AC%EC%95%84/%EC%B9%B4%EB%93%9C",
     "https://namu.wiki/w/%EC%95%84%EC%95%BC%EC%B9%B4%EC%8B%9C%20%EB%B2%84%EB%B0%80%EB%A6%AC%EC%98%A8/%EC%B9%B4%EB%93%9C",
+    "https://namu.wiki/w/%EB%94%94%EB%B0%94%20%ED%94%BC%EB%B2%84/%EC%B9%B4%EB%93%9C",  # hBP07 디바 피버
 )
 
 EFFECT_HEADER_KEYWORDS = (
