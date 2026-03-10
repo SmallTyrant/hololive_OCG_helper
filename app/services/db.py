@@ -394,7 +394,50 @@ def load_card_detail(conn: sqlite3.Connection, pid: int) -> dict | None:
         """,
         (pid,),
     ).fetchone()
-    return dict(r) if r else None
+    if not r:
+        return None
+    detail = dict(r)
+
+    # print_tags 테이블에서 태그를 가져와 ko_text에 없으면 추가
+    tag_joins = _build_tag_joins(conn)
+    if tag_joins:
+        # tags_ko가 있으면 한국어 태그 우선, 없으면 원본 사용
+        has_tags_ko = "tags_ko" in {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='tags_ko'"
+        )}
+        tag_select = "COALESCE(ko.tag, t.tag, '')" if has_tags_ko else "COALESCE(t.tag,'')"
+        ko_join = "LEFT JOIN tags_ko ko ON ko.tag_id = t.tag_id" if has_tags_ko else ""
+        tag_rows = conn.execute(
+            f"""
+            SELECT {tag_select} AS tag
+            FROM prints p
+            {tag_joins}
+            {ko_join}
+            WHERE p.print_id=?
+            ORDER BY t.tag
+            """,
+            (pid,),
+        ).fetchall()
+        tags = []
+        seen: set[str] = set()
+        for (tag,) in tag_rows:
+            tag = (tag or "").strip()
+            if not tag:
+                continue
+            if not tag.startswith("#"):
+                tag = f"#{tag}"
+            if tag not in seen:
+                seen.add(tag)
+                tags.append(tag)
+        if tags:
+            ko_text = (detail.get("ko_text") or "").strip()
+            existing = {t for t in ko_text.split() if t.startswith("#")}
+            missing = [t for t in tags if t not in existing]
+            if missing and not existing:
+                tag_line = " ".join(missing)
+                detail["ko_text"] = f"{ko_text}\n태그\n{tag_line}" if ko_text else f"태그\n{tag_line}"
+
+    return detail
 
 
 def get_print_brief(conn: sqlite3.Connection, print_id: int) -> dict | None:

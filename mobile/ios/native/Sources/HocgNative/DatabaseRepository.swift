@@ -734,7 +734,7 @@ final class DatabaseRepository {
         return rows
     }
 
-    private func loadTagsForPrint(
+     private func loadTagsForPrint(
         db: OpaquePointer,
         printId: Int64,
         fingerprint: DbFingerprint? = nil,
@@ -743,10 +743,16 @@ final class DatabaseRepository {
             return []
         }
 
+        // tags_ko 테이블이 있으면 한국어 태그를 우선 사용, 없으면 원본 태그 사용
+        let hasTagsKo = (try? tableExists(db: db, table: "tags_ko")) ?? false
+        let tagSelect = hasTagsKo ? "COALESCE(ko.tag, t.tag, '') AS tag" : "COALESCE(t.tag,'') AS tag"
+        let koJoin = hasTagsKo ? "LEFT JOIN tags_ko ko ON ko.tag_id = t.tag_id" : ""
+
         let sql = """
-        SELECT COALESCE(t.tag,'') AS tag
+        SELECT \(tagSelect)
         FROM prints p
         \(tagJoinSql)
+        \(koJoin)
         WHERE p.print_id=?
         ORDER BY t.tag
         """

@@ -480,17 +480,30 @@ class DbRepository(private val paths: AppPaths) {
         }
     }
 
-    private fun loadTagsForPrint(
+     private fun loadTagsForPrint(
         db: SQLiteDatabase,
         printId: Long,
         fingerprint: DbFingerprint? = null,
     ): List<String> {
         val tagJoinSql = buildTagJoinSql(db, fingerprint) ?: return emptyList()
+        // tags_ko 테이블이 있으면 한국어 태그를 우선 사용, 없으면 원본 태그 사용
+        val hasTagsKo = tableExists(db, "tags_ko")
+        val tagSelect = if (hasTagsKo) {
+            "COALESCE(ko.tag, t.tag, '') AS tag"
+        } else {
+            "COALESCE(t.tag,'') AS tag"
+        }
+        val koJoin = if (hasTagsKo) {
+            "LEFT JOIN tags_ko ko ON ko.tag_id = t.tag_id"
+        } else {
+            ""
+        }
         return db.rawQuery(
             """
-            SELECT COALESCE(t.tag,'') AS tag
+            SELECT $tagSelect
             FROM prints p
             $tagJoinSql
+            $koJoin
             WHERE p.print_id=?
             ORDER BY t.tag
             """.trimIndent(),
