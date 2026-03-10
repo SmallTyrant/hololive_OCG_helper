@@ -4,6 +4,7 @@ import Foundation
 
 private let sectionLabels: [String] = [
     "SP 오시 스킬",
+    "오시 스테이지 스킬",
     "오시 스킬",
     "콜라보 이펙트",
     "블룸 이펙트",
@@ -20,6 +21,7 @@ private let sectionLabels: [String] = [
     "레벨",
     "배턴 터치",
     "SP推しスキル",
+    "推しステージスキル",
     "推しスキル",
     "カードタイプ",
     "タグ",
@@ -38,10 +40,10 @@ private let detailPrefixPattern = #"^(?:(?:.+?)\s+)?(?:서포트|サポート)\s
 private let sectionLabelsSorted = sectionLabels.sorted { $0.count > $1.count }
 private let japaneseCharPattern = "[\\u3040-\\u30ff\\u31f0-\\u31ff\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff々〆ヵヶ]"
 private let koSectionMarkerRegex = try! NSRegularExpression(
-    pattern: "SP 오시 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\\s+(?![+\\-]\\d)\\S)|#"
+    pattern: "SP 오시 스킬|오시 스테이지 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\\s+(?![+\\-]\\d)\\S)|#"
 )
 private let jaSectionMarkerRegex = try! NSRegularExpression(
-    pattern: "SP推しスキル|推しスキル|コラボエフェクト|ブルームエフェクト|ギフト|エクストラ|アーツ(?=\\s+(?![+\\-]\\d)\\S)|カードタイプ|タグ|レアリティ|能力テキスト|バトンタッチ|#"
+    pattern: "SP推しスキル|推しステージスキル|推しスキル|コラボエフェクト|ブルームエフェクト|ギフト|エクストラ|アーツ(?=\\s+(?![+\\-]\\d)\\S)|カードタイプ|タグ|レアリティ|能力テキスト|バトンタッチ|#"
 )
 private let tagTokenRegex = try! NSRegularExpression(pattern: "#[^\\s#]+")
 private let koMetadataTokenSet: Set<String> = [
@@ -88,6 +90,7 @@ private let jaDetailReplacements: [(String, String)] = [
 ]
 private let koLineBreakRules: [(String, String)] = [
     ("\\s*SP 오시 스킬\\s*", "\nSP 오시 스킬\n"),
+    ("\\s*오시 스테이지 스킬\\s*", "\n오시 스테이지 스킬\n"),
     ("\\s*(?<!SP )오시 스킬\\s*", "\n오시 스킬\n"),
     ("\\s*콜라보 이펙트\\s*", "\n콜라보 이펙트\n"),
     ("\\s*기프트\\s*", "\n기프트\n"),
@@ -97,6 +100,7 @@ private let koLineBreakRules: [(String, String)] = [
 ]
 private let jaLineBreakRules: [(String, String)] = [
     ("\\s*SP推しスキル\\s*", "\nSP推しスキル\n"),
+    ("\\s*推しステージスキル\\s*", "\n推しステージスキル\n"),
     ("\\s*(?<!SP)推しスキル\\s*", "\n推しスキル\n"),
     ("\\s*コラボエフェクト\\s*", "\nコラボエフェクト\n"),
     ("\\s*ブルームエフェクト\\s*", "\nブルームエフェクト\n"),

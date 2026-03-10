@@ -37,6 +37,7 @@ COLORS = ft.Colors if hasattr(ft, "Colors") else ft.colors
 ICONS = ft.Icons if hasattr(ft, "Icons") else ft.icons
 SECTION_LABELS = (
     "SP 오시 스킬",
+    "오시 스테이지 스킬",
     "오시 스킬",
     "아츠",
     "태그",
@@ -47,6 +48,7 @@ SECTION_LABELS = (
     "カードタイプ",
     "タグ",
     "レアリティ",
+    "推しステージスキル",
     "推しスキル",
     "SP推しスキル",
     "アーツ",
@@ -140,10 +142,10 @@ def _restore_multiword_tags(text: str) -> str:
     return text.replace(_MW_PLACEHOLDER, " ")
 
 KO_SECTION_MARKER_RE = re.compile(
-    r"SP 오시 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\s+(?![+\-]\d)\S)|#"
+    r"SP 오시 스킬|오시 스테이지 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\s+(?![+\-]\d)\S)|#"
 )
 JA_SECTION_MARKER_RE = re.compile(
-    r"SP推しスキル|推しスキル|コラボエフェクト|ブルームエフェクト|ギフト|エクストラ|アーツ(?=\s+(?![+\-]\d)\S)|カードタイプ|レアリティ|能力テキスト|タグ|バトンタッチ|#"
+    r"SP推しスキル|推しステージスキル|推しスキル|コラボエフェクト|ブルームエフェクト|ギフト|エクストラ|アーツ(?=\s+(?![+\-]\d)\S)|カードタイプ|レアリティ|能力テキスト|タグ|バトンタッチ|#"
 )
 
 
@@ -290,6 +292,7 @@ def prettify_ko_detail_text(text: str) -> str:
         section_marker_re=KO_SECTION_MARKER_RE,
         section_break_rules=(
             (r"\s*SP 오시 스킬\s*", "\nSP 오시 스킬\n"),
+            (r"\s*오시 스테이지 스킬\s*", "\n오시 스테이지 스킬\n"),
             (r"\s*(?<!SP )오시 스킬\s*", "\n오시 스킬\n"),
             (r"\s*콜라보 이펙트\s*", "\n콜라보 이펙트\n"),
             (r"\s*기프트\s*", "\n기프트\n"),
@@ -324,6 +327,7 @@ def prettify_ja_detail_text(text: str) -> str:
         section_marker_re=JA_SECTION_MARKER_RE,
         section_break_rules=(
             (r"\s*SP推しスキル\s*", "\nSP推しスキル\n"),
+            (r"\s*推しステージスキル\s*", "\n推しステージスキル\n"),
             (r"\s*(?<!SP)推しスキル\s*", "\n推しスキル\n"),
             (r"\s*コラボエフェクト\s*", "\nコラボエフェクト\n"),
             (r"\s*ギフト\s*", "\nギフト\n"),
