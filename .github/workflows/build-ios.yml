@@ -51,12 +51,20 @@ jobs:
         run: |
           mkdir -p ~/private_keys
           echo "$APP_STORE_CONNECT_API_KEY" > ~/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8
+          
+          # App Store Connect API 인증 설정
+          xcrun notarytool store-credentials "AC_PASSWORD" \
+            --key ~/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8 \
+            --key-id ${{ secrets.APP_STORE_CONNECT_KEY_ID }} \
+            --issuer ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }} || true
       
       - name: Archive 빌드
         if: steps.check_secrets.outputs.has_secrets == 'true'
         working-directory: mobile/ios/native-app
         env:
           DEVELOPMENT_TEAM: ${{ secrets.IOS_TEAM_ID }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
           xcodebuild \
             -project HocgNative.xcodeproj \
@@ -68,6 +76,9 @@ jobs:
             CODE_SIGN_STYLE=Automatic \
             CURRENT_PROJECT_VERSION=${{ steps.build_number.outputs.build_number }} \
             -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8 \
+            -authenticationKeyID ${APP_STORE_CONNECT_KEY_ID} \
+            -authenticationKeyIssuerID ${APP_STORE_CONNECT_ISSUER_ID} \
             archive
       
       - name: ExportOptions.plist 생성
@@ -97,12 +108,18 @@ jobs:
       - name: IPA Export
         if: steps.check_secrets.outputs.has_secrets == 'true'
         working-directory: mobile/ios/native-app
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
           xcodebuild -exportArchive \
             -archivePath build/HocgNative.xcarchive \
             -exportOptionsPlist build/ExportOptions.plist \
             -exportPath build/ipa \
-            -allowProvisioningUpdates
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8 \
+            -authenticationKeyID ${APP_STORE_CONNECT_KEY_ID} \
+            -authenticationKeyIssuerID ${APP_STORE_CONNECT_ISSUER_ID}
       
       - name: TestFlight 업로드
         if: steps.check_secrets.outputs.has_secrets == 'true'
