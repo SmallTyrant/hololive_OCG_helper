@@ -97,7 +97,27 @@ final class HocgViewModel: ObservableObject {
                 pushToast(dbUpdatedToast)
                 refreshList()
             } catch {
-                let message = "DB 갱신 실패: \(error.localizedDescription)"
+                var message = "DB 갱신 실패: \(error.localizedDescription)"
+                
+                if let urlError = error as? URLError {
+                    switch urlError.code {
+                    case .badServerResponse:
+                        message = "DB 갱신 실패: 서버에서 DB 파일을 찾을 수 없습니다. 네트워크 연결을 확인하거나 나중에 다시 시도해주세요."
+                    case .notConnectedToInternet:
+                        message = "DB 갱신 실패: 인터넷에 연결되어 있지 않습니다."
+                    case .timedOut:
+                        message = "DB 갱신 실패: 요청 시간이 초과되었습니다."
+                    case .cannotFindHost:
+                        message = "DB 갱신 실패: 서버를 찾을 수 없습니다. 네트워크 연결을 확인해주세요."
+                    case .cannotConnectToHost:
+                        message = "DB 갱신 실패: 서버에 연결할 수 없습니다. 네트워크 연결을 확인해주세요."
+                    case .networkConnectionLost:
+                        message = "DB 갱신 실패: 네트워크 연결이 끊어졌습니다."
+                    default:
+                        break
+                    }
+                }
+                
                 state.updateStatus = message
                 state.updateStatusError = true
                 pushToast(message)
