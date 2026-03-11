@@ -1,0 +1,132 @@
+name: Android 빌드 및 GitHub Release 업로드
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'mobile/android/native-app/**'
+      - 'mobile/android/native/**'
+      - 'app/assets/hololive_ocg.sqlite'
+      - '.github/workflows/build-android.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    name: Android APK 빌드 및 GitHub Release 업로드
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+      
+      - name: JDK 17 설정
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      
+      - name: Gradle 캐시
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+      
+      - name: 빌드 번호 설정
+        id: build_number
+        run: |
+          BUILD_NUMBER=${{ github.run_number }}
+          echo "build_number=$BUILD_NUMBER" >> $GITHUB_OUTPUT
+          echo "version_name=1.0.$BUILD_NUMBER" >> $GITHUB_OUTPUT
+      
+      - name: keystore.properties 생성 (Release 빌드용)
+        working-directory: mobile/android/native-app
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > hocg-release.jks
+            cat > keystore.properties <<EOF
+          storeFile=hocg-release.jks
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+          else
+            echo "키스토어 시크릿이 없습니다. Debug APK만 빌드합니다."
+          fi
+      
+      - name: Gradlew 실행 권한 부여
+        working-directory: mobile/android/native-app
+        run: chmod +x ./gradlew
+      
+      - name: Release APK 빌드
+        working-directory: mobile/android/native-app
+        run: |
+          if [ -f keystore.properties ]; then
+            ./gradlew assembleRelease --no-daemon
+            APK_PATH="app/build/outputs/apk/release/app-release.apk"
+            echo "apk_path=$APK_PATH" >> $GITHUB_ENV
+            echo "apk_name=hololive-ocg-helper-v${{ steps.build_number.outputs.version_name }}.apk" >> $GITHUB_ENV
+          else
+            ./gradlew assembleDebug --no-daemon
+            APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+            echo "apk_path=$APK_PATH" >> $GITHUB_ENV
+            echo "apk_name=hololive-ocg-helper-v${{ steps.build_number.outputs.version_name }}-debug.apk" >> $GITHUB_ENV
+          fi
+      
+      - name: APK 파일 확인
+        working-directory: mobile/android/native-app
+        run: |
+          ls -lh ${{ env.apk_path }}
+          echo "APK 크기: $(du -h ${{ env.apk_path }} | cut -f1)"
+      
+      - name: 태그 생성
+        id: create_tag
+        run: |
+          TAG_NAME="android-v${{ steps.build_number.outputs.version_name }}"
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG_NAME" -m "Android 빌드 v${{ steps.build_number.outputs.version_name }}"
+          git push origin "$TAG_NAME"
+      
+      - name: GitHub Release 생성 및 APK 업로드
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.create_tag.outputs.tag_name }}
+          name: Android v${{ steps.build_number.outputs.version_name }}
+          body: |
+            ## Android APK 빌드
+            
+            **빌드 번호**: ${{ steps.build_number.outputs.build_number }}
+            **버전**: ${{ steps.build_number.outputs.version_name }}
+            **커밋**: ${{ github.sha }}
+            
+            ### 변경사항
+            ${{ github.event.head_commit.message }}
+            
+            ### 설치 방법
+            1. APK 파일을 Android 기기에 다운로드
+            2. 설치 허용 (출처를 알 수 없는 앱 설치 허용 필요)
+            3. 앱 실행
+          files: |
+            mobile/android/native-app/${{ env.apk_path }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: APK 아티팩트 업로드
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-${{ github.run_number }}
+          path: mobile/android/native-app/${{ env.apk_path }}
+          retention-days: 30
