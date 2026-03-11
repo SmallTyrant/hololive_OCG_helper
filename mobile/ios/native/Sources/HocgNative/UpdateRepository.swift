@@ -2,8 +2,9 @@ import Foundation
 import SQLite3
 
 private let githubRepo = "SmallTyrant/hololive_OCG_helper"
-private let latestReleaseAPI = URL(string: "https://api.github.com/repos/\(githubRepo)/releases/latest")!
-private let latestDbDirectURL = URL(string: "https://github.com/\(githubRepo)/releases/latest/download/hololive_ocg.sqlite")!
+private let dbReleaseTag = "DB"
+private let dbReleaseAPI = URL(string: "https://api.github.com/repos/\(githubRepo)/releases/tags/\(dbReleaseTag)")!
+private let dbDirectURL = URL(string: "https://github.com/\(githubRepo)/releases/download/\(dbReleaseTag)/hololive_ocg.sqlite")!
 
 struct ReleaseDbInfo {
     let tag: String
@@ -17,7 +18,7 @@ struct ReleaseDbInfo {
 final class UpdateRepository {
 
     func latestReleaseDbInfo() async throws -> ReleaseDbInfo {
-        var request = URLRequest(url: latestReleaseAPI)
+        var request = URLRequest(url: dbReleaseAPI)
         request.timeoutInterval = 20
         request.setValue("hOCG_H/1.1", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
@@ -51,9 +52,9 @@ final class UpdateRepository {
             releaseInfo = try await latestReleaseDbInfo()
         } catch {
             releaseInfo = ReleaseDbInfo(
-                tag: "latest",
+                tag: dbReleaseTag,
                 assetName: "hololive_ocg.sqlite",
-                assetURL: latestDbDirectURL,
+                assetURL: dbDirectURL,
                 assetUpdatedAt: "",
                 publishedAt: "",
                 createdAt: "",
@@ -146,7 +147,7 @@ final class UpdateRepository {
             }
         }
 
-        return ("hololive_ocg.sqlite", latestDbDirectURL)
+        return ("hololive_ocg.sqlite", dbDirectURL)
     }
 
     private func validateSQLite(fileURL: URL) throws {

@@ -11,8 +11,9 @@ import java.io.IOException
 import java.time.Duration
 
 private const val GITHUB_REPO = "SmallTyrant/hololive_OCG_helper"
-private const val LATEST_RELEASE_API = "https://api.github.com/repos/$GITHUB_REPO/releases/latest"
-private const val LATEST_DB_DIRECT_URL = "https://github.com/$GITHUB_REPO/releases/latest/download/hololive_ocg.sqlite"
+private const val DB_RELEASE_TAG = "DB"
+private const val DB_RELEASE_API = "https://api.github.com/repos/$GITHUB_REPO/releases/tags/$DB_RELEASE_TAG"
+private const val DB_DIRECT_URL = "https://github.com/$GITHUB_REPO/releases/download/$DB_RELEASE_TAG/hololive_ocg.sqlite"
 private const val APP_RELEASE_TAG = "install_file1"
 private const val APP_APK_ASSET_NAME = "app-release.apk"
 private const val APP_APK_DIRECT_URL = "https://github.com/$GITHUB_REPO/releases/download/$APP_RELEASE_TAG/$APP_APK_ASSET_NAME"
@@ -76,9 +77,9 @@ class UpdateRepository {
     fun downloadLatestDb(targetDbFile: File): ReleaseDbInfo {
         val releaseInfo = runCatching { getLatestReleaseDbInfo() }.getOrElse {
             ReleaseDbInfo(
-                tag = "latest",
+                tag = DB_RELEASE_TAG,
                 assetName = "hololive_ocg.sqlite",
-                assetUrl = LATEST_DB_DIRECT_URL,
+                assetUrl = DB_DIRECT_URL,
                 assetUpdatedAt = "",
                 publishedAt = "",
                 createdAt = "",
@@ -119,7 +120,7 @@ class UpdateRepository {
     }
 
     private fun fetchLatestReleasePayload(): JSONObject {
-        return fetchReleasePayload(LATEST_RELEASE_API)
+        return fetchReleasePayload(DB_RELEASE_API)
     }
 
     private fun fetchReleasePayload(url: String): JSONObject {
@@ -193,7 +194,7 @@ class UpdateRepository {
             }
         }
 
-        return "hololive_ocg.sqlite" to LATEST_DB_DIRECT_URL
+        return "hololive_ocg.sqlite" to DB_DIRECT_URL
     }
 
     private fun fetchVersionJsonApkInfo(): ReleaseApkInfo {
