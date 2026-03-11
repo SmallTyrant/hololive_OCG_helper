@@ -389,6 +389,11 @@ def strip_meta_prefix(effect: str) -> str:
         remainder = stripped[m.end():].strip()
         if remainder:
             return remainder
+    
+    # Remove full metadata lines including baton touch
+    # Pattern: "레벨 1st\nHP 160\n배턴 터치 -\n" or similar multi-line metadata
+    stripped = re.sub(r'레벨[^\n]*\nHP[^\n]*\n배턴 터치[^\n]*\n', '', stripped, flags=re.IGNORECASE)
+    
     return stripped
 
 
@@ -1045,6 +1050,10 @@ def upsert_ko_text(
 
     # 메타데이터 뭉침 프리픽스 제거: "레벨 속성 HP 배턴 터치 1st 120 ..." → 실제 효과만
     effect = strip_meta_prefix(effect)
+
+    # Remove brackets from collab/bloom effects
+    effect = effect.replace('【콜라보 이펙트】', '콜라보 이펙트')
+    effect = effect.replace('【블룸 이펙트】', '블룸 이펙트')
 
     # 최종 안전망: 레어도/태그만 있는 effect는 빈 문자열로 처리
     if _is_bad_effect(effect):
