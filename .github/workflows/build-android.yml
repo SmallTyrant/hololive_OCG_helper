@@ -11,6 +11,9 @@ on:
       - '.github/workflows/build-android.yml'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-and-release:
     name: Android APK 빌드 및 GitHub Release 업로드
@@ -88,15 +91,11 @@ jobs:
           ls -lh ${{ env.apk_path }}
           echo "APK 크기: $(du -h ${{ env.apk_path }} | cut -f1)"
       
-      - name: 태그 생성
+      - name: 태그 이름 설정
         id: create_tag
         run: |
           TAG_NAME="android-v${{ steps.build_number.outputs.version_name }}"
           echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG_NAME" -m "Android 빌드 v${{ steps.build_number.outputs.version_name }}"
-          git push origin "$TAG_NAME"
       
       - name: GitHub Release 생성 및 APK 업로드
         uses: softprops/action-gh-release@v1
