@@ -527,28 +527,39 @@ class DbRepository(private val paths: AppPaths) {
             return text
         }
 
-        val existingTags = text
-            .split(Regex("\\s+"))
-            .map { it.trim() }
-            .filter { it.startsWith("#") }
-            .toSet()
+        val trimmedText = text.trim()
+        if (trimmedText.isEmpty()) {
+            return "$sectionLabel\n${tags.joinToString(" ")}"
+        }
 
-        if (existingTags.isNotEmpty()) {
+        val textLines = trimmedText.lines().map { it.trim() }.filter { it.isNotEmpty() }
+
+        // Already has a standalone sectionLabel line (e.g. "태그" on its own)
+        if (textLines.any { it == sectionLabel }) return text
+
+        // Last line consists entirely of #-prefixed tokens → proper tag-only line at end
+        val lastLine = textLines.last()
+        if (lastLine.startsWith("#") &&
+            lastLine.split(Regex("\\s+")).filter { it.isNotEmpty() }.all { it.startsWith("#") }
+        ) {
             return text
         }
 
-        val missing = tags.filterNot(existingTags::contains)
-        if (missing.isEmpty()) {
-            return text
+        // Text ends with trailing tag tokens (everything from the last '#' is only tags)
+        val lastHashIdx = trimmedText.lastIndexOf('#')
+        if (lastHashIdx >= 0) {
+            val fromLastHash = trimmedText.substring(lastHashIdx)
+            val hasNonTagAfterLastHash = fromLastHash
+                .split(Regex("\\s+"))
+                .filter { it.isNotEmpty() }
+                .dropWhile { it.startsWith("#") }
+                .any { it.isNotEmpty() }
+            if (!hasNonTagAfterLastHash) return text
         }
 
-        val normalized = text.trim()
-        val tagLine = missing.joinToString(" ")
-        return if (normalized.isEmpty()) {
-            "$sectionLabel\n$tagLine"
-        } else {
-            "$normalized\n$sectionLabel\n$tagLine"
-        }
+        // No proper tag section found – append all tags at the bottom
+        val tagLine = tags.joinToString(" ")
+        return "$trimmedText\n$sectionLabel\n$tagLine"
     }
 
     fun loadMultiWordTags(): List<String> {

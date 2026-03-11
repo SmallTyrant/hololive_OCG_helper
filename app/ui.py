@@ -62,6 +62,14 @@ SECTION_LABELS = (
     "HP",
 )
 SECTION_LABELS_SORTED = tuple(sorted(SECTION_LABELS, key=len, reverse=True))
+
+_JA_TO_KO_EFFECT_LABEL = {
+    "コラボエフェクト": "콜라보 이펙트",
+    "ブルームエフェクト": "블룸 이펙트",
+    "ギフト": "기프트",
+    "エクストラ": "엑스트라",
+}
+_KO_EFFECT_TYPE_LABELS = frozenset({"콜라보 이펙트", "블룸 이펙트", "기프트", "엑스트라"})
 JAPANESE_CHAR_RE = re.compile(r"[\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff々〆ヵヶ]")
 TAG_ONLY_LINE_RE = re.compile(r"^(?:#[^\s#]+(?:\s+|$))+(?:[A-Za-z0-9가-힣]+(?:\s+[A-Za-z0-9가-힣]+)*)?$")
 JA_TAG_OBJECT_SPLIT_RE = re.compile(r"^(#[^\s#を]+(?:\s+[^\s#を]+)*)(を.+)$")
@@ -144,6 +152,23 @@ def _restore_multiword_tags(text: str) -> str:
 KO_SECTION_MARKER_RE = re.compile(
     r"SP 오시 스킬|오시 스테이지 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\s+(?![+\-]\d)\S)|#"
 )
+
+_KO_METADATA_TOKENS = frozenset({
+    "레벨", "속성", "hp", "life", "배턴", "터치", "배턴터치", "1st", "2nd", "debut", "buzz",
+})
+_NOISE_DASH_TOKENS = frozenset({"-", "\u2013", "\u2014", "\u30fc", "\u2212"})
+
+
+def _is_noise_metadata_line(line: str) -> bool:
+    """Return True if `line` is metadata noise that should be hidden (e.g. '배턴 터치 -')."""
+    normalized = normalize_inline_ws(line)
+    if not normalized:
+        return True
+    tokens = normalized.lower().split()
+    return bool(tokens) and all(
+        t in _KO_METADATA_TOKENS or re.fullmatch(r"\d{2,3}", t) or t in _NOISE_DASH_TOKENS
+        for t in tokens
+    )
 JA_SECTION_MARKER_RE = re.compile(
     r"SP推しスキル|推しステージスキル|推しスキル|コラボエフェクト|ブルームエフェクト|ギフト|エクストラ|アーツ(?=\s+(?![+\-]\d)\S)|カードタイプ|レアリティ|能力テキスト|タグ|バトンタッチ|#"
 )
@@ -277,6 +302,8 @@ def _prettify_detail_text(
         lines = _normalize_nonempty_lines(merged)
 
     expanded = _expand_tag_lines(lines, tag_label)
+    if strip_japanese_chars:
+        expanded = [ln for ln in expanded if not _is_noise_metadata_line(ln)]
     deduped = _dedupe_detail_lines(expanded, tag_label)
     return "\n".join(deduped)
 
@@ -1090,8 +1117,17 @@ def launch_app(db_path: str) -> None:
             ja = (detail_texts["ja"] or "").strip()
 
             if ko:
+                ko_pretty = prettify_ko_detail_text(ko)
+                if ja:
+                    ja_pretty = prettify_ja_detail_text(ja)
+                    ko_first = next((ln for ln in ko_pretty.splitlines() if ln.strip()), "")
+                    ja_first = next((ln for ln in ja_pretty.splitlines() if ln.strip()), "")
+                    if ko_first not in _KO_EFFECT_TYPE_LABELS:
+                        ko_equiv = _JA_TO_KO_EFFECT_LABEL.get(ja_first)
+                        if ko_equiv:
+                            ko_pretty = ko_equiv + "\n" + ko_pretty
                 detail_lv.controls.append(build_section_chip("한국어"))
-                append_detail_lines(ko, lang="ko")
+                append_detail_lines(ko_pretty)
             elif ja:
                 detail_lv.controls.append(build_section_chip("일본어 원문"))
                 append_detail_lines(ja, lang="ja")

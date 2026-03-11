@@ -431,10 +431,25 @@ def load_card_detail(conn: sqlite3.Connection, pid: int) -> dict | None:
                 tags.append(tag)
         if tags:
             ko_text = (detail.get("ko_text") or "").strip()
-            existing = {t for t in ko_text.split() if t.startswith("#")}
-            missing = [t for t in tags if t not in existing]
-            if missing and not existing:
-                tag_line = " ".join(missing)
+            # Detect whether a proper tag section already exists:
+            # 1. A standalone "태그" line exists, OR
+            # 2. The last meaningful line consists entirely of #-tokens (trailing tag line), OR
+            # 3. The text ends with tag tokens (no body text after the last #).
+            ko_lines = [ln.strip() for ln in ko_text.splitlines() if ln.strip()]
+            has_tag_section = "태그" in ko_lines
+            if not has_tag_section and ko_lines:
+                last_line = ko_lines[-1]
+                if last_line.startswith("#") and all(t.startswith("#") for t in last_line.split()):
+                    has_tag_section = True
+            if not has_tag_section:
+                last_hash = ko_text.rfind("#")
+                if last_hash >= 0:
+                    after_last = ko_text[last_hash:]
+                    remaining = [t for t in after_last.split() if t and not t.startswith("#")]
+                    if not remaining:
+                        has_tag_section = True
+            if not has_tag_section:
+                tag_line = " ".join(tags)
                 detail["ko_text"] = f"{ko_text}\n태그\n{tag_line}" if ko_text else f"태그\n{tag_line}"
 
     return detail

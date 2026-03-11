@@ -128,6 +128,15 @@ private let scalarMetadataPattern = try! NSRegularExpression(
     options: .caseInsensitive
 )
 private let digitTokenPattern = try! NSRegularExpression(pattern: #"^\d{2,3}$"#)
+private let noiseDashTokens: Set<String> = ["-", "\u{2013}", "\u{2014}", "\u{30fc}", "\u{2212}"]
+// Japanese effect-type labels → Korean equivalents for cross-language display
+private let jaToKoEffectLabel: [String: String] = [
+    "コラボエフェクト": "콜라보 이펙트",
+    "ブルームエフェクト": "블룸 이펙트",
+    "ギフト": "기프트",
+    "エクストラ": "엑스트라",
+]
+private let koEffectTypeLabels: Set<String> = ["콜라보 이펙트", "블룸 이펙트", "기프트", "엑스트라"]
 private let koMwTagCompiledPatterns: [NSRegularExpression] = [
     try! NSRegularExpression(pattern: "#ID\\s+\\d+기생"),
     try! NSRegularExpression(pattern: "#[^\\s#]+['\\u2019]s\\s+[^\\s#]+"),
@@ -677,8 +686,19 @@ struct ContentView: View {
     }
 
     private func detailPanel(scrollable: Bool) -> some View {
-        let koLines = cachedKoLines
         let jaLines = cachedJaLines
+        // If KO section lacks a leading effect-type chip but JA section has one, inject the KO equivalent.
+        let koLines: [String] = {
+            let raw = cachedKoLines
+            let koFirstLabel = raw.first.flatMap { splitSectionLabel($0)?.0 }
+            if koFirstLabel == nil || !koEffectTypeLabels.contains(koFirstLabel!) {
+                let jaFirstLabel = jaLines.first.flatMap { splitSectionLabel($0)?.0 }
+                if let jaLabel = jaFirstLabel, let koEquiv = jaToKoEffectLabel[jaLabel] {
+                    return [koEquiv] + raw
+                }
+            }
+            return raw
+        }()
 
         return Group {
             if scrollable {
@@ -917,8 +937,13 @@ struct ContentView: View {
                     }
                 }
             } else {
-                if !prefix.isEmpty { expanded.append(prefix) }
-                if !tagText.isEmpty { expanded.append(tagText) }
+                // If tagText has body text after the tag(s), keep the whole line intact.
+                if !prefix.isEmpty && !isTagOnlyContent(tagText) {
+                    expanded.append(line)
+                } else {
+                    if !prefix.isEmpty { expanded.append(prefix) }
+                    if !tagText.isEmpty { expanded.append(tagText) }
+                }
             }
         }
 
@@ -1216,7 +1241,8 @@ struct ContentView: View {
         if !tokens.isEmpty && tokens.allSatisfy({ token in
             if metadataTokens.contains(token) { return true }
             let nsToken = token as NSString
-            return digitTokenPattern.firstMatch(in: token, range: NSRange(location: 0, length: nsToken.length)) != nil
+            if digitTokenPattern.firstMatch(in: token, range: NSRange(location: 0, length: nsToken.length)) != nil { return true }
+            return noiseDashTokens.contains(token)
         }) {
             return true
         }
@@ -1439,6 +1465,23 @@ struct ContentView: View {
         "#비밀\\s+결사\\s+[Hh]oloX", // #비밀 결사 holoX
         "#FLOW\\s+GLOW", // #FLOW GLOW
     ]
+
+    /// Returns true if `text` consists entirely of tag tokens with no trailing body text.
+    private func isTagOnlyContent(_ text: String) -> Bool {
+        let tagRe = cachedTagRegex
+        var remainder = text.trimmingCharacters(in: .whitespaces)
+        if remainder.isEmpty { return false }
+        var foundTag = false
+        while !remainder.isEmpty {
+            let nsRange = NSRange(remainder.startIndex..., in: remainder)
+            guard let match = tagRe.firstMatch(in: remainder, range: nsRange),
+                  match.range.location == 0,
+                  let range = Range(match.range, in: remainder) else { break }
+            foundTag = true
+            remainder = remainder[range.upperBound...].trimmingCharacters(in: .whitespaces)
+        }
+        return foundTag && remainder.isEmpty
+    }
 
     private func buildTagTokenRegex(multiWordTags: [String]) -> NSRegularExpression {
         var parts: [String] = []

@@ -91,6 +91,16 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import java.util.Locale
 
+// Japanese effect-type labels → their Korean counterparts shown in the KO section
+private val JA_TO_KO_EFFECT_LABEL = mapOf(
+    "コラボエフェクト" to "콜라보 이펙트",
+    "ブルームエフェクト" to "블룸 이펙트",
+    "ギフト" to "기프트",
+    "エクストラ" to "엑스트라",
+)
+// Korean effect-type labels that should appear as the first chip in the KO section
+private val KO_EFFECT_TYPE_LABELS = setOf("콜라보 이펙트", "블룸 이펙트", "기프트", "엑스트라")
+
 private val SECTION_LABELS = listOf(
     "SP 오시 스킬",
     "오시 스테이지 스킬",
@@ -221,6 +231,7 @@ private val KO_MW_TAG_PATTERNS = listOf(
 )
 private val SCALAR_METADATA_PATTERN = Regex("^(hp\\s*\\d{2,3}|(1st|2nd)\\s*\\d{2,3})$", RegexOption.IGNORE_CASE)
 private val DIGIT_TOKEN_PATTERN = Regex("^\\d{2,3}$")
+private val NOISE_DASH_TOKENS = setOf("-", "\u2013", "\u2014", "\u30fc", "\u2212")
 
 private enum class DetailTextLanguage {
     KOREAN,
@@ -1095,8 +1106,21 @@ private fun DetailPanel(
     scrollable: Boolean,
     multiWordTags: List<String> = emptyList(),
 ) {
-    val koLines = remember(koText, multiWordTags) { splitDetailLines(koText, language = DetailTextLanguage.KOREAN, multiWordTags = multiWordTags) }
+    val koLinesRaw = remember(koText, multiWordTags) { splitDetailLines(koText, language = DetailTextLanguage.KOREAN, multiWordTags = multiWordTags) }
     val jaLines = remember(jaText, multiWordTags) { splitDetailLines(jaText, language = DetailTextLanguage.JAPANESE, multiWordTags = multiWordTags) }
+
+    // If the KO section has no leading effect-type chip but the JA section does,
+    // inject the Korean equivalent so the effect type is visible.
+    val koLines = remember(koLinesRaw, jaLines) {
+        val koFirstLabel = koLinesRaw.firstOrNull()?.let { splitSectionLabel(it)?.first }
+        if (koFirstLabel !in KO_EFFECT_TYPE_LABELS) {
+            val jaFirstLabel = jaLines.firstOrNull()?.let { splitSectionLabel(it)?.first }
+            val koEquiv = JA_TO_KO_EFFECT_LABEL[jaFirstLabel]
+            if (koEquiv != null) listOf(koEquiv) + koLinesRaw else koLinesRaw
+        } else {
+            koLinesRaw
+        }
+    }
 
     // Build highlight regex once per multiWordTags change, reuse for all lines
     val highlightRegex = remember(multiWordTags) {
@@ -1460,8 +1484,14 @@ private fun prettifyDetailText(
                     }
                 }
             } else {
-                if (prefix.isNotEmpty()) expanded += prefix
-                if (tagText.isNotEmpty()) expanded += tagText
+                // If tagText has body text after the tag(s), it's an inline reference –
+                // keep the whole original line so no spurious 태그 chip is inserted.
+                if (prefix.isNotEmpty() && !isTagOnlyContent(tagText, effectiveTagRegex)) {
+                    expanded += line
+                } else {
+                    if (prefix.isNotEmpty()) expanded += prefix
+                    if (tagText.isNotEmpty()) expanded += tagText
+                }
             }
         } else {
             expanded += line
@@ -1560,7 +1590,7 @@ private fun isNoiseMetadataLine(line: String, metadataTokens: Set<String>): Bool
 
     val tokens = lowered.split(" ").filter { it.isNotBlank() }
     if (tokens.isNotEmpty() && tokens.all { token ->
-            token in metadataTokens || DIGIT_TOKEN_PATTERN.matches(token)
+            token in metadataTokens || DIGIT_TOKEN_PATTERN.matches(token) || token in NOISE_DASH_TOKENS
         }) {
         return true
     }
@@ -1634,6 +1664,24 @@ private fun snappedListHeightDp(rawHeight: Dp): Dp {
     val fullRows = (available / rowStride).coerceAtLeast(1)
     val snappedInner = fullRows * rowStride - rowSpacing
     return (snappedInner + panelVerticalPadding).dp
+}
+
+/**
+ * Returns true if [text] consists entirely of tag tokens with no trailing body text.
+ * e.g. "#JP #슈터 #비밀 결사 holoX" → true
+ *      "#비밀 결사 holoX 를 가진 홀로멤" → false
+ */
+private fun isTagOnlyContent(text: String, tagRegex: Regex): Boolean {
+    var remainder = text.trim()
+    if (remainder.isEmpty()) return false
+    var foundTag = false
+    while (remainder.isNotEmpty()) {
+        val match = tagRegex.find(remainder) ?: break
+        if (match.range.first != 0) break
+        foundTag = true
+        remainder = remainder.substring(match.range.last + 1).trim()
+    }
+    return foundTag && remainder.isEmpty()
 }
 
 private fun buildTagTokenRegex(multiWordTags: List<String>): Regex {
