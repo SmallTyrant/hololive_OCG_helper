@@ -56,6 +56,7 @@ data class DeckCardCandidate(
     val color: String,
     val rarity: String,
     val koText: String,
+    val jaText: String,
 )
 
 data class DeckEntryRecord(

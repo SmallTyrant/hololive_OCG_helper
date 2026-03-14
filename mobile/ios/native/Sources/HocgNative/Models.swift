@@ -42,6 +42,7 @@ struct DeckCardCandidate: Identifiable {
     let color: String
     let rarity: String
     let koText: String
+    let jaText: String
 
     var id: Int64 { printId }
 }

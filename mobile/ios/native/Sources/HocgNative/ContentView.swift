@@ -253,17 +253,24 @@ struct ContentView: View {
     }
 
     private func hasUnlimitedPerCardRule(_ card: DeckCardCandidate) -> Bool {
-        let normalized = card.koText
+        let normalizedKo = card.koText
             .lowercased()
             .replacingOccurrences(of: " ", with: "")
-        return normalized.contains("이카드는갯수제한이없다")
-            || normalized.contains("이카드는수량제한이없다")
-            || normalized.contains("갯수제한이없다")
-            || normalized.contains("수량제한이없다")
+            .replacingOccurrences(of: "　", with: "")
+        let normalizedJa = card.jaText
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "　", with: "")
+        return normalizedKo.contains("이카드는갯수제한이없다")
+            || normalizedKo.contains("이카드는수량제한이없다")
+            || normalizedKo.contains("갯수제한이없다")
+            || normalizedKo.contains("수량제한이없다")
+            || normalizedKo.contains("몇장이라도넣을수있다")
+            || (normalizedJa.contains("何枚でも") && normalizedJa.contains("入れられる"))
     }
 
     private func maxPerCard(_ card: DeckCardCandidate) -> Int {
         if isOshi(card) { return 1 }
+        if isYell(card) { return Int.max }
         let rarity = card.rarity.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if rarity == "OSR" || rarity == "OUR" { return 1 }
         if hasUnlimitedPerCardRule(card) { return Int.max }

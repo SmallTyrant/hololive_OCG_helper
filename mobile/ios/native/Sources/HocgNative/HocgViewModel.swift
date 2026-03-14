@@ -449,6 +449,7 @@ final class HocgViewModel: ObservableObject {
                     color: row.color,
                     rarity: row.rarity,
                     koText: row.koText,
+                    jaText: row.jaText,
                 )
             }
         }

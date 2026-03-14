@@ -262,16 +262,23 @@ private fun isYell(card: DeckCardCandidate): Boolean {
 }
 
 private fun hasUnlimitedPerCardRule(card: DeckCardCandidate): Boolean {
-    val normalized = card.koText
+    val normalizedKo = card.koText
         .lowercase()
         .replace(" ", "")
-    return normalized.contains("이카드는갯수제한이없다") ||
-        normalized.contains("이카드는수량제한이없다") ||
-        normalized.contains("갯수제한이없다") ||
-        normalized.contains("수량제한이없다")
+        .replace("　", "")
+    val normalizedJa = card.jaText
+        .replace(" ", "")
+        .replace("　", "")
+    return normalizedKo.contains("이카드는갯수제한이없다") ||
+        normalizedKo.contains("이카드는수량제한이없다") ||
+        normalizedKo.contains("갯수제한이없다") ||
+        normalizedKo.contains("수량제한이없다") ||
+        normalizedKo.contains("몇장이라도넣을수있다") ||
+        (normalizedJa.contains("何枚でも") && normalizedJa.contains("入れられる"))
 }
 private fun maxPerCard(card: DeckCardCandidate): Int {
     if (isOshi(card)) return 1
+    if (isYell(card)) return Int.MAX_VALUE
     val rarity = card.rarity.trim().uppercase()
     if (rarity == "OSR" || rarity == "OUR") return 1
     if (hasUnlimitedPerCardRule(card)) return Int.MAX_VALUE
