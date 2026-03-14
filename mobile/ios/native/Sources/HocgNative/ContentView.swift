@@ -196,7 +196,6 @@ struct ContentView: View {
     @State private var jaExpanded = false
     @State private var showingDeckList = false
     @State private var showingDeckEditor = false
-    @State private var showingCardPicker = false
     @State private var deckTitle = "새 덱"
     @State private var deckEntries: [DeckEntryState] = []
     @State private var savedDecks: [SavedDeckState] = []
@@ -238,13 +237,29 @@ struct ContentView: View {
     }
 
     private func isYell(_ card: DeckCardCandidate) -> Bool {
+        if card.cardNumber.uppercased().hasPrefix("HY") {
+            return true
+        }
         let c = card.color.lowercased()
         let t = card.cardType.lowercased()
-        return c.contains("옐") || c.contains("yell") || c.contains("エール") || t.contains("yell")
+        return c.contains("옐") || c.contains("yell") || c.contains("エール") || t.contains("yell") || t.contains("エール")
+    }
+
+    private func hasUnlimitedPerCardRule(_ card: DeckCardCandidate) -> Bool {
+        let normalized = card.koText
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "")
+        return normalized.contains("이카드는갯수제한이없다")
+            || normalized.contains("이카드는수량제한이없다")
+            || normalized.contains("갯수제한이없다")
+            || normalized.contains("수량제한이없다")
     }
 
     private func maxPerCard(_ card: DeckCardCandidate) -> Int {
         if isOshi(card) { return 1 }
+        let rarity = card.rarity.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if rarity == "OSR" || rarity == "OUR" { return 1 }
+        if hasUnlimitedPerCardRule(card) { return Int.max }
         if card.koText.contains("리미티드") || card.koText.lowercased().contains("limited") { return 1 }
         let patterns = ["(\\d+)장만", "최대\\s*(\\d+)장", "(\\d+)장까지"]
         for p in patterns {
@@ -260,6 +275,51 @@ struct ContentView: View {
         if isOshi(card) { return oshi < 1 }
         if isYell(card) { return yell < 20 }
         return main < 50
+    }
+
+    private var deckOshiCount: Int {
+        deckEntries.filter { isOshi($0.card) }.map(\.qty).reduce(0, +)
+    }
+
+    private var deckYellCount: Int {
+        deckEntries.filter { isYell($0.card) }.map(\.qty).reduce(0, +)
+    }
+
+    private var deckMainCount: Int {
+        deckEntries.filter { !isOshi($0.card) && !isYell($0.card) }.map(\.qty).reduce(0, +)
+    }
+
+    private var deckTotalCount: Int {
+        deckEntries.map(\.qty).reduce(0, +)
+    }
+
+    private func openDeckBuilder() {
+        showingDeckList = false
+        showingDeckEditor = true
+        Task { deckCandidates = await viewModel.searchDeckCards(deckSearchQuery) }
+    }
+
+    private func deckQuantity(for card: DeckCardCandidate) -> Int {
+        deckEntries.first(where: { $0.id == card.printId })?.qty ?? 0
+    }
+
+    private func addCardToDeck(_ card: DeckCardCandidate) {
+        if let idx = deckEntries.firstIndex(where: { $0.id == card.printId }) {
+            guard deckEntries[idx].qty < deckEntries[idx].maxPerCard else { return }
+            guard canAddToDeck(deckEntries[idx].card) else { return }
+            deckEntries[idx].qty += 1
+            return
+        }
+
+        guard canAddToDeck(card) else { return }
+        deckEntries.append(
+            DeckEntryState(
+                id: card.printId,
+                card: card,
+                qty: 1,
+                maxPerCard: maxPerCard(card)
+            )
+        )
     }
 
     var body: some View {
@@ -459,6 +519,18 @@ struct ContentView: View {
                     .disabled(viewModel.state.updateRunning)
 
                     Button {
+                        openDeckBuilder()
+                    } label: {
+                        Text("덱빌딩")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(Color.blue.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.state.updateRunning)
+
+                    Button {
                         showingMenu = true
                     } label: {
                         Image(systemName: "line.3.horizontal")
@@ -525,15 +597,23 @@ struct ContentView: View {
                 }
             }
 
-            TextField(
-                "카드번호 / 이름 / 태그 / 한국어 본문 검색",
-                text: Binding(
-                    get: { viewModel.state.searchQuery },
-                    set: { viewModel.onSearchQueryChanged($0) }
+            HStack(spacing: 8) {
+                TextField(
+                    "카드번호 / 이름 / 태그 / 한국어 본문 검색",
+                    text: Binding(
+                        get: { viewModel.state.searchQuery },
+                        set: { viewModel.onSearchQueryChanged($0) }
+                    )
                 )
-            )
-            .textFieldStyle(.roundedBorder)
-            .disabled(viewModel.state.updateRunning)
+                .textFieldStyle(.roundedBorder)
+                .disabled(viewModel.state.updateRunning)
+
+                Button("덱빌딩") {
+                    openDeckBuilder()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(viewModel.state.updateRunning)
+            }
 
             updateStatusBlock
             Divider()
@@ -1323,8 +1403,7 @@ struct ContentView: View {
                 Button {
                     deckTitle = "새 덱"
                     deckEntries = []
-                    showingDeckList = false
-                    showingDeckEditor = true
+                    openDeckBuilder()
                 } label: { Image(systemName: "plus") }
             }
             ScrollView {
@@ -1346,8 +1425,7 @@ struct ContentView: View {
                         .onTapGesture {
                             deckTitle = deck.title
                             deckEntries = deck.entries
-                            showingDeckList = false
-                            showingDeckEditor = true
+                            openDeckBuilder()
                         }
                     }
                 }
@@ -1360,6 +1438,10 @@ struct ContentView: View {
             HStack {
                 Button("취소") { showingDeckEditor = false }
                 TextField("덱 이름", text: $deckTitle).textFieldStyle(.roundedBorder)
+                Button("덱 목록") {
+                    showingDeckEditor = false
+                    showingDeckList = true
+                }
                 Button("저장") {
                     savedDecks.removeAll { $0.title == deckTitle }
                     savedDecks.append(SavedDeckState(title: deckTitle.isEmpty ? "덱" : deckTitle, entries: deckEntries))
@@ -1368,12 +1450,72 @@ struct ContentView: View {
                 }
             }
             HStack {
-                Text("오시 \(deckEntries.filter { isOshi($0.card) }.map(\.qty).reduce(0,+))/1")
-                Text("옐 \(deckEntries.filter { isYell($0.card) }.map(\.qty).reduce(0,+))/20")
-                Text("기타 \(deckEntries.filter { !isOshi($0.card) && !isYell($0.card) }.map(\.qty).reduce(0,+))/50")
+                Text("오시 \(deckOshiCount)/1")
+                Text("옐 \(deckYellCount)/20")
+                Text("기타 \(deckMainCount)/50")
+                Text("합계 \(deckTotalCount)")
                 Spacer()
-                Button { showingCardPicker = true; Task { deckCandidates = await viewModel.searchDeckCards(deckSearchQuery) } } label: { Image(systemName: "plus") }
             }
+            .font(.footnote)
+
+            TextField("카드 검색", text: $deckSearchQuery)
+                .textFieldStyle(.roundedBorder)
+                .onChange(of: deckSearchQuery) { _ in
+                    Task { deckCandidates = await viewModel.searchDeckCards(deckSearchQuery) }
+                }
+
+            panel(height: 280) {
+                if deckCandidates.isEmpty {
+                    Text("검색 결과가 없습니다.")
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 4) {
+                            ForEach(deckCandidates) { card in
+                                Button {
+                                    addCardToDeck(card)
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        AsyncImage(url: URL(string: card.imageUrl)) { phase in
+                                            remotePhaseView(phase)
+                                        }
+                                        .frame(width: 36, height: 50)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("\(card.cardNumber) | \((card.nameKo.isEmpty ? card.nameJa : card.nameKo))")
+                                                .lineLimit(1)
+                                            let rarity = card.rarity.trimmingCharacters(in: .whitespacesAndNewlines)
+                                            if !rarity.isEmpty {
+                                                Text("레어리티 \(rarity)")
+                                                    .font(.caption2)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                        }
+                                        Spacer()
+                                        let qty = deckQuantity(for: card)
+                                        if qty > 0 {
+                                            Text("x \(qty)")
+                                                .font(.caption.weight(.semibold))
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 4)
+                                                .background(Color.blue.opacity(0.16), in: Capsule())
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 4)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .simultaneousGesture(DragGesture(), including: .all)
+                }
+            }
+
+            Text("선택 카드")
+                .font(.headline)
+
             ScrollView {
                 VStack(spacing: 8) {
                     ForEach(deckEntries.indices, id: \.self) { i in
@@ -1393,34 +1535,9 @@ struct ContentView: View {
             }
         }
         .padding(10)
-        .sheet(isPresented: $showingCardPicker) {
-            NavigationStack {
-                VStack {
-                    TextField("카드 검색", text: $deckSearchQuery)
-                        .textFieldStyle(.roundedBorder)
-                        .onChange(of: deckSearchQuery) { _ in Task { deckCandidates = await viewModel.searchDeckCards(deckSearchQuery) } }
-                    List(deckCandidates) { card in
-                        Button {
-                            if let idx = deckEntries.firstIndex(where: { $0.id == card.printId }) {
-                                if deckEntries[idx].qty < deckEntries[idx].maxPerCard && canAddToDeck(deckEntries[idx].card) {
-                                    deckEntries[idx].qty += 1
-                                }
-                            } else {
-                                if canAddToDeck(card) {
-                                    deckEntries.append(DeckEntryState(id: card.printId, card: card, qty: 1, maxPerCard: maxPerCard(card)))
-                                }
-                            }
-                        } label: {
-                            HStack {
-                                AsyncImage(url: URL(string: card.imageUrl)) { phase in remotePhaseView(phase) }.frame(width: 34, height: 46)
-                                Text("\(card.cardNumber) | \((card.nameKo.isEmpty ? card.nameJa : card.nameKo))")
-                            }
-                        }
-                    }
-                }
-                .padding(10)
-                .navigationTitle("카드 선택")
-            }
+        .task(id: showingDeckEditor) {
+            guard showingDeckEditor else { return }
+            deckCandidates = await viewModel.searchDeckCards(deckSearchQuery)
         }
     }
 

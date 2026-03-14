@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ElevatedButton
@@ -240,12 +241,28 @@ private data class DeckUi(
 
 private fun isOshi(card: DeckCardCandidate): Boolean = card.cardType.contains("오시") || card.cardType.contains("推し")
 private fun isYell(card: DeckCardCandidate): Boolean {
+    if (card.cardNumber.uppercase().startsWith("HY")) {
+        return true
+    }
     val c = card.color.lowercase()
     val t = card.cardType.lowercase()
-    return c.contains("옐") || c.contains("yell") || c.contains("エール") || t.contains("yell")
+    return c.contains("옐") || c.contains("yell") || c.contains("エール") || t.contains("yell") || t.contains("エール")
+}
+
+private fun hasUnlimitedPerCardRule(card: DeckCardCandidate): Boolean {
+    val normalized = card.koText
+        .lowercase()
+        .replace(" ", "")
+    return normalized.contains("이카드는갯수제한이없다") ||
+        normalized.contains("이카드는수량제한이없다") ||
+        normalized.contains("갯수제한이없다") ||
+        normalized.contains("수량제한이없다")
 }
 private fun maxPerCard(card: DeckCardCandidate): Int {
     if (isOshi(card)) return 1
+    val rarity = card.rarity.trim().uppercase()
+    if (rarity == "OSR" || rarity == "OUR") return 1
+    if (hasUnlimitedPerCardRule(card)) return Int.MAX_VALUE
     val src = card.koText
     if (src.contains("리미티드") || src.contains("limited", ignoreCase = true)) return 1
     val rx = listOf(Regex("(\\d+)장만"), Regex("최대\\s*(\\d+)장"), Regex("(\\d+)장까지"))
@@ -255,6 +272,32 @@ private fun maxPerCard(card: DeckCardCandidate): Int {
         return n.coerceAtLeast(1)
     }
     return 4
+}
+
+private fun canAddToDeck(entries: List<DeckEntryUi>, card: DeckCardCandidate): Boolean {
+    val oshi = entries.filter { isOshi(it.card) }.sumOf { it.qty }
+    val yell = entries.filter { isYell(it.card) }.sumOf { it.qty }
+    val main = entries.filter { !isOshi(it.card) && !isYell(it.card) }.sumOf { it.qty }
+    if (isOshi(card)) return oshi < 1
+    if (isYell(card)) return yell < 20
+    return main < 50
+}
+
+private fun deckQuantity(entries: List<DeckEntryUi>, card: DeckCardCandidate): Int {
+    return entries.firstOrNull { it.card.printId == card.printId }?.qty ?: 0
+}
+
+private fun addCardToDeck(entries: MutableList<DeckEntryUi>, card: DeckCardCandidate) {
+    val found = entries.firstOrNull { it.card.printId == card.printId }
+    if (found == null) {
+        if (canAddToDeck(entries, card)) {
+            entries.add(DeckEntryUi(card = card, qty = 1, maxPerCard = maxPerCard(card)))
+        }
+        return
+    }
+    if (found.qty < found.maxPerCard && canAddToDeck(entries, card)) {
+        found.qty += 1
+    }
 }
 
 @Composable
@@ -278,12 +321,17 @@ fun HocgScreen(
 
     var showDeckList by remember { mutableStateOf(false) }
     var showDeckEditor by remember { mutableStateOf(false) }
-    var showCardPicker by remember { mutableStateOf(false) }
     var deckTitle by remember { mutableStateOf("새 덱") }
     var deckSearchQuery by remember { mutableStateOf("") }
     var deckCandidates by remember { mutableStateOf<List<DeckCardCandidate>>(emptyList()) }
     val deckDraft = remember { mutableStateListOf<DeckEntryUi>() }
     val savedDecks = remember { mutableStateListOf<DeckUi>() }
+
+    val openDeckBuilder = {
+        showDeckList = false
+        showDeckEditor = true
+        scope.launch { deckCandidates = viewModel.searchDeckCards(deckSearchQuery) }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.toastEvents.collect { message ->
@@ -423,15 +471,13 @@ fun HocgScreen(
                     onAdd = {
                         deckTitle = "새 덱"
                         deckDraft.clear()
-                        showDeckList = false
-                        showDeckEditor = true
+                        openDeckBuilder()
                     },
                     onEdit = { deck ->
                         deckTitle = deck.title
                         deckDraft.clear()
                         deckDraft.addAll(deck.entries.map { it.copy() })
-                        showDeckList = false
-                        showDeckEditor = true
+                        openDeckBuilder()
                     },
                 )
             } else if (showDeckEditor) {
@@ -439,8 +485,14 @@ fun HocgScreen(
                     innerPadding = innerPadding,
                     title = deckTitle,
                     entries = deckDraft,
+                    searchQuery = deckSearchQuery,
+                    candidates = deckCandidates,
                     onTitleChange = { deckTitle = it },
                     onCancel = { showDeckEditor = false },
+                    onOpenDeckList = {
+                        showDeckEditor = false
+                        showDeckList = true
+                    },
                     onSave = {
                         val snapshot = deckDraft.groupBy { it.card.printId }.values.map { g ->
                             val first = g.first()
@@ -451,15 +503,16 @@ fun HocgScreen(
                         showDeckEditor = false
                         showDeckList = true
                     },
-                    onOpenPicker = {
-                        showCardPicker = true
+                    onSearchQueryChange = {
+                        deckSearchQuery = it
                         scope.launch { deckCandidates = viewModel.searchDeckCards(deckSearchQuery) }
                     },
+                    onSelectCandidate = { card ->
+                        addCardToDeck(deckDraft, card)
+                    },
+                    quantityForCard = { card -> deckQuantity(deckDraft, card) },
                     onIncrease = { entry ->
-                        val oshi = deckDraft.filter { isOshi(it.card) }.sumOf { it.qty }
-                        val yell = deckDraft.filter { isYell(it.card) }.sumOf { it.qty }
-                        val main = deckDraft.filter { !isOshi(it.card) && !isYell(it.card) }.sumOf { it.qty }
-                        if (entry.qty < entry.maxPerCard && (!isOshi(entry.card) || oshi < 1) && (!isYell(entry.card) || yell < 20) && (isOshi(entry.card) || isYell(entry.card) || main < 50)) {
+                        if (entry.qty < entry.maxPerCard && canAddToDeck(deckDraft, entry.card)) {
                             entry.qty += 1
                         }
                     },
@@ -468,60 +521,12 @@ fun HocgScreen(
                         if (entry.qty <= 0) deckDraft.remove(entry)
                     },
                 )
-
-                if (showCardPicker) {
-                    AlertDialog(
-                        onDismissRequest = { showCardPicker = false },
-                        confirmButton = { TextButton(onClick = { showCardPicker = false }) { Text("닫기") } },
-                        title = { Text("카드 선택") },
-                        text = {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                OutlinedTextField(
-                                    value = deckSearchQuery,
-                                    onValueChange = {
-                                        deckSearchQuery = it
-                                        scope.launch { deckCandidates = viewModel.searchDeckCards(deckSearchQuery) }
-                                    },
-                                    label = { Text("카드 검색") },
-                                    singleLine = true,
-                                )
-                                LazyColumn(modifier = Modifier.height(320.dp)) {
-                                    items(deckCandidates, key = { it.printId }) { card ->
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable {
-                                                    val found = deckDraft.firstOrNull { it.card.printId == card.printId }
-                                                    val oshi = deckDraft.filter { isOshi(it.card) }.sumOf { it.qty }
-                                                    val yell = deckDraft.filter { isYell(it.card) }.sumOf { it.qty }
-                                                    val main = deckDraft.filter { !isOshi(it.card) && !isYell(it.card) }.sumOf { it.qty }
-                                                    if (found == null) {
-                                                        if ((!isOshi(card) || oshi < 1) && (!isYell(card) || yell < 20) && (isOshi(card) || isYell(card) || main < 50)) {
-                                                            deckDraft.add(DeckEntryUi(card = card, qty = 1, maxPerCard = maxPerCard(card)))
-                                                        }
-                                                    } else if (found.qty < found.maxPerCard) {
-                                                        if ((!isOshi(card) || oshi < 1) && (!isYell(card) || yell < 20) && (isOshi(card) || isYell(card) || main < 50)) {
-                                                            found.qty += 1
-                                                        }
-                                                    }
-                                                }
-                                                .padding(vertical = 4.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        ) {
-                                            AsyncImage(model = card.imageUrl, contentDescription = null, modifier = Modifier.size(width = 44.dp, height = 60.dp))
-                                            Text("${card.cardNumber} | ${card.nameKo.ifBlank { card.nameJa }}", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        }
-                                    }
-                                }
-                            }
-                        },
-                    )
-                }
             } else if (isMobileLayout) {
                 MobileLayout(
                     state = state,
                     innerPadding = innerPadding,
                     onSearchQueryChanged = viewModel::onSearchQueryChanged,
+                    onOpenDeckBuilder = openDeckBuilder,
                     onOpenMenu = { scope.launch { drawerState.open() } },
                     onDismissKeyboard = { focusManager.clearFocus() },
                     onSelectPrint = viewModel::onSelectPrint,
@@ -534,6 +539,7 @@ fun HocgScreen(
                     state = state,
                     innerPadding = innerPadding,
                     onSearchQueryChanged = viewModel::onSearchQueryChanged,
+                    onOpenDeckBuilder = openDeckBuilder,
                     onDismissKeyboard = { focusManager.clearFocus() },
                     onOpenMenu = { scope.launch { drawerState.open() } },
                     showMenuButton = forceDesktopLandscape,
@@ -587,29 +593,91 @@ private fun DeckEditorScreen(
     innerPadding: androidx.compose.foundation.layout.PaddingValues,
     title: String,
     entries: List<DeckEntryUi>,
+    searchQuery: String,
+    candidates: List<DeckCardCandidate>,
     onTitleChange: (String) -> Unit,
     onCancel: () -> Unit,
+    onOpenDeckList: () -> Unit,
     onSave: () -> Unit,
-    onOpenPicker: () -> Unit,
+    onSearchQueryChange: (String) -> Unit,
+    onSelectCandidate: (DeckCardCandidate) -> Unit,
+    quantityForCard: (DeckCardCandidate) -> Int,
     onIncrease: (DeckEntryUi) -> Unit,
     onDecrease: (DeckEntryUi) -> Unit,
 ) {
     val oshi = entries.filter { isOshi(it.card) }.sumOf { it.qty }
     val yell = entries.filter { isYell(it.card) }.sumOf { it.qty }
     val main = entries.filter { !isOshi(it.card) && !isYell(it.card) }.sumOf { it.qty }
+    val total = entries.sumOf { it.qty }
     Column(modifier = Modifier.fillMaxSize().padding(innerPadding).padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onCancel) { Text("취소") }
             OutlinedTextField(value = title, onValueChange = onTitleChange, singleLine = true, modifier = Modifier.weight(1f), label = { Text("덱 이름") })
+            TextButton(onClick = onOpenDeckList) { Text("덱 목록") }
             TextButton(onClick = onSave) { Text("저장") }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("오시 $oshi/1")
             Text("옐 $yell/20")
             Text("기타 $main/50")
-            IconButton(onClick = onOpenPicker) { Icon(Icons.Default.Add, contentDescription = "카드 추가") }
+            Text("합계 $total")
         }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = onSearchQueryChange,
+            label = { Text("카드 검색") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(260.dp)
+                .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(10.dp))
+                .padding(8.dp),
+        ) {
+            if (candidates.isEmpty()) {
+                Text("검색 결과가 없습니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    items(candidates, key = { it.printId }) { card ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onSelectCandidate(card) }
+                                .padding(horizontal = 6.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            AsyncImage(model = card.imageUrl, contentDescription = null, modifier = Modifier.size(width = 36.dp, height = 50.dp))
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text("${card.cardNumber} | ${card.nameKo.ifBlank { card.nameJa }}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (card.rarity.isNotBlank()) {
+                                    Text(
+                                        "레어리티 ${card.rarity.trim()}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.outline,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                            val qty = quantityForCard(card)
+                            if (qty > 0) {
+                                AssistChip(
+                                    onClick = {},
+                                    enabled = false,
+                                    label = { Text("x $qty") },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Text("선택 카드", style = MaterialTheme.typography.titleSmall)
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f, fill = true)) {
             items(entries, key = { it.card.printId }) { entry ->
                 Row(modifier = Modifier.fillMaxWidth().border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(10.dp)).padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     AsyncImage(model = entry.card.imageUrl, contentDescription = null, modifier = Modifier.size(width = 50.dp, height = 70.dp))
@@ -627,6 +695,7 @@ private fun MobileLayout(
     state: HocgUiState,
     innerPadding: androidx.compose.foundation.layout.PaddingValues,
     onSearchQueryChanged: (String) -> Unit,
+    onOpenDeckBuilder: () -> Unit,
     onOpenMenu: () -> Unit,
     onDismissKeyboard: () -> Unit,
     onSelectPrint: (Long) -> Unit,
@@ -659,6 +728,15 @@ private fun MobileLayout(
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { onDismissKeyboard() }),
             )
+            TextButton(
+                onClick = {
+                    onDismissKeyboard()
+                    onOpenDeckBuilder()
+                },
+                enabled = !state.updateRunning,
+            ) {
+                Text("덱빌딩")
+            }
             IconButton(
                 onClick = {
                     onDismissKeyboard()
@@ -730,6 +808,7 @@ private fun DesktopLayout(
     state: HocgUiState,
     innerPadding: androidx.compose.foundation.layout.PaddingValues,
     onSearchQueryChanged: (String) -> Unit,
+    onOpenDeckBuilder: () -> Unit,
     onDismissKeyboard: () -> Unit,
     onOpenMenu: () -> Unit,
     showMenuButton: Boolean,
@@ -761,6 +840,15 @@ private fun DesktopLayout(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { onDismissKeyboard() }),
                 )
+                TextButton(
+                    onClick = {
+                        onDismissKeyboard()
+                        onOpenDeckBuilder()
+                    },
+                    enabled = !state.updateRunning,
+                ) {
+                    Text("덱빌딩")
+                }
                 if (state.updateRunning) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(20.dp),
@@ -824,6 +912,15 @@ private fun DesktopLayout(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { onDismissKeyboard() }),
                 )
+                TextButton(
+                    onClick = {
+                        onDismissKeyboard()
+                        onOpenDeckBuilder()
+                    },
+                    enabled = !state.updateRunning,
+                ) {
+                    Text("덱빌딩")
+                }
                 if (showMenuButton) {
                     IconButton(
                         onClick = {

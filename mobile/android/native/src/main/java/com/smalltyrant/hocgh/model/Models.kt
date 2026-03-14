@@ -54,6 +54,7 @@ data class DeckCardCandidate(
     val imageUrl: String,
     val cardType: String,
     val color: String,
+    val rarity: String,
     val koText: String,
 )
 
