@@ -1055,7 +1055,6 @@ private fun DeckListScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
-                        .clickable { onEdit(deck) }
                         .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(10.dp))
                         .padding(10.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -1065,7 +1064,14 @@ private fun DeckListScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(deck.title, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = deck.title,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { onEdit(deck) }
+                                .padding(vertical = 4.dp),
+                        )
                         Box {
                             IconButton(onClick = { menuExpanded = true }) {
                                 Icon(Icons.Default.MoreVert, contentDescription = "덱 메뉴")
@@ -1105,7 +1111,12 @@ private fun DeckListScreen(
                             }
                         }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onEdit(deck) },
+                    ) {
                         deck.entries.take(8).forEach { entry ->
                             DeckThumbnail(
                                 imageUrl = entry.card.imageUrl,

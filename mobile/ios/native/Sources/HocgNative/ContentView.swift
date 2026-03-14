@@ -1812,6 +1812,13 @@ struct ContentView: View {
                                 }
                             }
                         }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            editingDeckID = deck.id
+                            deckTitle = deck.title
+                            deckEntries = deck.entries
+                            openDeckBuilder()
+                        }
                         Spacer()
                         Menu {
                             Button("이름 수정") {
@@ -1828,14 +1835,9 @@ struct ContentView: View {
                             }
                         } label: {
                             Image(systemName: "ellipsis.circle")
+                                .padding(.vertical, 8)
+                                .padding(.leading, 8)
                         }
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        editingDeckID = deck.id
-                        deckTitle = deck.title
-                        deckEntries = deck.entries
-                        openDeckBuilder()
                     }
                 }
             }
