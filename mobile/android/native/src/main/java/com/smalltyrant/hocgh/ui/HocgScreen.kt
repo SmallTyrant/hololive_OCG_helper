@@ -63,6 +63,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -327,10 +328,11 @@ fun HocgScreen(
     val deckDraft = remember { mutableStateListOf<DeckEntryUi>() }
     val savedDecks = remember { mutableStateListOf<DeckUi>() }
 
-    val openDeckBuilder = {
+    val openDeckBuilder: () -> Unit = {
         showDeckList = false
         showDeckEditor = true
         scope.launch { deckCandidates = viewModel.searchDeckCards(deckSearchQuery) }
+        Unit
     }
 
     LaunchedEffect(Unit) {
