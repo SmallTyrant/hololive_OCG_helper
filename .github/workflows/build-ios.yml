@@ -41,7 +41,20 @@ jobs:
         if: steps.check_secrets.outputs.has_secrets == 'true'
         id: build_number
         run: |
-          BUILD_NUMBER=${{ github.run_number }}
+          # project.yml에서 CURRENT_PROJECT_VERSION 읽기
+          BASE_BUILD_NUMBER=$(grep "CURRENT_PROJECT_VERSION:" mobile/ios/native-app/project.yml | awk '{print $2}')
+          
+          if [ -z "$BASE_BUILD_NUMBER" ]; then
+            echo "❌ 에러: project.yml에서 CURRENT_PROJECT_VERSION을 찾을 수 없습니다"
+            exit 1
+          fi
+          
+          # GitHub run_number를 더해 최종 빌드 번호 생성
+          BUILD_NUMBER=$((BASE_BUILD_NUMBER + ${{ github.run_number }}))
+          
+          echo "✅ 베이스 빌드 번호: $BASE_BUILD_NUMBER"
+          echo "✅ GitHub run_number: ${{ github.run_number }}"
+          echo "✅ 최종 빌드 번호: $BUILD_NUMBER"
           echo "build_number=$BUILD_NUMBER" >> $GITHUB_OUTPUT
       
       - name: App Store Connect API 키 설정
@@ -74,6 +87,8 @@ jobs:
             -destination "generic/platform=iOS" \
             DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
             CODE_SIGN_STYLE=Automatic \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
             CURRENT_PROJECT_VERSION=${{ steps.build_number.outputs.build_number }} \
             -allowProvisioningUpdates \
             -authenticationKeyPath ~/private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8 \
