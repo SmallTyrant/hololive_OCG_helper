@@ -2,15 +2,18 @@ package com.smalltyrant.hocgh.ui
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ContentValues
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
-import android.content.res.Configuration
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -115,7 +118,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import java.io.ByteArrayOutputStream
 import java.util.Locale
 import java.util.UUID
 
@@ -434,32 +436,92 @@ private suspend fun buildDeckExportBitmap(
     val entries = deck.entries
     if (entries.isEmpty()) return null
 
-    val columns = 5
+    val oshiEntries = entries.filter { isOshi(it.card) }
+    val yellEntries = entries.filter { !isOshi(it.card) && isYell(it.card) }
+    val mainEntries = entries.filter { !isOshi(it.card) && !isYell(it.card) }
+
+    val mainColumns = 5
+    val sideColumns = 2
     val cardW = 220
     val cardH = 308
     val gap = 16
     val padding = 24
-    val titleH = 64
-    val rows = (entries.size + columns - 1) / columns
-    val canvasW = padding * 2 + columns * cardW + (columns - 1) * gap
-    val canvasH = padding + titleH + rows * cardH + (rows - 1).coerceAtLeast(0) * gap + padding
+    val sideGap = 24
+    val titleH = 76
+    val sectionLabelH = 44
+    val sectionSubLabelH = 38
+    val sectionSpacing = 18
+    val separatorH = 1
+    val minEmptySectionH = 52
+
+    val canvasW = padding * 2 + mainColumns * cardW + (mainColumns - 1) * gap
+    val contentW = canvasW - padding * 2
+    val sideWidth = (contentW - sideGap) / 2
+    val sideGridW = sideColumns * cardW + (sideColumns - 1) * gap
+    val sideGridOffset = ((sideWidth - sideGridW) / 2).coerceAtLeast(0)
+
+    val oshiRows = if (oshiEntries.isEmpty()) 0 else (oshiEntries.size + sideColumns - 1) / sideColumns
+    val yellRows = if (yellEntries.isEmpty()) 0 else (yellEntries.size + sideColumns - 1) / sideColumns
+    val sideRows = maxOf(oshiRows, yellRows)
+    val sideGridH = if (sideRows > 0) sideRows * cardH + (sideRows - 1) * gap else minEmptySectionH
+
+    val mainRows = if (mainEntries.isEmpty()) 0 else (mainEntries.size + mainColumns - 1) / mainColumns
+    val mainGridH = if (mainRows > 0) mainRows * cardH + (mainRows - 1) * gap else minEmptySectionH
+
+    val canvasH = padding +
+        titleH +
+        sectionSpacing +
+        sectionLabelH +
+        sectionSubLabelH +
+        sectionSpacing +
+        sideGridH +
+        sectionSpacing +
+        separatorH +
+        sectionSpacing +
+        sectionLabelH +
+        sectionSpacing +
+        mainGridH +
+        padding
     val bitmap = Bitmap.createBitmap(canvasW, canvasH, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     canvas.drawColor(Color.WHITE)
 
     val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.BLACK
-        textSize = 42f
+        textSize = 52f
         typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+        textAlign = Paint.Align.LEFT
+    }
+    val sectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.BLACK
+        textSize = 34f
+        typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+        textAlign = Paint.Align.CENTER
+    }
+    val sectionLeftPaint = Paint(sectionPaint).apply {
+        textAlign = Paint.Align.LEFT
+    }
+    val subSectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.DKGRAY
+        textSize = 28f
+        typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+        textAlign = Paint.Align.CENTER
+    }
+    val emptyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.GRAY
+        textSize = 24f
+        typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+        textAlign = Paint.Align.CENTER
     }
     val title = deck.title.ifBlank { "덱" }
-    canvas.drawText(title, padding.toFloat(), (padding + 44).toFloat(), titlePaint)
+    canvas.drawText(title, padding.toFloat(), (padding + 52).toFloat(), titlePaint)
 
     val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     val placeholderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.LTGRAY }
     val placeholderTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.DKGRAY
         textSize = 22f
+        textAlign = Paint.Align.LEFT
     }
     val badgeBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(205, 0, 0, 0)
@@ -469,6 +531,10 @@ private suspend fun buildDeckExportBitmap(
         textSize = 26f
         typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
         textAlign = Paint.Align.CENTER
+    }
+    val dividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(210, 210, 210)
+        strokeWidth = 1f
     }
 
     val imageCache = mutableMapOf<Long, Bitmap?>()
@@ -483,18 +549,13 @@ private suspend fun buildDeckExportBitmap(
         )
     }
 
-    entries.forEachIndexed { index, entry ->
-        val row = index / columns
-        val col = index % columns
-        val left = padding + col * (cardW + gap)
-        val top = padding + titleH + row * (cardH + gap)
-        val dst = Rect(left, top, left + cardW, top + cardH)
+    fun drawCard(entry: DeckEntryUi, dst: Rect) {
         val loaded = imageCache[entry.card.printId]
         if (loaded != null) {
             canvas.drawBitmap(loaded, null, dst, cardPaint)
         } else {
             canvas.drawRoundRect(RectF(dst), 12f, 12f, placeholderPaint)
-            canvas.drawText(entry.card.cardNumber, (left + 10).toFloat(), (top + 30).toFloat(), placeholderTextPaint)
+            canvas.drawText(entry.card.cardNumber, (dst.left + 10).toFloat(), (dst.top + 30).toFloat(), placeholderTextPaint)
         }
 
         val qtyLabel = entry.qty.toString()
@@ -508,7 +569,147 @@ private suspend fun buildDeckExportBitmap(
         val textY = badgeRect.centerY() - (badgeTextPaint.descent() + badgeTextPaint.ascent()) / 2f
         canvas.drawText(qtyLabel, badgeRect.centerX(), textY, badgeTextPaint)
     }
+
+    fun drawCenteredText(text: String, rect: RectF, paint: Paint) {
+        val textY = rect.centerY() - (paint.descent() + paint.ascent()) / 2f
+        canvas.drawText(text, rect.centerX(), textY, paint)
+    }
+
+    val leftSectionX = padding
+    val rightSectionX = padding + sideWidth + sideGap
+    val sideSplitX = padding + sideWidth + sideGap / 2f
+    val leftGridX = leftSectionX + sideGridOffset
+    val rightGridX = rightSectionX + sideGridOffset
+    var currentY = (padding + titleH + sectionSpacing).toFloat()
+    val sideLabelTop = currentY
+
+    drawCenteredText(
+        "오시",
+        RectF(leftSectionX.toFloat(), currentY, (leftSectionX + sideWidth).toFloat(), currentY + sectionLabelH),
+        sectionPaint,
+    )
+    drawCenteredText(
+        "옐",
+        RectF(rightSectionX.toFloat(), currentY, (rightSectionX + sideWidth).toFloat(), currentY + sectionLabelH),
+        sectionPaint,
+    )
+    currentY += sectionLabelH
+
+    drawCenteredText(
+        "오시 카드",
+        RectF(leftSectionX.toFloat(), currentY, (leftSectionX + sideWidth).toFloat(), currentY + sectionSubLabelH),
+        subSectionPaint,
+    )
+    drawCenteredText(
+        "옐 카드",
+        RectF(rightSectionX.toFloat(), currentY, (rightSectionX + sideWidth).toFloat(), currentY + sectionSubLabelH),
+        subSectionPaint,
+    )
+    currentY += sectionSubLabelH + sectionSpacing
+
+    val sideCardsTop = currentY.toInt()
+    if (oshiEntries.isEmpty()) {
+        drawCenteredText(
+            "카드 없음",
+            RectF(leftSectionX.toFloat(), currentY, (leftSectionX + sideWidth).toFloat(), currentY + sideGridH),
+            emptyPaint,
+        )
+    } else {
+        oshiEntries.forEachIndexed { index, entry ->
+            val row = index / sideColumns
+            val col = index % sideColumns
+            val left = leftGridX + col * (cardW + gap)
+            val top = sideCardsTop + row * (cardH + gap)
+            drawCard(entry, Rect(left, top, left + cardW, top + cardH))
+        }
+    }
+
+    if (yellEntries.isEmpty()) {
+        drawCenteredText(
+            "카드 없음",
+            RectF(rightSectionX.toFloat(), currentY, (rightSectionX + sideWidth).toFloat(), currentY + sideGridH),
+            emptyPaint,
+        )
+    } else {
+        yellEntries.forEachIndexed { index, entry ->
+            val row = index / sideColumns
+            val col = index % sideColumns
+            val left = rightGridX + col * (cardW + gap)
+            val top = sideCardsTop + row * (cardH + gap)
+            drawCard(entry, Rect(left, top, left + cardW, top + cardH))
+        }
+    }
+
+    val sideBottom = sideCardsTop + sideGridH
+    canvas.drawLine(sideSplitX, sideLabelTop, sideSplitX, sideBottom.toFloat(), dividerPaint)
+
+    currentY = (sideBottom + sectionSpacing).toFloat()
+    canvas.drawLine(padding.toFloat(), currentY, (canvasW - padding).toFloat(), currentY, dividerPaint)
+
+    currentY += sectionSpacing
+    canvas.drawText("덱 카드", padding.toFloat(), currentY + sectionLeftPaint.textSize, sectionLeftPaint)
+    currentY += sectionLabelH + sectionSpacing
+
+    if (mainEntries.isEmpty()) {
+        drawCenteredText(
+            "카드 없음",
+            RectF(padding.toFloat(), currentY, (canvasW - padding).toFloat(), currentY + mainGridH),
+            emptyPaint,
+        )
+    } else {
+        mainEntries.forEachIndexed { index, entry ->
+            val row = index / mainColumns
+            val col = index % mainColumns
+            val left = padding + col * (cardW + gap)
+            val top = currentY.toInt() + row * (cardH + gap)
+            drawCard(entry, Rect(left, top, left + cardW, top + cardH))
+        }
+    }
     return bitmap
+}
+
+private suspend fun saveDeckBitmapToGallery(
+    context: android.content.Context,
+    deckTitle: String,
+    bitmap: Bitmap,
+): Boolean = withContext(Dispatchers.IO) {
+    val resolver = context.contentResolver
+    val safeName = sanitizeDeckFilename(deckTitle)
+    val fileName = "deck_${safeName}_${System.currentTimeMillis()}.png"
+    val values = ContentValues().apply {
+        put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+        put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/hOCG_H")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+    }
+    val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+    } else {
+        MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+    }
+
+    var savedUri: Uri? = null
+    runCatching {
+        savedUri = resolver.insert(collection, values) ?: error("갤러리 저장 URI 생성에 실패했습니다.")
+        resolver.openOutputStream(savedUri!!)?.use { stream ->
+            if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)) {
+                error("이미지 인코딩에 실패했습니다.")
+            }
+        } ?: error("갤러리 출력 스트림 생성에 실패했습니다.")
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val publish = ContentValues().apply {
+                put(MediaStore.Images.Media.IS_PENDING, 0)
+            }
+            resolver.update(savedUri!!, publish, null, null)
+        }
+        true
+    }.getOrElse {
+        savedUri?.let { resolver.delete(it, null, null) }
+        false
+    }
 }
 
 @Composable
@@ -578,31 +779,9 @@ fun HocgScreen(
     var renamingDeckTitle by remember { mutableStateOf("") }
     var showingDeckImportDialog by remember { mutableStateOf(false) }
     var deckImportText by remember { mutableStateOf("") }
-    var pendingDeckImageBytes by remember { mutableStateOf<ByteArray?>(null) }
     val deckDraft = remember { mutableStateListOf<DeckEntryUi>() }
     val savedDecks = remember { mutableStateListOf<DeckUi>() }
     val imageLoader = remember(context) { ImageLoader(context) }
-
-    val exportImageLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("image/png"),
-    ) { uri ->
-        val payload = pendingDeckImageBytes ?: return@rememberLauncherForActivityResult
-        pendingDeckImageBytes = null
-        if (uri == null) {
-            return@rememberLauncherForActivityResult
-        }
-        scope.launch {
-            val ok = withContext(Dispatchers.IO) {
-                runCatching {
-                    context.contentResolver.openOutputStream(uri)?.use { stream ->
-                        stream.write(payload)
-                    } ?: error("파일을 열 수 없습니다.")
-                    true
-                }.getOrDefault(false)
-            }
-            snackbarHostState.showSnackbar(if (ok) "덱 이미지 내보내기가 완료되었습니다." else "덱 이미지 내보내기에 실패했습니다.")
-        }
-    }
 
     val openDeckBuilder: () -> Unit = {
         showDeckList = false
@@ -886,15 +1065,14 @@ fun HocgScreen(
                                 snackbarHostState.showSnackbar("덱 이미지 생성에 실패했습니다.")
                                 return@launch
                             }
-                            val pngBytes = withContext(Dispatchers.IO) {
-                                ByteArrayOutputStream().use { out ->
-                                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-                                    out.toByteArray()
-                                }
-                            }
-                            pendingDeckImageBytes = pngBytes
-                            val safeName = sanitizeDeckFilename(deck.title)
-                            exportImageLauncher.launch("deck_${safeName}_${System.currentTimeMillis()}.png")
+                            val ok = saveDeckBitmapToGallery(
+                                context = context,
+                                deckTitle = deck.title,
+                                bitmap = bitmap,
+                            )
+                            snackbarHostState.showSnackbar(
+                                if (ok) "덱 이미지가 갤러리에 저장되었습니다." else "덱 이미지 저장에 실패했습니다. 권한을 확인해 주세요."
+                            )
                         }
                     },
                     onAdd = {

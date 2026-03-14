@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import Foundation
+import Photos
 
 private let sectionLabels: [String] = [
     "SP 오시 스킬",
@@ -205,7 +206,6 @@ struct ContentView: View {
     @State private var showingDeckImportSheet = false
     @State private var deckImportText = ""
     @State private var deckToastMessage: String?
-    @State private var sharePayload: SharePayload?
     @State private var renamingDeckID: UUID?
     @State private var renamingDeckTitle = ""
     @State private var multiWordTags: [String] = []
@@ -493,26 +493,41 @@ struct ContentView: View {
                 showDeckToast("덱 이미지를 생성하는 중입니다...")
             }
             let images = await loadDeckImages(for: deck)
-            guard let image = buildDeckGridImage(deck: deck, images: images),
-                  let pngData = image.pngData() else {
+            guard let image = buildDeckGridImage(deck: deck, images: images) else {
                 await MainActor.run {
                     showDeckToast("덱 이미지 생성에 실패했습니다.")
                 }
                 return
             }
-            let safeTitle = deck.title.replacingOccurrences(of: "[^A-Za-z0-9가-힣._-]+", with: "_", options: .regularExpression)
-            let filename = "deck_\(safeTitle.isEmpty ? "hocg" : safeTitle)_\(Int(Date().timeIntervalSince1970)).png"
-            let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
-            do {
-                try pngData.write(to: url, options: .atomic)
-                await MainActor.run {
-                    sharePayload = SharePayload(items: [url])
-                    showDeckToast("덱 이미지가 준비되었습니다. 저장 위치를 선택하세요.")
+            let saved = await saveDeckImageToGallery(image)
+            await MainActor.run {
+                showDeckToast(saved ? "덱 이미지가 갤러리에 저장되었습니다." : "갤러리 저장 권한이 없거나 저장에 실패했습니다.")
+            }
+        }
+    }
+
+    private func requestPhotoLibraryAddPermission() async -> PHAuthorizationStatus {
+        let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+        if status == .notDetermined {
+            return await withCheckedContinuation { continuation in
+                PHPhotoLibrary.requestAuthorization(for: .addOnly) { updatedStatus in
+                    continuation.resume(returning: updatedStatus)
                 }
-            } catch {
-                await MainActor.run {
-                    showDeckToast("덱 이미지 저장에 실패했습니다.")
-                }
+            }
+        }
+        return status
+    }
+
+    private func saveDeckImageToGallery(_ image: UIImage) async -> Bool {
+        let status = await requestPhotoLibraryAddPermission()
+        guard status == .authorized || status == .limited else {
+            return false
+        }
+        return await withCheckedContinuation { continuation in
+            PHPhotoLibrary.shared().performChanges({
+                PHAssetChangeRequest.creationRequestForAsset(from: image)
+            }) { success, _ in
+                continuation.resume(returning: success)
             }
         }
     }
@@ -545,57 +560,114 @@ struct ContentView: View {
     private func buildDeckGridImage(deck: SavedDeckState, images: [Int64: UIImage]) -> UIImage? {
         let entries = deck.entries
         guard !entries.isEmpty else { return nil }
-        let columns = 5
+
+        let oshiEntries = entries.filter { isOshi($0.card) }
+        let yellEntries = entries.filter { !isOshi($0.card) && isYell($0.card) }
+        let mainEntries = entries.filter { !isOshi($0.card) && !isYell($0.card) }
+
+        let mainColumns = 5
+        let sideColumns = 2
         let cardWidth: CGFloat = 140
         let cardHeight: CGFloat = 196
         let gridSpacing: CGFloat = 12
         let padding: CGFloat = 18
-        let titleHeight: CGFloat = 42
-        let rows = Int(ceil(Double(entries.count) / Double(columns)))
-        let canvasWidth = padding * 2 + CGFloat(columns) * cardWidth + CGFloat(columns - 1) * gridSpacing
-        let canvasHeight = padding + titleHeight + CGFloat(rows) * cardHeight + CGFloat(max(0, rows - 1)) * gridSpacing + padding
+        let sideGap: CGFloat = 16
+        let titleHeight: CGFloat = 44
+        let sectionLabelHeight: CGFloat = 24
+        let sectionSubLabelHeight: CGFloat = 24
+        let sectionSpacing: CGFloat = 16
+        let separatorHeight: CGFloat = 1
+        let minEmptySectionHeight: CGFloat = 36
+
+        let canvasWidth = padding * 2 + CGFloat(mainColumns) * cardWidth + CGFloat(mainColumns - 1) * gridSpacing
+        let contentWidth = canvasWidth - padding * 2
+        let sideWidth = (contentWidth - sideGap) / 2
+        let sideGridWidth = CGFloat(sideColumns) * cardWidth + CGFloat(sideColumns - 1) * gridSpacing
+        let sideGridOffset = max(0, (sideWidth - sideGridWidth) / 2)
+
+        let oshiRows = Int(ceil(Double(oshiEntries.count) / Double(sideColumns)))
+        let yellRows = Int(ceil(Double(yellEntries.count) / Double(sideColumns)))
+        let sideRows = max(oshiRows, yellRows)
+        let sideGridHeight = sideRows > 0
+            ? CGFloat(sideRows) * cardHeight + CGFloat(max(0, sideRows - 1)) * gridSpacing
+            : minEmptySectionHeight
+
+        let mainRows = Int(ceil(Double(mainEntries.count) / Double(mainColumns)))
+        let mainGridHeight = mainRows > 0
+            ? CGFloat(mainRows) * cardHeight + CGFloat(max(0, mainRows - 1)) * gridSpacing
+            : minEmptySectionHeight
+
+        let canvasHeight = padding +
+            titleHeight +
+            sectionSpacing +
+            sectionLabelHeight +
+            sectionSubLabelHeight +
+            sectionSpacing +
+            sideGridHeight +
+            sectionSpacing +
+            separatorHeight +
+            sectionSpacing +
+            sectionLabelHeight +
+            sectionSpacing +
+            mainGridHeight +
+            padding
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: canvasWidth, height: canvasHeight))
 
         return renderer.image { context in
-            UIColor.systemBackground.setFill()
+            let cg = context.cgContext
+            UIColor.white.setFill()
             context.fill(CGRect(x: 0, y: 0, width: canvasWidth, height: canvasHeight))
 
             let title = deck.title.isEmpty ? "덱" : deck.title
             let titleAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.boldSystemFont(ofSize: 24),
-                .foregroundColor: UIColor.label,
+                .font: UIFont.boldSystemFont(ofSize: 28),
+                .foregroundColor: UIColor.black,
             ]
-            (title as NSString).draw(
-                in: CGRect(x: padding, y: padding, width: canvasWidth - padding * 2, height: titleHeight),
-                withAttributes: titleAttrs
-            )
+            let sectionAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 20, weight: .bold),
+                .foregroundColor: UIColor.black,
+            ]
+            let subSectionAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 16, weight: .semibold),
+                .foregroundColor: UIColor.darkGray,
+            ]
+            let emptyAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 16, weight: .medium),
+                .foregroundColor: UIColor.gray,
+            ]
+            let fallbackAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 12, weight: .medium),
+                .foregroundColor: UIColor.secondaryLabel,
+            ]
+            let qtyAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.boldSystemFont(ofSize: 16),
+                .foregroundColor: UIColor.white,
+            ]
 
-            for (index, entry) in entries.enumerated() {
-                let row = index / columns
-                let col = index % columns
-                let x = padding + CGFloat(col) * (cardWidth + gridSpacing)
-                let y = padding + titleHeight + CGFloat(row) * (cardHeight + gridSpacing)
-                let frame = CGRect(x: x, y: y, width: cardWidth, height: cardHeight)
+            func drawCenteredText(_ text: String, in rect: CGRect, attrs: [NSAttributedString.Key: Any]) {
+                let textSize = (text as NSString).size(withAttributes: attrs)
+                let textRect = CGRect(
+                    x: rect.midX - textSize.width / 2,
+                    y: rect.midY - textSize.height / 2,
+                    width: textSize.width,
+                    height: textSize.height
+                )
+                (text as NSString).draw(in: textRect, withAttributes: attrs)
+            }
 
+            func drawCard(_ entry: DeckEntryState, in frame: CGRect) {
                 if let image = images[entry.card.printId] {
                     image.draw(in: frame)
                 } else {
                     UIColor.secondarySystemFill.setFill()
                     UIBezierPath(roundedRect: frame, cornerRadius: 10).fill()
-                    let fallback = entry.card.cardNumber
-                    let fallbackAttrs: [NSAttributedString.Key: Any] = [
-                        .font: UIFont.systemFont(ofSize: 12, weight: .medium),
-                        .foregroundColor: UIColor.secondaryLabel,
-                    ]
-                    let textRect = frame.insetBy(dx: 6, dy: 6)
-                    (fallback as NSString).draw(in: textRect, withAttributes: fallbackAttrs)
+                    (entry.card.cardNumber as NSString).draw(
+                        in: frame.insetBy(dx: 6, dy: 6),
+                        withAttributes: fallbackAttrs
+                    )
                 }
 
                 let qtyText = "\(entry.qty)"
-                let qtyAttrs: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.boldSystemFont(ofSize: 16),
-                    .foregroundColor: UIColor.white,
-                ]
                 let qtySize = (qtyText as NSString).size(withAttributes: qtyAttrs)
                 let badgeW = max(28, qtySize.width + 14)
                 let badgeH: CGFloat = 24
@@ -614,6 +686,112 @@ struct ContentView: View {
                     height: qtySize.height
                 )
                 (qtyText as NSString).draw(in: textRect, withAttributes: qtyAttrs)
+            }
+
+            (title as NSString).draw(
+                in: CGRect(x: padding, y: padding, width: canvasWidth - padding * 2, height: titleHeight),
+                withAttributes: titleAttrs
+            )
+
+            let leftSectionX = padding
+            let rightSectionX = padding + sideWidth + sideGap
+            let splitX = padding + sideWidth + sideGap / 2
+
+            var currentY = padding + titleHeight + sectionSpacing
+            let sideLabelTop = currentY
+
+            drawCenteredText(
+                "오시",
+                in: CGRect(x: leftSectionX, y: currentY, width: sideWidth, height: sectionLabelHeight),
+                attrs: sectionAttrs
+            )
+            drawCenteredText(
+                "옐",
+                in: CGRect(x: rightSectionX, y: currentY, width: sideWidth, height: sectionLabelHeight),
+                attrs: sectionAttrs
+            )
+            currentY += sectionLabelHeight
+
+            drawCenteredText(
+                "오시 카드",
+                in: CGRect(x: leftSectionX, y: currentY, width: sideWidth, height: sectionSubLabelHeight),
+                attrs: subSectionAttrs
+            )
+            drawCenteredText(
+                "옐 카드",
+                in: CGRect(x: rightSectionX, y: currentY, width: sideWidth, height: sectionSubLabelHeight),
+                attrs: subSectionAttrs
+            )
+            currentY += sectionSubLabelHeight + sectionSpacing
+
+            let sideCardsTop = currentY
+            if oshiEntries.isEmpty {
+                drawCenteredText(
+                    "카드 없음",
+                    in: CGRect(x: leftSectionX, y: sideCardsTop, width: sideWidth, height: sideGridHeight),
+                    attrs: emptyAttrs
+                )
+            } else {
+                for (index, entry) in oshiEntries.enumerated() {
+                    let row = index / sideColumns
+                    let col = index % sideColumns
+                    let x = leftSectionX + sideGridOffset + CGFloat(col) * (cardWidth + gridSpacing)
+                    let y = sideCardsTop + CGFloat(row) * (cardHeight + gridSpacing)
+                    drawCard(entry, in: CGRect(x: x, y: y, width: cardWidth, height: cardHeight))
+                }
+            }
+
+            if yellEntries.isEmpty {
+                drawCenteredText(
+                    "카드 없음",
+                    in: CGRect(x: rightSectionX, y: sideCardsTop, width: sideWidth, height: sideGridHeight),
+                    attrs: emptyAttrs
+                )
+            } else {
+                for (index, entry) in yellEntries.enumerated() {
+                    let row = index / sideColumns
+                    let col = index % sideColumns
+                    let x = rightSectionX + sideGridOffset + CGFloat(col) * (cardWidth + gridSpacing)
+                    let y = sideCardsTop + CGFloat(row) * (cardHeight + gridSpacing)
+                    drawCard(entry, in: CGRect(x: x, y: y, width: cardWidth, height: cardHeight))
+                }
+            }
+
+            let sideBottom = sideCardsTop + sideGridHeight
+            cg.setStrokeColor(UIColor(white: 0.82, alpha: 1).cgColor)
+            cg.setLineWidth(1)
+            cg.move(to: CGPoint(x: splitX, y: sideLabelTop))
+            cg.addLine(to: CGPoint(x: splitX, y: sideBottom))
+            cg.strokePath()
+
+            currentY = sideBottom + sectionSpacing
+            cg.setStrokeColor(UIColor(white: 0.82, alpha: 1).cgColor)
+            cg.setLineWidth(separatorHeight)
+            cg.move(to: CGPoint(x: padding, y: currentY))
+            cg.addLine(to: CGPoint(x: canvasWidth - padding, y: currentY))
+            cg.strokePath()
+
+            currentY += sectionSpacing
+            ("덱 카드" as NSString).draw(
+                in: CGRect(x: padding, y: currentY, width: contentWidth, height: sectionLabelHeight),
+                withAttributes: sectionAttrs
+            )
+            currentY += sectionLabelHeight + sectionSpacing
+
+            if mainEntries.isEmpty {
+                drawCenteredText(
+                    "카드 없음",
+                    in: CGRect(x: padding, y: currentY, width: contentWidth, height: mainGridHeight),
+                    attrs: emptyAttrs
+                )
+            } else {
+                for (index, entry) in mainEntries.enumerated() {
+                    let row = index / mainColumns
+                    let col = index % mainColumns
+                    let x = padding + CGFloat(col) * (cardWidth + gridSpacing)
+                    let y = currentY + CGFloat(row) * (cardHeight + gridSpacing)
+                    drawCard(entry, in: CGRect(x: x, y: y, width: cardWidth, height: cardHeight))
+                }
             }
         }
     }
@@ -768,9 +946,6 @@ struct ContentView: View {
                         }
                     }
                 }
-            }
-            .sheet(item: $sharePayload) { payload in
-                ActivityView(activityItems: payload.items)
             }
             .alert(
                 "덱 이름 수정",
@@ -2028,21 +2203,6 @@ struct ContentView: View {
     private func restoreMultiWordTags(_ text: String) -> String {
         text.replacingOccurrences(of: Self.mwPlaceholder, with: " ")
     }
-}
-
-private struct SharePayload: Identifiable {
-    let id = UUID()
-    let items: [Any]
-}
-
-private struct ActivityView: UIViewControllerRepresentable {
-    let activityItems: [Any]
-
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
-    }
-
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 private struct MenuSheet: View {
