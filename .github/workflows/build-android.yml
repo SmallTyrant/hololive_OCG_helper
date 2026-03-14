@@ -56,7 +56,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
-            KEYSTORE_PATH="$(pwd)/hocg-release.jks"
+            KEYSTORE_PATH="$(pwd)/hocg-release-new.jks"
             echo "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
             cat > keystore.properties <<EOF
           storeFile=$KEYSTORE_PATH
