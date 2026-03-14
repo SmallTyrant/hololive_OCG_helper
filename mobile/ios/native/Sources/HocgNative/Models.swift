@@ -46,6 +46,29 @@ struct DeckCardCandidate: Identifiable {
     var id: Int64 { printId }
 }
 
+struct DeckEntryRecord: Codable {
+    var printId: Int64
+    var cardNumber: String
+    var qty: Int
+}
+
+struct SavedDeckRecord: Codable, Identifiable {
+    var id: UUID
+    var title: String
+    var entries: [DeckEntryRecord]
+    var updatedAt: Date
+}
+
+struct DeckLibraryRecord: Codable {
+    var version: Int
+    var decks: [SavedDeckRecord]
+
+    init(version: Int = 1, decks: [SavedDeckRecord] = []) {
+        self.version = version
+        self.decks = decks
+    }
+}
+
 struct UpdateDialogState {
     let localDate: String?
     let remoteDate: String

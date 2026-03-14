@@ -1,6 +1,8 @@
 package com.smalltyrant.hocgh.ui
 
 import android.content.res.Configuration
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,9 +32,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ElevatedButton
@@ -71,6 +71,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
@@ -82,16 +83,24 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.input.ImeAction
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import com.smalltyrant.hocgh.data.AppPaths
+import com.smalltyrant.hocgh.data.DeckStorage
 import com.smalltyrant.hocgh.data.DbRepository
+import com.smalltyrant.hocgh.model.DeckEntryRecord
 import com.smalltyrant.hocgh.model.HocgUiState
 import com.smalltyrant.hocgh.model.ImageState
+import com.smalltyrant.hocgh.model.DeckLibraryRecord
 import com.smalltyrant.hocgh.model.PrintRow
 import com.smalltyrant.hocgh.model.DeckCardCandidate
+import com.smalltyrant.hocgh.model.SavedDeckRecord
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import java.util.Locale
+import java.util.UUID
 
 private val SECTION_LABELS = listOf(
     "SP 오시 스킬",
@@ -236,8 +245,10 @@ private data class DeckEntryUi(
 )
 
 private data class DeckUi(
+    val id: String,
     val title: String,
     val entries: List<DeckEntryUi>,
+    val updatedAt: Long,
 )
 
 private fun isOshi(card: DeckCardCandidate): Boolean = card.cardType.contains("오시") || card.cardType.contains("推し")
@@ -301,6 +312,93 @@ private fun addCardToDeck(entries: MutableList<DeckEntryUi>, card: DeckCardCandi
     }
 }
 
+private fun toDeckRecords(decks: List<DeckUi>): List<SavedDeckRecord> {
+    return decks.map { deck ->
+        SavedDeckRecord(
+            id = deck.id,
+            title = deck.title,
+            entries = deck.entries
+                .filter { it.qty > 0 }
+                .map { entry ->
+                    DeckEntryRecord(
+                        printId = entry.card.printId,
+                        cardNumber = entry.card.cardNumber,
+                        qty = entry.qty,
+                    )
+                },
+            updatedAt = deck.updatedAt,
+        )
+    }
+}
+
+private fun resolveDecksFromRecords(
+    records: List<SavedDeckRecord>,
+    cards: List<DeckCardCandidate>,
+): List<DeckUi> {
+    val byPrintId = cards.associateBy { it.printId }
+    val byCardNumber = cards.associateBy { it.cardNumber.uppercase() }
+    return records.mapNotNull { deck ->
+        val entries = deck.entries.mapNotNull { entry ->
+            val card = byPrintId[entry.printId] ?: byCardNumber[entry.cardNumber.uppercase()]
+            if (card == null || entry.qty <= 0) {
+                null
+            } else {
+                DeckEntryUi(
+                    card = card,
+                    qty = entry.qty.coerceAtLeast(1),
+                    maxPerCard = maxPerCard(card),
+                )
+            }
+        }
+        if (entries.isEmpty()) {
+            null
+        } else {
+            DeckUi(
+                id = deck.id,
+                title = deck.title,
+                entries = entries,
+                updatedAt = deck.updatedAt,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DeckThumbnail(
+    imageUrl: String,
+    qty: Int,
+    width: Dp,
+    height: Dp,
+) {
+    Box(
+        modifier = Modifier
+            .size(width = width, height = height)
+            .clip(RoundedCornerShape(6.dp)),
+    ) {
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+        )
+        if (qty > 0) {
+            Text(
+                text = qty.toString(),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(3.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.75f),
+                        shape = RoundedCornerShape(999.dp),
+                    )
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                color = MaterialTheme.colorScheme.onPrimary,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+}
+
 @Composable
 fun HocgScreen(
     viewModel: HocgViewModel = viewModel(),
@@ -315,18 +413,83 @@ fun HocgScreen(
         config.orientation == Configuration.ORIENTATION_LANDSCAPE && config.screenWidthDp < 900
     val isMobileLayout = config.screenWidthDp < 900 && !forceDesktopLandscape
     val focusManager = LocalFocusManager.current
+    val context = LocalContext.current
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val deckStorage = remember(context) { DeckStorage(AppPaths(context)) }
 
     var showDeckList by remember { mutableStateOf(false) }
     var showDeckEditor by remember { mutableStateOf(false) }
+    var editingDeckId by remember { mutableStateOf<String?>(null) }
     var deckTitle by remember { mutableStateOf("새 덱") }
     var deckSearchQuery by remember { mutableStateOf("") }
     var deckCandidates by remember { mutableStateOf<List<DeckCardCandidate>>(emptyList()) }
+    var renamingDeckId by remember { mutableStateOf<String?>(null) }
+    var renamingDeckTitle by remember { mutableStateOf("") }
+    var pendingExportJson by remember { mutableStateOf<String?>(null) }
     val deckDraft = remember { mutableStateListOf<DeckEntryUi>() }
     val savedDecks = remember { mutableStateListOf<DeckUi>() }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        val payload = pendingExportJson ?: return@rememberLauncherForActivityResult
+        pendingExportJson = null
+        if (uri == null) {
+            return@rememberLauncherForActivityResult
+        }
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { writer ->
+                        writer.write(payload)
+                    } ?: error("파일을 열 수 없습니다.")
+                    true
+                }.getOrDefault(false)
+            }
+            snackbarHostState.showSnackbar(if (ok) "덱 JSON 내보내기가 완료되었습니다." else "덱 JSON 내보내기에 실패했습니다.")
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) {
+            return@rememberLauncherForActivityResult
+        }
+        scope.launch {
+            val importedRecords = withContext(Dispatchers.IO) {
+                val raw = runCatching {
+                    context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                }.getOrNull().orEmpty()
+                if (raw.isBlank()) emptyList() else deckStorage.importText(raw)
+            }
+            if (importedRecords.isEmpty()) {
+                snackbarHostState.showSnackbar("가져올 덱이 없습니다.")
+                return@launch
+            }
+            val allCards = viewModel.searchDeckCards("", limit = 5000)
+            val importedDecks = resolveDecksFromRecords(importedRecords, allCards)
+            if (importedDecks.isEmpty()) {
+                snackbarHostState.showSnackbar("가져온 덱에서 카드 정보를 찾을 수 없습니다.")
+                return@launch
+            }
+            importedDecks.forEach { deck ->
+                val existing = savedDecks.indexOfFirst { it.id == deck.id }
+                if (existing >= 0) {
+                    savedDecks[existing] = deck
+                } else {
+                    savedDecks.add(deck)
+                }
+            }
+            withContext(Dispatchers.IO) {
+                deckStorage.saveLibrary(DeckLibraryRecord(decks = toDeckRecords(savedDecks)))
+            }
+            snackbarHostState.showSnackbar("덱 JSON 가져오기가 완료되었습니다.")
+        }
+    }
 
     val openDeckBuilder: () -> Unit = {
         showDeckList = false
@@ -339,6 +502,17 @@ fun HocgScreen(
         viewModel.toastEvents.collect { message ->
             snackbarHostState.showSnackbar(message)
         }
+    }
+
+    LaunchedEffect(Unit) {
+        val records = withContext(Dispatchers.IO) { deckStorage.loadLibrary().decks }
+        if (records.isEmpty()) {
+            return@LaunchedEffect
+        }
+        val allCards = viewModel.searchDeckCards("", limit = 5000)
+        val restored = resolveDecksFromRecords(records, allCards)
+        savedDecks.clear()
+        savedDecks.addAll(restored)
     }
 
     state.appUpdateDialog?.let { dialog ->
@@ -401,6 +575,46 @@ fun HocgScreen(
                 },
             )
         }
+    }
+
+    if (renamingDeckId != null) {
+        AlertDialog(
+            onDismissRequest = { renamingDeckId = null },
+            title = { Text("덱 이름 수정") },
+            text = {
+                OutlinedTextField(
+                    value = renamingDeckTitle,
+                    onValueChange = { renamingDeckTitle = it },
+                    singleLine = true,
+                    label = { Text("덱 이름") },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val targetId = renamingDeckId
+                        val title = renamingDeckTitle.trim()
+                        if (targetId != null && title.isNotEmpty()) {
+                            val idx = savedDecks.indexOfFirst { it.id == targetId }
+                            if (idx >= 0) {
+                                savedDecks[idx] = savedDecks[idx].copy(title = title, updatedAt = System.currentTimeMillis())
+                                scope.launch(Dispatchers.IO) {
+                                    deckStorage.saveLibrary(DeckLibraryRecord(decks = toDeckRecords(savedDecks)))
+                                }
+                            }
+                        }
+                        renamingDeckId = null
+                    },
+                ) {
+                    Text("저장")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { renamingDeckId = null }) {
+                    Text("취소")
+                }
+            },
+        )
     }
 
     ModalNavigationDrawer(
@@ -470,16 +684,38 @@ fun HocgScreen(
                     innerPadding = innerPadding,
                     decks = savedDecks,
                     onBack = { showDeckList = false },
+                    onImport = { importLauncher.launch(arrayOf("application/json", "text/json")) },
+                    onExport = {
+                        pendingExportJson = deckStorage.exportText(toDeckRecords(savedDecks))
+                        exportLauncher.launch("hocg_deck_library.json")
+                    },
                     onAdd = {
                         deckTitle = "새 덱"
                         deckDraft.clear()
+                        editingDeckId = null
                         openDeckBuilder()
                     },
                     onEdit = { deck ->
+                        editingDeckId = deck.id
                         deckTitle = deck.title
                         deckDraft.clear()
                         deckDraft.addAll(deck.entries.map { it.copy() })
                         openDeckBuilder()
+                    },
+                    onRename = { deck ->
+                        renamingDeckId = deck.id
+                        renamingDeckTitle = deck.title
+                    },
+                    onDelete = { deck ->
+                        savedDecks.removeAll { it.id == deck.id }
+                        if (editingDeckId == deck.id) {
+                            editingDeckId = null
+                            deckDraft.clear()
+                            deckTitle = "새 덱"
+                        }
+                        scope.launch(Dispatchers.IO) {
+                            deckStorage.saveLibrary(DeckLibraryRecord(decks = toDeckRecords(savedDecks)))
+                        }
                     },
                 )
             } else if (showDeckEditor) {
@@ -500,8 +736,24 @@ fun HocgScreen(
                             val first = g.first()
                             DeckEntryUi(first.card, g.sumOf { it.qty }, first.maxPerCard)
                         }
-                        savedDecks.removeAll { it.title == deckTitle }
-                        savedDecks.add(DeckUi(deckTitle.ifBlank { "덱" }, snapshot))
+                        val now = System.currentTimeMillis()
+                        val targetId = editingDeckId ?: UUID.randomUUID().toString()
+                        val deck = DeckUi(
+                            id = targetId,
+                            title = deckTitle.ifBlank { "덱" },
+                            entries = snapshot,
+                            updatedAt = now,
+                        )
+                        val existing = savedDecks.indexOfFirst { it.id == targetId }
+                        if (existing >= 0) {
+                            savedDecks[existing] = deck
+                        } else {
+                            savedDecks.add(deck)
+                        }
+                        editingDeckId = targetId
+                        scope.launch(Dispatchers.IO) {
+                            deckStorage.saveLibrary(DeckLibraryRecord(decks = toDeckRecords(savedDecks)))
+                        }
                         showDeckEditor = false
                         showDeckList = true
                     },
@@ -561,8 +813,12 @@ private fun DeckListScreen(
     innerPadding: androidx.compose.foundation.layout.PaddingValues,
     decks: List<DeckUi>,
     onBack: () -> Unit,
+    onImport: () -> Unit,
+    onExport: () -> Unit,
     onAdd: () -> Unit,
     onEdit: (DeckUi) -> Unit,
+    onRename: (DeckUi) -> Unit,
+    onDelete: (DeckUi) -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxSize().padding(innerPadding).padding(10.dp),
@@ -571,17 +827,43 @@ private fun DeckListScreen(
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onBack) { Text("취소") }
             Text("덱 리스트", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            IconButton(onClick = onAdd) { Icon(Icons.Default.Add, contentDescription = "추가") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onImport) { Text("가져오기") }
+                TextButton(onClick = onExport) { Text("내보내기") }
+                IconButton(onClick = onAdd) { Icon(Icons.Default.Add, contentDescription = "추가") }
+            }
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(decks.indices.toList(), key = { it }) { idx ->
+            items(decks.indices.toList(), key = { decks[it].id }) { idx ->
                 val deck = decks[idx]
-                Column(modifier = Modifier.fillMaxWidth().clickable { onEdit(deck) }.border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(10.dp)).padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(deck.title, fontWeight = FontWeight.Bold)
-                    deck.entries.take(5).forEach { entry ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            AsyncImage(model = entry.card.imageUrl, contentDescription = null, modifier = Modifier.size(width = 42.dp, height = 58.dp))
-                            Text("x ${entry.qty}")
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onEdit(deck) }
+                        .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(10.dp))
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(deck.title, fontWeight = FontWeight.Bold)
+                        Row {
+                            TextButton(onClick = { onRename(deck) }) { Text("이름 수정") }
+                            TextButton(onClick = { onDelete(deck) }) { Text("삭제") }
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        deck.entries.take(8).forEach { entry ->
+                            DeckThumbnail(
+                                imageUrl = entry.card.imageUrl,
+                                qty = entry.qty,
+                                width = 42.dp,
+                                height = 58.dp,
+                            )
                         }
                     }
                 }
@@ -621,7 +903,7 @@ private fun DeckEditorScreen(
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("오시 $oshi/1")
             Text("옐 $yell/20")
-            Text("기타 $main/50")
+            Text("덱 $main/50")
             Text("합계 $total")
         }
         OutlinedTextField(
@@ -652,7 +934,12 @@ private fun DeckEditorScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            AsyncImage(model = card.imageUrl, contentDescription = null, modifier = Modifier.size(width = 36.dp, height = 50.dp))
+                            DeckThumbnail(
+                                imageUrl = card.imageUrl,
+                                qty = quantityForCard(card),
+                                width = 36.dp,
+                                height = 50.dp,
+                            )
                             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text("${card.cardNumber} | ${card.nameKo.ifBlank { card.nameJa }}", maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 if (card.rarity.isNotBlank()) {
@@ -665,14 +952,6 @@ private fun DeckEditorScreen(
                                     )
                                 }
                             }
-                            val qty = quantityForCard(card)
-                            if (qty > 0) {
-                                AssistChip(
-                                    onClick = {},
-                                    enabled = false,
-                                    label = { Text("x $qty") },
-                                )
-                            }
                         }
                     }
                 }
@@ -682,8 +961,13 @@ private fun DeckEditorScreen(
         LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f, fill = true)) {
             items(entries, key = { it.card.printId }) { entry ->
                 Row(modifier = Modifier.fillMaxWidth().border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(10.dp)).padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AsyncImage(model = entry.card.imageUrl, contentDescription = null, modifier = Modifier.size(width = 50.dp, height = 70.dp))
-                    Text("${entry.card.cardNumber} | ${entry.card.nameKo.ifBlank { entry.card.nameJa }} x ${entry.qty}", modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    DeckThumbnail(
+                        imageUrl = entry.card.imageUrl,
+                        qty = entry.qty,
+                        width = 50.dp,
+                        height = 70.dp,
+                    )
+                    Text("${entry.card.cardNumber} | ${entry.card.nameKo.ifBlank { entry.card.nameJa }}", modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     IconButton(onClick = { onDecrease(entry) }) { Icon(Icons.Default.Close, contentDescription = "감소") }
                     IconButton(onClick = { onIncrease(entry) }) { Icon(Icons.Default.Add, contentDescription = "증가") }
                 }

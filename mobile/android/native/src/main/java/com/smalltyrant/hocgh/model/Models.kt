@@ -58,6 +58,24 @@ data class DeckCardCandidate(
     val koText: String,
 )
 
+data class DeckEntryRecord(
+    val printId: Long,
+    val cardNumber: String,
+    val qty: Int,
+)
+
+data class SavedDeckRecord(
+    val id: String,
+    val title: String,
+    val entries: List<DeckEntryRecord>,
+    val updatedAt: Long,
+)
+
+data class DeckLibraryRecord(
+    val version: Int = 1,
+    val decks: List<SavedDeckRecord> = emptyList(),
+)
+
 sealed interface ImageState {
     data class Local(val file: File) : ImageState
     data class Remote(val url: String) : ImageState

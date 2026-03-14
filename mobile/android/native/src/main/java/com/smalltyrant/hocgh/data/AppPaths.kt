@@ -14,6 +14,8 @@ class AppPaths(private val context: Context) {
     val rootDir: File = File(context.filesDir, APP_NAME).apply { mkdirs() }
     val dbFile: File = File(rootDir, DB_FILE_NAME)
     val imageDir: File = File(rootDir, "images").apply { mkdirs() }
+    val deckDir: File = File(rootDir, "decks").apply { mkdirs() }
+    val deckLibraryFile: File = File(deckDir, "deck_library.json")
 
     fun localImageFile(cardNumber: String): File {
         val safe = sanitizeCardNumber(cardNumber)

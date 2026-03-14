@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import Foundation
+import UniformTypeIdentifiers
 
 private let sectionLabels: [String] = [
     "SP 오시 스킬",
@@ -196,11 +197,17 @@ struct ContentView: View {
     @State private var jaExpanded = false
     @State private var showingDeckList = false
     @State private var showingDeckEditor = false
+    @State private var editingDeckID: UUID?
     @State private var deckTitle = "새 덱"
     @State private var deckEntries: [DeckEntryState] = []
     @State private var savedDecks: [SavedDeckState] = []
     @State private var deckSearchQuery = ""
     @State private var deckCandidates: [DeckCardCandidate] = []
+    @State private var showingDeckImporter = false
+    @State private var showingDeckExporter = false
+    @State private var exportDeckDocument = DeckJSONFileDocument(data: Data("{}".utf8))
+    @State private var renamingDeckID: UUID?
+    @State private var renamingDeckTitle = ""
     @State private var multiWordTags: [String] = []
     @AppStorage("theme_mode") private var themeModeRawValue: String = AppThemeMode.system.rawValue
     @AppStorage("preferred_language") private var preferredLanguageRawValue: String = PreferredLanguage.defaultFromSystem.rawValue
@@ -227,7 +234,7 @@ struct ContentView: View {
     }
 
     private struct SavedDeckState: Identifiable {
-        let id = UUID()
+        var id: UUID
         var title: String
         var entries: [DeckEntryState]
     }
@@ -322,6 +329,132 @@ struct ContentView: View {
         )
     }
 
+    private func deckThumbnail(url: String, qty: Int, width: CGFloat, height: CGFloat) -> some View {
+        ZStack(alignment: .topTrailing) {
+            AsyncImage(url: URL(string: url)) { phase in
+                remotePhaseView(phase)
+            }
+            .frame(width: width, height: height)
+
+            if qty > 0 {
+                Text("\(qty)")
+                    .font(.caption2.weight(.bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Color.black.opacity(0.75), in: Capsule())
+                    .padding(4)
+            }
+        }
+    }
+
+    private var deckStorage: DeckStorage {
+        DeckStorage(paths: AppPaths())
+    }
+
+    private func makeDeckRecords(from decks: [SavedDeckState]) -> [SavedDeckRecord] {
+        decks.map { deck in
+            SavedDeckRecord(
+                id: deck.id,
+                title: deck.title,
+                entries: deck.entries.map {
+                    DeckEntryRecord(
+                        printId: $0.card.printId,
+                        cardNumber: $0.card.cardNumber,
+                        qty: $0.qty
+                    )
+                },
+                updatedAt: Date()
+            )
+        }
+    }
+
+    private func resolveDeckStates(from records: [SavedDeckRecord], cards: [DeckCardCandidate]) -> [SavedDeckState] {
+        let byPrintId = Dictionary(uniqueKeysWithValues: cards.map { ($0.printId, $0) })
+        let byCardNumber = Dictionary(uniqueKeysWithValues: cards.map { ($0.cardNumber.uppercased(), $0) })
+        return records.compactMap { record in
+            let resolvedEntries = record.entries.compactMap { entry -> DeckEntryState? in
+                let card = byPrintId[entry.printId] ?? byCardNumber[entry.cardNumber.uppercased()]
+                guard let card else { return nil }
+                let qty = max(1, entry.qty)
+                return DeckEntryState(
+                    id: card.printId,
+                    card: card,
+                    qty: qty,
+                    maxPerCard: maxPerCard(card)
+                )
+            }
+            guard !resolvedEntries.isEmpty else { return nil }
+            return SavedDeckState(
+                id: record.id,
+                title: record.title,
+                entries: resolvedEntries
+            )
+        }
+    }
+
+    private func persistSavedDecks() {
+        let records = makeDeckRecords(from: savedDecks)
+        _ = deckStorage.saveLibrary(DeckLibraryRecord(decks: records))
+    }
+
+    private func loadSavedDecks() async {
+        let library = deckStorage.loadLibrary()
+        let cards = await viewModel.searchDeckCards("", limit: 5000)
+        let resolved = resolveDeckStates(from: library.decks, cards: cards)
+        savedDecks = resolved
+    }
+
+    private func mergeImportedDecks(_ records: [SavedDeckRecord]) async {
+        guard !records.isEmpty else { return }
+        let cards = await viewModel.searchDeckCards("", limit: 5000)
+        let importedStates = resolveDeckStates(from: records, cards: cards)
+        guard !importedStates.isEmpty else { return }
+        for deck in importedStates {
+            if let idx = savedDecks.firstIndex(where: { $0.id == deck.id }) {
+                savedDecks[idx] = deck
+            } else {
+                savedDecks.append(deck)
+            }
+        }
+        persistSavedDecks()
+    }
+
+    private func exportDeckLibrary() {
+        guard let data = deckStorage.exportData(for: makeDeckRecords(from: savedDecks)) else { return }
+        exportDeckDocument = DeckJSONFileDocument(data: data)
+        showingDeckExporter = true
+    }
+
+    private func startRenameDeck(_ deck: SavedDeckState) {
+        renamingDeckID = deck.id
+        renamingDeckTitle = deck.title
+    }
+
+    private func commitRenameDeck() {
+        guard let id = renamingDeckID else { return }
+        let title = renamingDeckTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else {
+            renamingDeckID = nil
+            return
+        }
+        if let idx = savedDecks.firstIndex(where: { $0.id == id }) {
+            savedDecks[idx].title = title
+            persistSavedDecks()
+        }
+        renamingDeckID = nil
+    }
+
+    private func removeDeck(_ id: UUID) {
+        savedDecks.removeAll { $0.id == id }
+        if editingDeckID == id {
+            editingDeckID = nil
+            deckEntries = []
+            deckTitle = "새 덱"
+        }
+        persistSavedDecks()
+    }
+
     var body: some View {
         GeometryReader { geo in
             let isMobileLayout = geo.size.width < 900
@@ -412,12 +545,58 @@ struct ContentView: View {
                 rebuildTagRegexCache(tags)
                 refreshDetailLines()
             }
+            .fileImporter(
+                isPresented: $showingDeckImporter,
+                allowedContentTypes: [.json],
+                allowsMultipleSelection: false
+            ) { result in
+                guard case let .success(urls) = result, let url = urls.first else { return }
+                Task {
+                    let started = url.startAccessingSecurityScopedResource()
+                    defer {
+                        if started {
+                            url.stopAccessingSecurityScopedResource()
+                        }
+                    }
+                    guard let data = try? Data(contentsOf: url) else { return }
+                    let imported = deckStorage.importData(data)
+                    await mergeImportedDecks(imported)
+                }
+            }
+            .fileExporter(
+                isPresented: $showingDeckExporter,
+                document: exportDeckDocument,
+                contentType: .json,
+                defaultFilename: "hocg_deck_library"
+            ) { _ in }
+            .alert(
+                "덱 이름 수정",
+                isPresented: Binding(
+                    get: { renamingDeckID != nil },
+                    set: { newValue in
+                        if !newValue {
+                            renamingDeckID = nil
+                        }
+                    }
+                )
+            ) {
+                TextField("덱 이름", text: $renamingDeckTitle)
+                Button("취소", role: .cancel) {
+                    renamingDeckID = nil
+                }
+                Button("저장") {
+                    commitRenameDeck()
+                }
+            } message: {
+                Text("변경할 덱 이름을 입력하세요.")
+            }
             .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
             .task {
                 let tags = await Task.detached {
                     DatabaseRepository(paths: AppPaths()).loadMultiWordTags()
                 }.value
                 multiWordTags = tags
+                await loadSavedDecks()
             }
             .preferredColorScheme(selectedThemeMode.colorScheme)
         }
@@ -1397,40 +1576,60 @@ struct ContentView: View {
         VStack(spacing: 8) {
             HStack {
                 Button("뒤로") { showingDeckList = false }
+                Button("가져오기") { showingDeckImporter = true }
+                Button("내보내기") { exportDeckLibrary() }
                 Spacer()
                 Text("덱 리스트").font(.headline)
                 Spacer()
                 Button {
                     deckTitle = "새 덱"
                     deckEntries = []
+                    editingDeckID = nil
                     openDeckBuilder()
                 } label: { Image(systemName: "plus") }
             }
-            ScrollView {
-                VStack(spacing: 8) {
-                    ForEach(savedDecks) { deck in
+            List {
+                ForEach(savedDecks) { deck in
+                    HStack(spacing: 10) {
                         VStack(alignment: .leading, spacing: 6) {
                             Text(deck.title).bold()
-                            ForEach(deck.entries.prefix(5)) { e in
-                                HStack {
-                                    AsyncImage(url: URL(string: e.card.imageUrl)) { phase in remotePhaseView(phase) }
-                                        .frame(width: 42, height: 58)
-                                    Text("x \(e.qty)")
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(deck.entries.prefix(8)) { entry in
+                                        deckThumbnail(
+                                            url: entry.card.imageUrl,
+                                            qty: entry.qty,
+                                            width: 42,
+                                            height: 58
+                                        )
+                                    }
                                 }
                             }
                         }
-                        .padding(8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.secondary.opacity(0.3)))
-                        .onTapGesture {
-                            deckTitle = deck.title
-                            deckEntries = deck.entries
-                            openDeckBuilder()
+                        Spacer()
+                        Menu {
+                            Button("이름 수정") {
+                                startRenameDeck(deck)
+                            }
+                            Button("삭제", role: .destructive) {
+                                removeDeck(deck.id)
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
                         }
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        editingDeckID = deck.id
+                        deckTitle = deck.title
+                        deckEntries = deck.entries
+                        openDeckBuilder()
                     }
                 }
             }
-        }.padding(10)
+            .listStyle(.plain)
+        }
+        .padding(10)
     }
 
     private var deckEditorLayout: some View {
@@ -1443,8 +1642,22 @@ struct ContentView: View {
                     showingDeckList = true
                 }
                 Button("저장") {
-                    savedDecks.removeAll { $0.title == deckTitle }
-                    savedDecks.append(SavedDeckState(title: deckTitle.isEmpty ? "덱" : deckTitle, entries: deckEntries))
+                    let normalized = deckEntries
+                        .filter { $0.qty > 0 }
+                        .map { DeckEntryState(id: $0.id, card: $0.card, qty: $0.qty, maxPerCard: $0.maxPerCard) }
+                    let targetID = editingDeckID ?? UUID()
+                    let snapshot = SavedDeckState(
+                        id: targetID,
+                        title: deckTitle.isEmpty ? "덱" : deckTitle,
+                        entries: normalized
+                    )
+                    if let idx = savedDecks.firstIndex(where: { $0.id == targetID }) {
+                        savedDecks[idx] = snapshot
+                    } else {
+                        savedDecks.append(snapshot)
+                    }
+                    editingDeckID = targetID
+                    persistSavedDecks()
                     showingDeckEditor = false
                     showingDeckList = true
                 }
@@ -1452,7 +1665,7 @@ struct ContentView: View {
             HStack {
                 Text("오시 \(deckOshiCount)/1")
                 Text("옐 \(deckYellCount)/20")
-                Text("기타 \(deckMainCount)/50")
+                Text("덱 \(deckMainCount)/50")
                 Text("합계 \(deckTotalCount)")
                 Spacer()
             }
@@ -1477,10 +1690,12 @@ struct ContentView: View {
                                     addCardToDeck(card)
                                 } label: {
                                     HStack(spacing: 8) {
-                                        AsyncImage(url: URL(string: card.imageUrl)) { phase in
-                                            remotePhaseView(phase)
-                                        }
-                                        .frame(width: 36, height: 50)
+                                        deckThumbnail(
+                                            url: card.imageUrl,
+                                            qty: deckQuantity(for: card),
+                                            width: 36,
+                                            height: 50
+                                        )
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text("\(card.cardNumber) | \((card.nameKo.isEmpty ? card.nameJa : card.nameKo))")
                                                 .lineLimit(1)
@@ -1492,14 +1707,6 @@ struct ContentView: View {
                                             }
                                         }
                                         Spacer()
-                                        let qty = deckQuantity(for: card)
-                                        if qty > 0 {
-                                            Text("x \(qty)")
-                                                .font(.caption.weight(.semibold))
-                                                .padding(.horizontal, 8)
-                                                .padding(.vertical, 4)
-                                                .background(Color.blue.opacity(0.16), in: Capsule())
-                                        }
                                     }
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(.horizontal, 6)
@@ -1520,8 +1727,13 @@ struct ContentView: View {
                 VStack(spacing: 8) {
                     ForEach(deckEntries.indices, id: \.self) { i in
                         HStack {
-                            AsyncImage(url: URL(string: deckEntries[i].card.imageUrl)) { phase in remotePhaseView(phase) }.frame(width: 50, height: 70)
-                            Text("\(deckEntries[i].card.cardNumber) | \((deckEntries[i].card.nameKo.isEmpty ? deckEntries[i].card.nameJa : deckEntries[i].card.nameKo)) x \(deckEntries[i].qty)")
+                            deckThumbnail(
+                                url: deckEntries[i].card.imageUrl,
+                                qty: deckEntries[i].qty,
+                                width: 50,
+                                height: 70
+                            )
+                            Text("\(deckEntries[i].card.cardNumber) | \((deckEntries[i].card.nameKo.isEmpty ? deckEntries[i].card.nameJa : deckEntries[i].card.nameKo))")
                             Spacer()
                             Button("-") { deckEntries[i].qty -= 1; if deckEntries[i].qty <= 0 { deckEntries.remove(at: i) } }
                             Button("+") {
@@ -1591,6 +1803,24 @@ struct ContentView: View {
 
     private func restoreMultiWordTags(_ text: String) -> String {
         text.replacingOccurrences(of: Self.mwPlaceholder, with: " ")
+    }
+}
+
+private struct DeckJSONFileDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+
+    var data: Data
+
+    init(data: Data) {
+        self.data = data
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        data = configuration.file.regularFileContents ?? Data()
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
     }
 }
 

@@ -10,6 +10,7 @@ final class AppPaths {
     let rootURL: URL
     let dbURL: URL
     let imagesURL: URL
+    let decksURL: URL
 
     init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
@@ -17,13 +18,20 @@ final class AppPaths {
         let base = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
         let root = base.appendingPathComponent(appName, isDirectory: true)
         let images = root.appendingPathComponent("images", isDirectory: true)
+        let decks = root.appendingPathComponent("decks", isDirectory: true)
 
         try? fileManager.createDirectory(at: root, withIntermediateDirectories: true)
         try? fileManager.createDirectory(at: images, withIntermediateDirectories: true)
+        try? fileManager.createDirectory(at: decks, withIntermediateDirectories: true)
 
         rootURL = root
         dbURL = root.appendingPathComponent(dbFileName)
         imagesURL = images
+        decksURL = decks
+    }
+
+    var deckLibraryURL: URL {
+        decksURL.appendingPathComponent("deck_library.json")
     }
 
     func localImageURL(cardNumber: String) -> URL {

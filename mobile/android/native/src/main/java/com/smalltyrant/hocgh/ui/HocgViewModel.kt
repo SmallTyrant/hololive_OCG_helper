@@ -556,9 +556,9 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    suspend fun searchDeckCards(query: String): List<DeckCardCandidate> {
+    suspend fun searchDeckCards(query: String, limit: Int = 240): List<DeckCardCandidate> {
         return withContext(Dispatchers.IO) {
-            dbRepository.listDeckCards(query).map { candidate ->
+            dbRepository.listDeckCards(query, limit).map { candidate ->
                 candidate.copy(imageUrl = paths.resolveImageUrl(candidate.imageUrl))
             }
         }
