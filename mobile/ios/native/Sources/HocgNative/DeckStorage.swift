@@ -11,6 +11,7 @@ final class DeckStorage {
         self.fileManager = fileManager
         self.encoder = JSONEncoder()
         self.decoder = JSONDecoder()
+
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         decoder.dateDecodingStrategy = .iso8601
         encoder.dateEncodingStrategy = .iso8601
