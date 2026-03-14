@@ -352,11 +352,78 @@ class DbRepository(private val paths: AppPaths) {
                         COALESCE(p.name_ja,'') AS name_ja,
                         COALESCE(ko.name,'') AS name_ko,
                         COALESCE(p.image_url,'') AS image_url,
-                        COALESCE(p.card_type,'') AS card_type,
-                        COALESCE(p.color,'') AS color,
+                        COALESCE(
+                            NULLIF(TRIM(COALESCE(p.card_type,'')), ''),
+                            CASE
+                                WHEN instr(COALESCE(ja.effect_text,''), 'カードタイプ ') > 0 THEN
+                                    TRIM(
+                                        substr(
+                                            substr(
+                                                COALESCE(ja.effect_text,''),
+                                                instr(COALESCE(ja.effect_text,''), 'カードタイプ ') + length('カードタイプ ')
+                                            ),
+                                            1,
+                                            instr(
+                                                substr(
+                                                    COALESCE(ja.effect_text,''),
+                                                    instr(COALESCE(ja.effect_text,''), 'カードタイプ ') + length('カードタイプ ')
+                                                ) || char(10),
+                                                char(10)
+                                            ) - 1
+                                        )
+                                    )
+                                ELSE ''
+                            END,
+                            ''
+                        ) AS card_type,
+                        COALESCE(
+                            NULLIF(TRIM(COALESCE(p.color,'')), ''),
+                            CASE
+                                WHEN instr(COALESCE(ja.effect_text,''), '色 ') > 0 THEN
+                                    TRIM(
+                                        substr(
+                                            substr(
+                                                COALESCE(ja.effect_text,''),
+                                                instr(COALESCE(ja.effect_text,''), '色 ') + length('色 ')
+                                            ),
+                                            1,
+                                            instr(
+                                                substr(
+                                                    COALESCE(ja.effect_text,''),
+                                                    instr(COALESCE(ja.effect_text,''), '色 ') + length('色 ')
+                                                ) || char(10),
+                                                char(10)
+                                            ) - 1
+                                        )
+                                    )
+                                ELSE ''
+                            END,
+                            ''
+                        ) AS color,
+                        CASE
+                            WHEN instr(COALESCE(ja.effect_text,''), 'レアリティ ') > 0 THEN
+                                TRIM(
+                                    substr(
+                                        substr(
+                                            COALESCE(ja.effect_text,''),
+                                            instr(COALESCE(ja.effect_text,''), 'レアリティ ') + length('レアリティ ')
+                                        ),
+                                        1,
+                                        instr(
+                                            substr(
+                                                COALESCE(ja.effect_text,''),
+                                                instr(COALESCE(ja.effect_text,''), 'レアリティ ') + length('レアリティ ')
+                                            ) || char(10),
+                                            char(10)
+                                        ) - 1
+                                    )
+                                )
+                            ELSE ''
+                        END AS rarity,
                         COALESCE(ko.effect_text,'') AS ko_text
                     FROM prints p
                     LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
+                    LEFT JOIN card_texts_ja ja ON ja.print_id = p.print_id
                     WHERE
                         ? = '%%'
                         OR UPPER(COALESCE(p.card_number,'')) LIKE UPPER(?)
@@ -377,6 +444,7 @@ class DbRepository(private val paths: AppPaths) {
                             imageUrl = cursor.getStringOrEmpty("image_url"),
                             cardType = cursor.getStringOrEmpty("card_type"),
                             color = cursor.getStringOrEmpty("color"),
+                            rarity = cursor.getStringOrEmpty("rarity"),
                             koText = cursor.getStringOrEmpty("ko_text"),
                         )
                     }

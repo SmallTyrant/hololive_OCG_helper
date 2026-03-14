@@ -447,6 +447,7 @@ final class HocgViewModel: ObservableObject {
                     imageUrl: self.paths.resolveImageURL(row.imageUrl)?.absoluteString ?? row.imageUrl,
                     cardType: row.cardType,
                     color: row.color,
+                    rarity: row.rarity,
                     koText: row.koText,
                 )
             }
