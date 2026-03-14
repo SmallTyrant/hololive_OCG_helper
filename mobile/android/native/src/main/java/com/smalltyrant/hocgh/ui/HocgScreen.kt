@@ -1,5 +1,13 @@
 package com.smalltyrant.hocgh.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.RectF
 import android.content.res.Configuration
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -63,6 +71,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -82,7 +91,11 @@ import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.input.ImeAction
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.core.graphics.drawable.toBitmap
 import coil.compose.AsyncImage
+import coil.ImageLoader
+import coil.request.ImageRequest
+import coil.request.SuccessResult
 import com.smalltyrant.hocgh.data.AppPaths
 import com.smalltyrant.hocgh.data.DeckStorage
 import com.smalltyrant.hocgh.data.DbRepository
@@ -99,6 +112,10 @@ import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import java.io.ByteArrayOutputStream
 import java.util.Locale
 import java.util.UUID
 
@@ -274,6 +291,8 @@ private fun hasUnlimitedPerCardRule(card: DeckCardCandidate): Boolean {
         normalizedKo.contains("갯수제한이없다") ||
         normalizedKo.contains("수량제한이없다") ||
         normalizedKo.contains("몇장이라도넣을수있다") ||
+        normalizedKo.contains("갯수상관없이여러장넣을수있다") ||
+        normalizedKo.contains("수량상관없이여러장넣을수있다") ||
         (normalizedJa.contains("何枚でも") && normalizedJa.contains("入れられる"))
 }
 private fun maxPerCard(card: DeckCardCandidate): Int {
@@ -283,7 +302,6 @@ private fun maxPerCard(card: DeckCardCandidate): Int {
     if (rarity == "OSR" || rarity == "OUR") return 1
     if (hasUnlimitedPerCardRule(card)) return Int.MAX_VALUE
     val src = card.koText
-    if (src.contains("리미티드") || src.contains("limited", ignoreCase = true)) return 1
     val rx = listOf(Regex("(\\d+)장만"), Regex("최대\\s*(\\d+)장"), Regex("(\\d+)장까지"))
     for (r in rx) {
         val m = r.find(src) ?: continue
@@ -293,30 +311,43 @@ private fun maxPerCard(card: DeckCardCandidate): Int {
     return 4
 }
 
-private fun canAddToDeck(entries: List<DeckEntryUi>, card: DeckCardCandidate): Boolean {
+private fun blockReason(entries: List<DeckEntryUi>, card: DeckCardCandidate): String? {
+    val qty = deckQuantity(entries, card)
+    val perCardLimit = entries.firstOrNull { it.card.printId == card.printId }?.maxPerCard ?: maxPerCard(card)
+    if (perCardLimit != Int.MAX_VALUE && qty >= perCardLimit) {
+        return "이 카드는 최대 ${perCardLimit}장까지만 편성 가능합니다."
+    }
     val oshi = entries.filter { isOshi(it.card) }.sumOf { it.qty }
     val yell = entries.filter { isYell(it.card) }.sumOf { it.qty }
     val main = entries.filter { !isOshi(it.card) && !isYell(it.card) }.sumOf { it.qty }
-    if (isOshi(card)) return oshi < 1
-    if (isYell(card)) return yell < 20
-    return main < 50
+    if (isOshi(card) && oshi >= 1) {
+        return "오시는 1장만 편성 가능합니다."
+    }
+    if (isYell(card) && yell >= 20) {
+        return "옐 슬롯이 가득 찼습니다 (20/20)."
+    }
+    if (!isOshi(card) && !isYell(card) && main >= 50) {
+        return "덱이 가득 찼습니다 (50/50)."
+    }
+    return null
 }
 
 private fun deckQuantity(entries: List<DeckEntryUi>, card: DeckCardCandidate): Int {
     return entries.firstOrNull { it.card.printId == card.printId }?.qty ?: 0
 }
 
-private fun addCardToDeck(entries: MutableList<DeckEntryUi>, card: DeckCardCandidate) {
+private fun addCardToDeck(entries: MutableList<DeckEntryUi>, card: DeckCardCandidate): String? {
+    val reason = blockReason(entries, card)
+    if (reason != null) {
+        return reason
+    }
     val found = entries.firstOrNull { it.card.printId == card.printId }
     if (found == null) {
-        if (canAddToDeck(entries, card)) {
-            entries.add(DeckEntryUi(card = card, qty = 1, maxPerCard = maxPerCard(card)))
-        }
-        return
+        entries.add(DeckEntryUi(card = card, qty = 1, maxPerCard = maxPerCard(card)))
+        return null
     }
-    if (found.qty < found.maxPerCard && canAddToDeck(entries, card)) {
-        found.qty += 1
-    }
+    found.qty += 1
+    return null
 }
 
 private fun toDeckRecords(decks: List<DeckUi>): List<SavedDeckRecord> {
@@ -368,6 +399,116 @@ private fun resolveDecksFromRecords(
             )
         }
     }
+}
+
+private fun sanitizeDeckFilename(raw: String): String {
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty()) {
+        return "deck"
+    }
+    val safe = trimmed.replace(Regex("[^A-Za-z0-9가-힣._-]+"), "_")
+    return safe.ifBlank { "deck" }
+}
+
+private suspend fun loadDeckCardBitmap(
+    context: android.content.Context,
+    imageLoader: ImageLoader,
+    imageUrl: String,
+    width: Int,
+    height: Int,
+): Bitmap? {
+    val request = ImageRequest.Builder(context)
+        .data(imageUrl)
+        .allowHardware(false)
+        .build()
+    val result = imageLoader.execute(request)
+    val drawable = (result as? SuccessResult)?.drawable ?: return null
+    return runCatching { drawable.toBitmap(width, height) }.getOrNull()
+}
+
+private suspend fun buildDeckExportBitmap(
+    context: android.content.Context,
+    imageLoader: ImageLoader,
+    deck: DeckUi,
+): Bitmap? {
+    val entries = deck.entries
+    if (entries.isEmpty()) return null
+
+    val columns = 5
+    val cardW = 220
+    val cardH = 308
+    val gap = 16
+    val padding = 24
+    val titleH = 64
+    val rows = (entries.size + columns - 1) / columns
+    val canvasW = padding * 2 + columns * cardW + (columns - 1) * gap
+    val canvasH = padding + titleH + rows * cardH + (rows - 1).coerceAtLeast(0) * gap + padding
+    val bitmap = Bitmap.createBitmap(canvasW, canvasH, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    canvas.drawColor(Color.WHITE)
+
+    val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.BLACK
+        textSize = 42f
+        typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+    }
+    val title = deck.title.ifBlank { "덱" }
+    canvas.drawText(title, padding.toFloat(), (padding + 44).toFloat(), titlePaint)
+
+    val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    val placeholderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.LTGRAY }
+    val placeholderTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.DKGRAY
+        textSize = 22f
+    }
+    val badgeBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(205, 0, 0, 0)
+    }
+    val badgeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 26f
+        typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+        textAlign = Paint.Align.CENTER
+    }
+
+    val imageCache = mutableMapOf<Long, Bitmap?>()
+    for (entry in entries) {
+        if (imageCache.containsKey(entry.card.printId)) continue
+        imageCache[entry.card.printId] = loadDeckCardBitmap(
+            context = context,
+            imageLoader = imageLoader,
+            imageUrl = entry.card.imageUrl,
+            width = cardW,
+            height = cardH,
+        )
+    }
+
+    entries.forEachIndexed { index, entry ->
+        val row = index / columns
+        val col = index % columns
+        val left = padding + col * (cardW + gap)
+        val top = padding + titleH + row * (cardH + gap)
+        val dst = Rect(left, top, left + cardW, top + cardH)
+        val loaded = imageCache[entry.card.printId]
+        if (loaded != null) {
+            canvas.drawBitmap(loaded, null, dst, cardPaint)
+        } else {
+            canvas.drawRoundRect(RectF(dst), 12f, 12f, placeholderPaint)
+            canvas.drawText(entry.card.cardNumber, (left + 10).toFloat(), (top + 30).toFloat(), placeholderTextPaint)
+        }
+
+        val qtyLabel = entry.qty.toString()
+        val qtyWidth = badgeTextPaint.measureText(qtyLabel)
+        val badgeW = maxOf(42f, qtyWidth + 24f)
+        val badgeH = 36f
+        val badgeLeft = dst.right - badgeW - 10f
+        val badgeTop = dst.top + 10f
+        val badgeRect = RectF(badgeLeft, badgeTop, badgeLeft + badgeW, badgeTop + badgeH)
+        canvas.drawRoundRect(badgeRect, badgeH / 2f, badgeH / 2f, badgeBgPaint)
+        val textY = badgeRect.centerY() - (badgeTextPaint.descent() + badgeTextPaint.ascent()) / 2f
+        canvas.drawText(qtyLabel, badgeRect.centerX(), textY, badgeTextPaint)
+    }
+    return bitmap
 }
 
 @Composable
@@ -435,66 +576,31 @@ fun HocgScreen(
     var deckCandidates by remember { mutableStateOf<List<DeckCardCandidate>>(emptyList()) }
     var renamingDeckId by remember { mutableStateOf<String?>(null) }
     var renamingDeckTitle by remember { mutableStateOf("") }
-    var pendingExportJson by remember { mutableStateOf<String?>(null) }
+    var showingDeckImportDialog by remember { mutableStateOf(false) }
+    var deckImportText by remember { mutableStateOf("") }
+    var pendingDeckImageBytes by remember { mutableStateOf<ByteArray?>(null) }
     val deckDraft = remember { mutableStateListOf<DeckEntryUi>() }
     val savedDecks = remember { mutableStateListOf<DeckUi>() }
+    val imageLoader = remember(context) { ImageLoader(context) }
 
-    val exportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/json"),
+    val exportImageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("image/png"),
     ) { uri ->
-        val payload = pendingExportJson ?: return@rememberLauncherForActivityResult
-        pendingExportJson = null
+        val payload = pendingDeckImageBytes ?: return@rememberLauncherForActivityResult
+        pendingDeckImageBytes = null
         if (uri == null) {
             return@rememberLauncherForActivityResult
         }
         scope.launch {
             val ok = withContext(Dispatchers.IO) {
                 runCatching {
-                    context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { writer ->
-                        writer.write(payload)
+                    context.contentResolver.openOutputStream(uri)?.use { stream ->
+                        stream.write(payload)
                     } ?: error("파일을 열 수 없습니다.")
                     true
                 }.getOrDefault(false)
             }
-            snackbarHostState.showSnackbar(if (ok) "덱 JSON 내보내기가 완료되었습니다." else "덱 JSON 내보내기에 실패했습니다.")
-        }
-    }
-
-    val importLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument(),
-    ) { uri ->
-        if (uri == null) {
-            return@rememberLauncherForActivityResult
-        }
-        scope.launch {
-            val importedRecords = withContext(Dispatchers.IO) {
-                val raw = runCatching {
-                    context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                }.getOrNull().orEmpty()
-                if (raw.isBlank()) emptyList() else deckStorage.importText(raw)
-            }
-            if (importedRecords.isEmpty()) {
-                snackbarHostState.showSnackbar("가져올 덱이 없습니다.")
-                return@launch
-            }
-            val allCards = viewModel.searchDeckCards("", limit = 5000)
-            val importedDecks = resolveDecksFromRecords(importedRecords, allCards)
-            if (importedDecks.isEmpty()) {
-                snackbarHostState.showSnackbar("가져온 덱에서 카드 정보를 찾을 수 없습니다.")
-                return@launch
-            }
-            importedDecks.forEach { deck ->
-                val existing = savedDecks.indexOfFirst { it.id == deck.id }
-                if (existing >= 0) {
-                    savedDecks[existing] = deck
-                } else {
-                    savedDecks.add(deck)
-                }
-            }
-            withContext(Dispatchers.IO) {
-                deckStorage.saveLibrary(DeckLibraryRecord(decks = toDeckRecords(savedDecks)))
-            }
-            snackbarHostState.showSnackbar("덱 JSON 가져오기가 완료되었습니다.")
+            snackbarHostState.showSnackbar(if (ok) "덱 이미지 내보내기가 완료되었습니다." else "덱 이미지 내보내기에 실패했습니다.")
         }
     }
 
@@ -624,6 +730,71 @@ fun HocgScreen(
         )
     }
 
+    if (showingDeckImportDialog) {
+        AlertDialog(
+            onDismissRequest = { showingDeckImportDialog = false },
+            title = { Text("덱 코드 가져오기") },
+            text = {
+                OutlinedTextField(
+                    value = deckImportText,
+                    onValueChange = { deckImportText = it },
+                    label = { Text("덱 코드") },
+                    placeholder = { Text("클립보드 코드를 붙여넣어 주세요") },
+                    minLines = 10,
+                    maxLines = 14,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val raw = deckImportText.trim()
+                        if (raw.isEmpty()) {
+                            scope.launch { snackbarHostState.showSnackbar("가져오기 코드가 비어 있습니다.") }
+                            return@TextButton
+                        }
+                        showingDeckImportDialog = false
+                        scope.launch {
+                            val importedRecords = withContext(Dispatchers.IO) {
+                                runCatching { deckStorage.importText(raw) }.getOrElse { emptyList() }
+                            }
+                            if (importedRecords.isEmpty()) {
+                                snackbarHostState.showSnackbar("가져올 덱이 없습니다.")
+                                return@launch
+                            }
+                            val allCards = viewModel.searchDeckCards("", limit = 5000)
+                            val importedDecks = resolveDecksFromRecords(importedRecords, allCards)
+                            if (importedDecks.isEmpty()) {
+                                snackbarHostState.showSnackbar("가져온 코드에서 카드 정보를 찾을 수 없습니다.")
+                                return@launch
+                            }
+                            importedDecks.forEach { deck ->
+                                val existing = savedDecks.indexOfFirst { it.id == deck.id }
+                                if (existing >= 0) {
+                                    savedDecks[existing] = deck
+                                } else {
+                                    savedDecks.add(deck)
+                                }
+                            }
+                            withContext(Dispatchers.IO) {
+                                deckStorage.saveLibrary(DeckLibraryRecord(decks = toDeckRecords(savedDecks)))
+                            }
+                            deckImportText = ""
+                            snackbarHostState.showSnackbar("덱 코드 가져오기가 완료되었습니다.")
+                        }
+                    },
+                ) {
+                    Text("가져오기")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showingDeckImportDialog = false }) {
+                    Text("취소")
+                }
+            },
+        )
+    }
+
     ModalNavigationDrawer(
         modifier = Modifier
             .fillMaxSize()
@@ -691,10 +862,40 @@ fun HocgScreen(
                     innerPadding = innerPadding,
                     decks = savedDecks,
                     onBack = { showDeckList = false },
-                    onImport = { importLauncher.launch(arrayOf("application/json", "text/json")) },
-                    onExport = {
-                        pendingExportJson = deckStorage.exportText(toDeckRecords(savedDecks))
-                        exportLauncher.launch("hocg_deck_library.json")
+                    onImport = {
+                        deckImportText = ""
+                        showingDeckImportDialog = true
+                    },
+                    onExportCode = { deck ->
+                        val code = deckStorage.exportText(toDeckRecords(listOf(deck)))
+                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                        clipboard?.setPrimaryClip(ClipData.newPlainText("deck_code", code))
+                        scope.launch { snackbarHostState.showSnackbar("덱 코드가 클립보드에 복사되었습니다.") }
+                    },
+                    onExportImage = { deck ->
+                        scope.launch {
+                            snackbarHostState.showSnackbar("덱 이미지를 생성하는 중입니다...")
+                            val bitmap = withContext(Dispatchers.IO) {
+                                buildDeckExportBitmap(
+                                    context = context,
+                                    imageLoader = imageLoader,
+                                    deck = deck,
+                                )
+                            }
+                            if (bitmap == null) {
+                                snackbarHostState.showSnackbar("덱 이미지 생성에 실패했습니다.")
+                                return@launch
+                            }
+                            val pngBytes = withContext(Dispatchers.IO) {
+                                ByteArrayOutputStream().use { out ->
+                                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                                    out.toByteArray()
+                                }
+                            }
+                            pendingDeckImageBytes = pngBytes
+                            val safeName = sanitizeDeckFilename(deck.title)
+                            exportImageLauncher.launch("deck_${safeName}_${System.currentTimeMillis()}.png")
+                        }
                     },
                     onAdd = {
                         deckTitle = "새 덱"
@@ -769,12 +970,18 @@ fun HocgScreen(
                         scope.launch { deckCandidates = viewModel.searchDeckCards(deckSearchQuery) }
                     },
                     onSelectCandidate = { card ->
-                        addCardToDeck(deckDraft, card)
+                        val reason = addCardToDeck(deckDraft, card)
+                        if (reason != null) {
+                            scope.launch { snackbarHostState.showSnackbar(reason) }
+                        }
                     },
                     quantityForCard = { card -> deckQuantity(deckDraft, card) },
                     onIncrease = { entry ->
-                        if (entry.qty < entry.maxPerCard && canAddToDeck(deckDraft, entry.card)) {
+                        val reason = blockReason(deckDraft, entry.card)
+                        if (reason == null) {
                             entry.qty += 1
+                        } else {
+                            scope.launch { snackbarHostState.showSnackbar(reason) }
                         }
                     },
                     onDecrease = { entry ->
@@ -821,7 +1028,8 @@ private fun DeckListScreen(
     decks: List<DeckUi>,
     onBack: () -> Unit,
     onImport: () -> Unit,
-    onExport: () -> Unit,
+    onExportCode: (DeckUi) -> Unit,
+    onExportImage: (DeckUi) -> Unit,
     onAdd: () -> Unit,
     onEdit: (DeckUi) -> Unit,
     onRename: (DeckUi) -> Unit,
@@ -836,13 +1044,13 @@ private fun DeckListScreen(
             Text("덱 리스트", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onImport) { Text("가져오기") }
-                TextButton(onClick = onExport) { Text("내보내기") }
                 IconButton(onClick = onAdd) { Icon(Icons.Default.Add, contentDescription = "추가") }
             }
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(decks.indices.toList(), key = { decks[it].id }) { idx ->
                 val deck = decks[idx]
+                var menuExpanded by remember(deck.id) { mutableStateOf(false) }
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -858,9 +1066,43 @@ private fun DeckListScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(deck.title, fontWeight = FontWeight.Bold)
-                        Row {
-                            TextButton(onClick = { onRename(deck) }) { Text("이름 수정") }
-                            TextButton(onClick = { onDelete(deck) }) { Text("삭제") }
+                        Box {
+                            IconButton(onClick = { menuExpanded = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "덱 메뉴")
+                            }
+                            DropdownMenu(
+                                expanded = menuExpanded,
+                                onDismissRequest = { menuExpanded = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("이름 수정") },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onRename(deck)
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("코드로 내보내기") },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onExportCode(deck)
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("이미지로 내보내기") },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onExportImage(deck)
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("삭제") },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onDelete(deck)
+                                    },
+                                )
+                            }
                         }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -932,18 +1174,22 @@ private fun DeckEditorScreen(
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     items(candidates, key = { it.printId }) { card ->
+                        val qty = quantityForCard(card)
+                        val maxQty = entries.firstOrNull { it.card.printId == card.printId }?.maxPerCard ?: maxPerCard(card)
+                        val blockedReason = blockReason(entries, card)
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(8.dp))
                                 .clickable { onSelectCandidate(card) }
-                                .padding(horizontal = 6.dp, vertical = 4.dp),
+                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                                .alpha(if (blockedReason == null) 1f else 0.45f),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             DeckThumbnail(
                                 imageUrl = card.imageUrl,
-                                qty = quantityForCard(card),
+                                qty = qty,
                                 width = 36.dp,
                                 height = 50.dp,
                             )
@@ -959,6 +1205,11 @@ private fun DeckEditorScreen(
                                     )
                                 }
                             }
+                            Text(
+                                text = if (maxQty == Int.MAX_VALUE) "${qty}/∞" else "${qty}/${maxQty}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (blockedReason == null) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.error,
+                            )
                         }
                     }
                 }

@@ -1,7 +1,6 @@
 import SwiftUI
 import UIKit
 import Foundation
-import UniformTypeIdentifiers
 
 private let sectionLabels: [String] = [
     "SP 오시 스킬",
@@ -203,9 +202,10 @@ struct ContentView: View {
     @State private var savedDecks: [SavedDeckState] = []
     @State private var deckSearchQuery = ""
     @State private var deckCandidates: [DeckCardCandidate] = []
-    @State private var showingDeckImporter = false
-    @State private var showingDeckExporter = false
-    @State private var exportDeckDocument = DeckJSONFileDocument(data: Data("{}".utf8))
+    @State private var showingDeckImportSheet = false
+    @State private var deckImportText = ""
+    @State private var deckToastMessage: String?
+    @State private var sharePayload: SharePayload?
     @State private var renamingDeckID: UUID?
     @State private var renamingDeckTitle = ""
     @State private var multiWordTags: [String] = []
@@ -265,6 +265,8 @@ struct ContentView: View {
             || normalizedKo.contains("갯수제한이없다")
             || normalizedKo.contains("수량제한이없다")
             || normalizedKo.contains("몇장이라도넣을수있다")
+            || normalizedKo.contains("갯수상관없이여러장넣을수있다")
+            || normalizedKo.contains("수량상관없이여러장넣을수있다")
             || (normalizedJa.contains("何枚でも") && normalizedJa.contains("入れられる"))
     }
 
@@ -274,21 +276,11 @@ struct ContentView: View {
         let rarity = card.rarity.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if rarity == "OSR" || rarity == "OUR" { return 1 }
         if hasUnlimitedPerCardRule(card) { return Int.max }
-        if card.koText.contains("리미티드") || card.koText.lowercased().contains("limited") { return 1 }
         let patterns = ["(\\d+)장만", "최대\\s*(\\d+)장", "(\\d+)장까지"]
         for p in patterns {
             if let regex = try? NSRegularExpression(pattern: p), let match = regex.firstMatch(in: card.koText, range: NSRange(location: 0, length: card.koText.utf16.count)), let r = Range(match.range(at: 1), in: card.koText), let n = Int(card.koText[r]) { return max(1, n) }
         }
         return 4
-    }
-
-    private func canAddToDeck(_ card: DeckCardCandidate) -> Bool {
-        let oshi = deckEntries.filter { isOshi($0.card) }.map(\.qty).reduce(0, +)
-        let yell = deckEntries.filter { isYell($0.card) }.map(\.qty).reduce(0, +)
-        let main = deckEntries.filter { !isOshi($0.card) && !isYell($0.card) }.map(\.qty).reduce(0, +)
-        if isOshi(card) { return oshi < 1 }
-        if isYell(card) { return yell < 20 }
-        return main < 50
     }
 
     private var deckOshiCount: Int {
@@ -317,15 +309,44 @@ struct ContentView: View {
         deckEntries.first(where: { $0.id == card.printId })?.qty ?? 0
     }
 
+    private func blockReason(for card: DeckCardCandidate) -> String? {
+        let qty = deckQuantity(for: card)
+        let perCardLimit = deckEntries.first(where: { $0.id == card.printId })?.maxPerCard ?? maxPerCard(card)
+        if perCardLimit != .max, qty >= perCardLimit {
+            return "이 카드는 최대 \(perCardLimit)장까지만 편성 가능합니다."
+        }
+        if isOshi(card), deckOshiCount >= 1 {
+            return "오시는 1장만 편성 가능합니다."
+        }
+        if isYell(card), deckYellCount >= 20 {
+            return "옐 슬롯이 가득 찼습니다 (20/20)."
+        }
+        if !isOshi(card) && !isYell(card) && deckMainCount >= 50 {
+            return "덱이 가득 찼습니다 (50/50)."
+        }
+        return nil
+    }
+
+    private func showDeckToast(_ message: String) {
+        deckToastMessage = message
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if deckToastMessage == message {
+                deckToastMessage = nil
+            }
+        }
+    }
+
     private func addCardToDeck(_ card: DeckCardCandidate) {
+        if let reason = blockReason(for: card) {
+            showDeckToast(reason)
+            return
+        }
         if let idx = deckEntries.firstIndex(where: { $0.id == card.printId }) {
-            guard deckEntries[idx].qty < deckEntries[idx].maxPerCard else { return }
-            guard canAddToDeck(deckEntries[idx].card) else { return }
             deckEntries[idx].qty += 1
             return
         }
 
-        guard canAddToDeck(card) else { return }
         deckEntries.append(
             DeckEntryState(
                 id: card.printId,
@@ -412,11 +433,11 @@ struct ContentView: View {
         savedDecks = resolved
     }
 
-    private func mergeImportedDecks(_ records: [SavedDeckRecord]) async {
-        guard !records.isEmpty else { return }
+    private func mergeImportedDecks(_ records: [SavedDeckRecord]) async -> Int {
+        guard !records.isEmpty else { return 0 }
         let cards = await viewModel.searchDeckCards("", limit: 5000)
         let importedStates = resolveDeckStates(from: records, cards: cards)
-        guard !importedStates.isEmpty else { return }
+        guard !importedStates.isEmpty else { return 0 }
         for deck in importedStates {
             if let idx = savedDecks.firstIndex(where: { $0.id == deck.id }) {
                 savedDecks[idx] = deck
@@ -425,12 +446,176 @@ struct ContentView: View {
             }
         }
         persistSavedDecks()
+        return importedStates.count
     }
 
-    private func exportDeckLibrary() {
-        guard let data = deckStorage.exportData(for: makeDeckRecords(from: savedDecks)) else { return }
-        exportDeckDocument = DeckJSONFileDocument(data: data)
-        showingDeckExporter = true
+    private func importDeckLibraryFromText() {
+        let raw = deckImportText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else {
+            showDeckToast("가져오기 코드가 비어 있습니다.")
+            return
+        }
+        guard let data = raw.data(using: .utf8) else {
+            showDeckToast("코드 형식이 올바르지 않습니다.")
+            return
+        }
+        let imported = deckStorage.importData(data)
+        guard !imported.isEmpty else {
+            showDeckToast("가져올 덱 코드가 없습니다.")
+            return
+        }
+        showingDeckImportSheet = false
+        deckImportText = ""
+        Task {
+            let merged = await mergeImportedDecks(imported)
+            if merged > 0 {
+                showDeckToast("덱 코드 가져오기가 완료되었습니다.")
+            } else {
+                showDeckToast("가져온 코드에서 유효한 덱을 찾지 못했습니다.")
+            }
+        }
+    }
+
+    private func exportDeckCodeToClipboard(_ deck: SavedDeckState) {
+        let record = makeDeckRecords(from: [deck])
+        guard let data = deckStorage.exportData(for: record),
+              let text = String(data: data, encoding: .utf8) else {
+            showDeckToast("덱 코드 내보내기에 실패했습니다.")
+            return
+        }
+        UIPasteboard.general.string = text
+        showDeckToast("덱 코드가 클립보드에 복사되었습니다.")
+    }
+
+    private func exportDeckImage(_ deck: SavedDeckState) {
+        Task {
+            await MainActor.run {
+                showDeckToast("덱 이미지를 생성하는 중입니다...")
+            }
+            let images = await loadDeckImages(for: deck)
+            guard let image = buildDeckGridImage(deck: deck, images: images),
+                  let pngData = image.pngData() else {
+                await MainActor.run {
+                    showDeckToast("덱 이미지 생성에 실패했습니다.")
+                }
+                return
+            }
+            let safeTitle = deck.title.replacingOccurrences(of: "[^A-Za-z0-9가-힣._-]+", with: "_", options: .regularExpression)
+            let filename = "deck_\(safeTitle.isEmpty ? "hocg" : safeTitle)_\(Int(Date().timeIntervalSince1970)).png"
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+            do {
+                try pngData.write(to: url, options: .atomic)
+                await MainActor.run {
+                    sharePayload = SharePayload(items: [url])
+                    showDeckToast("덱 이미지가 준비되었습니다. 저장 위치를 선택하세요.")
+                }
+            } catch {
+                await MainActor.run {
+                    showDeckToast("덱 이미지 저장에 실패했습니다.")
+                }
+            }
+        }
+    }
+
+    private func loadDeckImages(for deck: SavedDeckState) async -> [Int64: UIImage] {
+        let unique = Dictionary(uniqueKeysWithValues: deck.entries.map { ($0.card.printId, $0.card.imageUrl) })
+        return await withTaskGroup(of: (Int64, UIImage?).self) { group in
+            for (printId, imageURL) in unique {
+                group.addTask {
+                    guard let url = URL(string: imageURL) else {
+                        return (printId, nil)
+                    }
+                    guard let (data, _) = try? await URLSession.shared.data(from: url),
+                          let image = UIImage(data: data) else {
+                        return (printId, nil)
+                    }
+                    return (printId, image)
+                }
+            }
+            var result: [Int64: UIImage] = [:]
+            for await (printId, image) in group {
+                if let image {
+                    result[printId] = image
+                }
+            }
+            return result
+        }
+    }
+
+    private func buildDeckGridImage(deck: SavedDeckState, images: [Int64: UIImage]) -> UIImage? {
+        let entries = deck.entries
+        guard !entries.isEmpty else { return nil }
+        let columns = 5
+        let cardWidth: CGFloat = 140
+        let cardHeight: CGFloat = 196
+        let gridSpacing: CGFloat = 12
+        let padding: CGFloat = 18
+        let titleHeight: CGFloat = 42
+        let rows = Int(ceil(Double(entries.count) / Double(columns)))
+        let canvasWidth = padding * 2 + CGFloat(columns) * cardWidth + CGFloat(columns - 1) * gridSpacing
+        let canvasHeight = padding + titleHeight + CGFloat(rows) * cardHeight + CGFloat(max(0, rows - 1)) * gridSpacing + padding
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: canvasWidth, height: canvasHeight))
+
+        return renderer.image { context in
+            UIColor.systemBackground.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: canvasWidth, height: canvasHeight))
+
+            let title = deck.title.isEmpty ? "덱" : deck.title
+            let titleAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.boldSystemFont(ofSize: 24),
+                .foregroundColor: UIColor.label,
+            ]
+            (title as NSString).draw(
+                in: CGRect(x: padding, y: padding, width: canvasWidth - padding * 2, height: titleHeight),
+                withAttributes: titleAttrs
+            )
+
+            for (index, entry) in entries.enumerated() {
+                let row = index / columns
+                let col = index % columns
+                let x = padding + CGFloat(col) * (cardWidth + gridSpacing)
+                let y = padding + titleHeight + CGFloat(row) * (cardHeight + gridSpacing)
+                let frame = CGRect(x: x, y: y, width: cardWidth, height: cardHeight)
+
+                if let image = images[entry.card.printId] {
+                    image.draw(in: frame)
+                } else {
+                    UIColor.secondarySystemFill.setFill()
+                    UIBezierPath(roundedRect: frame, cornerRadius: 10).fill()
+                    let fallback = entry.card.cardNumber
+                    let fallbackAttrs: [NSAttributedString.Key: Any] = [
+                        .font: UIFont.systemFont(ofSize: 12, weight: .medium),
+                        .foregroundColor: UIColor.secondaryLabel,
+                    ]
+                    let textRect = frame.insetBy(dx: 6, dy: 6)
+                    (fallback as NSString).draw(in: textRect, withAttributes: fallbackAttrs)
+                }
+
+                let qtyText = "\(entry.qty)"
+                let qtyAttrs: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.boldSystemFont(ofSize: 16),
+                    .foregroundColor: UIColor.white,
+                ]
+                let qtySize = (qtyText as NSString).size(withAttributes: qtyAttrs)
+                let badgeW = max(28, qtySize.width + 14)
+                let badgeH: CGFloat = 24
+                let badgeRect = CGRect(
+                    x: frame.maxX - badgeW - 6,
+                    y: frame.minY + 6,
+                    width: badgeW,
+                    height: badgeH
+                )
+                UIColor.black.withAlphaComponent(0.8).setFill()
+                UIBezierPath(roundedRect: badgeRect, cornerRadius: badgeH / 2).fill()
+                let textRect = CGRect(
+                    x: badgeRect.midX - qtySize.width / 2,
+                    y: badgeRect.midY - qtySize.height / 2,
+                    width: qtySize.width,
+                    height: qtySize.height
+                )
+                (qtyText as NSString).draw(in: textRect, withAttributes: qtyAttrs)
+            }
+        }
     }
 
     private func startRenameDeck(_ deck: SavedDeckState) {
@@ -477,7 +662,7 @@ struct ContentView: View {
                     desktopLayout()
                 }
 
-                if let toast = viewModel.toastMessage {
+                if let toast = deckToastMessage ?? viewModel.toastMessage {
                     Text(toast)
                         .font(.subheadline.weight(.semibold))
                         .foregroundColor(.white)
@@ -552,30 +737,41 @@ struct ContentView: View {
                 rebuildTagRegexCache(tags)
                 refreshDetailLines()
             }
-            .fileImporter(
-                isPresented: $showingDeckImporter,
-                allowedContentTypes: [.json],
-                allowsMultipleSelection: false
-            ) { result in
-                guard case let .success(urls) = result, let url = urls.first else { return }
-                Task {
-                    let started = url.startAccessingSecurityScopedResource()
-                    defer {
-                        if started {
-                            url.stopAccessingSecurityScopedResource()
+            .sheet(isPresented: $showingDeckImportSheet) {
+                NavigationStack {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("클립보드의 덱 코드를 붙여넣어 주세요.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        TextEditor(text: $deckImportText)
+                            .font(.system(.footnote, design: .monospaced))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding(8)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
+                            )
+                    }
+                    .padding(14)
+                    .navigationTitle("덱 코드 가져오기")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("취소") {
+                                showingDeckImportSheet = false
+                            }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("가져오기") {
+                                importDeckLibraryFromText()
+                            }
                         }
                     }
-                    guard let data = try? Data(contentsOf: url) else { return }
-                    let imported = deckStorage.importData(data)
-                    await mergeImportedDecks(imported)
                 }
             }
-            .fileExporter(
-                isPresented: $showingDeckExporter,
-                document: exportDeckDocument,
-                contentType: .json,
-                defaultFilename: "hocg_deck_library"
-            ) { _ in }
+            .sheet(item: $sharePayload) { payload in
+                ActivityView(activityItems: payload.items)
+            }
             .alert(
                 "덱 이름 수정",
                 isPresented: Binding(
@@ -598,6 +794,7 @@ struct ContentView: View {
                 Text("변경할 덱 이름을 입력하세요.")
             }
             .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
+            .animation(.easeInOut(duration: 0.2), value: deckToastMessage)
             .task {
                 let tags = await Task.detached {
                     DatabaseRepository(paths: AppPaths()).loadMultiWordTags()
@@ -1583,8 +1780,10 @@ struct ContentView: View {
         VStack(spacing: 8) {
             HStack {
                 Button("뒤로") { showingDeckList = false }
-                Button("가져오기") { showingDeckImporter = true }
-                Button("내보내기") { exportDeckLibrary() }
+                Button("가져오기") {
+                    deckImportText = ""
+                    showingDeckImportSheet = true
+                }
                 Spacer()
                 Text("덱 리스트").font(.headline)
                 Spacer()
@@ -1617,6 +1816,12 @@ struct ContentView: View {
                         Menu {
                             Button("이름 수정") {
                                 startRenameDeck(deck)
+                            }
+                            Button("코드로 내보내기") {
+                                exportDeckCodeToClipboard(deck)
+                            }
+                            Button("이미지로 내보내기") {
+                                exportDeckImage(deck)
                             }
                             Button("삭제", role: .destructive) {
                                 removeDeck(deck.id)
@@ -1693,13 +1898,16 @@ struct ContentView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 4) {
                             ForEach(deckCandidates) { card in
+                                let qty = deckQuantity(for: card)
+                                let maxQty = deckEntries.first(where: { $0.id == card.printId })?.maxPerCard ?? maxPerCard(card)
+                                let blockedReason = blockReason(for: card)
                                 Button {
                                     addCardToDeck(card)
                                 } label: {
                                     HStack(spacing: 8) {
                                         deckThumbnail(
                                             url: card.imageUrl,
-                                            qty: deckQuantity(for: card),
+                                            qty: qty,
                                             width: 36,
                                             height: 50
                                         )
@@ -1714,12 +1922,16 @@ struct ContentView: View {
                                             }
                                         }
                                         Spacer()
+                                        Text(maxQty == Int.max ? "\(qty)/∞" : "\(qty)/\(maxQty)")
+                                            .font(.caption2.monospacedDigit())
+                                            .foregroundColor(blockedReason == nil ? .secondary : .orange)
                                     }
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 4)
                                 }
                                 .buttonStyle(.plain)
+                                .opacity(blockedReason == nil ? 1 : 0.45)
                             }
                         }
                     }
@@ -1744,7 +1956,10 @@ struct ContentView: View {
                             Spacer()
                             Button("-") { deckEntries[i].qty -= 1; if deckEntries[i].qty <= 0 { deckEntries.remove(at: i) } }
                             Button("+") {
-                                if deckEntries[i].qty < deckEntries[i].maxPerCard && canAddToDeck(deckEntries[i].card) {
+                                let card = deckEntries[i].card
+                                if let reason = blockReason(for: card) {
+                                    showDeckToast(reason)
+                                } else {
                                     deckEntries[i].qty += 1
                                 }
                             }
@@ -1813,22 +2028,19 @@ struct ContentView: View {
     }
 }
 
-private struct DeckJSONFileDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.json] }
+private struct SharePayload: Identifiable {
+    let id = UUID()
+    let items: [Any]
+}
 
-    var data: Data
+private struct ActivityView: UIViewControllerRepresentable {
+    let activityItems: [Any]
 
-    init(data: Data) {
-        self.data = data
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
     }
 
-    init(configuration: ReadConfiguration) throws {
-        data = configuration.file.regularFileContents ?? Data()
-    }
-
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        FileWrapper(regularFileWithContents: data)
-    }
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 private struct MenuSheet: View {
