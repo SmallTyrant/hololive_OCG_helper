@@ -535,11 +535,11 @@ private fun DeckThumbnail(
                     .align(Alignment.TopEnd)
                     .padding(3.dp)
                     .background(
-                        color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.75f),
+                        color = androidx.compose.ui.graphics.Color(0xCC000000),
                         shape = RoundedCornerShape(999.dp),
                     )
                     .padding(horizontal = 6.dp, vertical = 2.dp),
-                color = MaterialTheme.colorScheme.onPrimary,
+                color = androidx.compose.ui.graphics.Color.White,
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
             )
@@ -1218,8 +1218,9 @@ private fun DeckEditorScreen(
                             }
                             Text(
                                 text = if (maxQty == Int.MAX_VALUE) "${qty}/∞" else "${qty}/${maxQty}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (blockedReason == null) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (blockedReason == null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
                             )
                         }
                     }
