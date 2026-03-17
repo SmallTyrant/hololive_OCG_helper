@@ -205,6 +205,12 @@ struct ContentView: View {
     @State private var deckCandidates: [DeckCardCandidate] = []
     @State private var showingDeckImportSheet = false
     @State private var deckImportText = ""
+    @State private var deckImportMode: DeckImportMode = .holoDuel
+
+    private enum DeckImportMode: String, CaseIterable {
+        case holoDuel = "홀로듀얼"
+        case bushiroad = "부시나비"
+    }
     @State private var deckToastMessage: String?
     @State private var renamingDeckID: UUID?
     @State private var renamingDeckTitle = ""
@@ -455,36 +461,152 @@ struct ContentView: View {
             showDeckToast("가져오기 코드가 비어 있습니다.")
             return
         }
+
+        switch deckImportMode {
+        case .holoDuel:
+            importHoloDuelCode(raw)
+        case .bushiroad:
+            importBushiroadCode(raw)
+        }
+    }
+
+    private func importHoloDuelCode(_ raw: String) {
+        // 1) HoloDuel Base64 시도
+        if let holoDuelDeck = DeckCodeConverter.importHoloDuel(raw) {
+            showingDeckImportSheet = false
+            deckImportText = ""
+            Task {
+                let merged = await mergeHoloDuelDeck(holoDuelDeck)
+                if merged {
+                    showDeckToast("홀로듀얼 덱 가져오기가 완료되었습니다.")
+                } else {
+                    showDeckToast("카드 정보를 찾을 수 없습니다.")
+                }
+            }
+            return
+        }
+        // 2) 폴백: 기존 앱 JSON 형식
         guard let data = raw.data(using: .utf8) else {
             showDeckToast("코드 형식이 올바르지 않습니다.")
             return
         }
         let imported = deckStorage.importData(data)
         guard !imported.isEmpty else {
-            showDeckToast("가져올 덱 코드가 없습니다.")
+            showDeckToast("가져올 수 있는 덱이 없습니다.")
             return
         }
         showingDeckImportSheet = false
         deckImportText = ""
         Task {
             let merged = await mergeImportedDecks(imported)
-            if merged > 0 {
-                showDeckToast("덱 코드 가져오기가 완료되었습니다.")
-            } else {
-                showDeckToast("가져온 코드에서 유효한 덱을 찾지 못했습니다.")
+            showDeckToast(merged > 0 ? "덱 가져오기가 완료되었습니다." : "가져온 코드에서 유효한 덱을 찾지 못했습니다.")
+        }
+    }
+
+    private func importBushiroadCode(_ raw: String) {
+        showingDeckImportSheet = false
+        deckImportText = ""
+        Task {
+            await MainActor.run { showDeckToast("부시나비에서 덱 정보를 불러오는 중...") }
+            do {
+                let bushiDeck = try await DeckCodeConverter.fetchBushiDeck(codeOrURL: raw)
+                let merged = await mergeBushiDeck(bushiDeck)
+                await MainActor.run {
+                    showDeckToast(merged ? "부시나비 덱 가져오기가 완료되었습니다." : "카드 정보를 찾을 수 없습니다.")
+                }
+            } catch {
+                await MainActor.run {
+                    showDeckToast("부시나비 불러오기 실패: \(error.localizedDescription)")
+                }
             }
         }
     }
 
-    private func exportDeckCodeToClipboard(_ deck: SavedDeckState) {
-        let record = makeDeckRecords(from: [deck])
-        guard let data = deckStorage.exportData(for: record),
-              let text = String(data: data, encoding: .utf8) else {
-            showDeckToast("덱 코드 내보내기에 실패했습니다.")
+    private func mergeHoloDuelDeck(_ holoDuelDeck: DeckCodeConverter.HoloDuelDeck) async -> Bool {
+        let allCards = await viewModel.searchDeckCards("", limit: 5000)
+        let byCardNumber = Dictionary(uniqueKeysWithValues: allCards.map { ($0.cardNumber.uppercased(), $0) })
+
+        var entries: [DeckEntryState] = []
+
+        // 오시
+        if let card = byCardNumber[holoDuelDeck.oshiCardNumber.uppercased()] {
+            entries.append(DeckEntryState(id: card.printId, card: card, qty: 1, maxPerCard: maxPerCard(card)))
+        }
+        // 메인덱
+        for (cn, qty) in holoDuelDeck.deckEntries {
+            if let card = byCardNumber[cn.uppercased()] {
+                entries.append(DeckEntryState(id: card.printId, card: card, qty: qty, maxPerCard: maxPerCard(card)))
+            }
+        }
+        // 치어덱
+        for (cn, qty) in holoDuelDeck.cheerEntries {
+            if let card = byCardNumber[cn.uppercased()] {
+                entries.append(DeckEntryState(id: card.printId, card: card, qty: qty, maxPerCard: maxPerCard(card)))
+            }
+        }
+
+        guard !entries.isEmpty else { return false }
+
+        let newDeck = SavedDeckState(id: UUID(), title: "가져온 덱", entries: entries)
+        savedDecks.append(newDeck)
+        persistSavedDecks()
+        return true
+    }
+
+    private func mergeBushiDeck(_ bushiDeck: DeckCodeConverter.BushiDeck) async -> Bool {
+        let allCards = await viewModel.searchDeckCards("", limit: 5000)
+        let byCardNumber = Dictionary(uniqueKeysWithValues: allCards.map { ($0.cardNumber.uppercased(), $0) })
+
+        var entries: [DeckEntryState] = []
+        for bc in bushiDeck.pList + bushiDeck.list + bushiDeck.subList {
+            if let card = byCardNumber[bc.cardNumber.uppercased()] {
+                entries.append(DeckEntryState(id: card.printId, card: card, qty: bc.num, maxPerCard: maxPerCard(card)))
+            }
+        }
+
+        guard !entries.isEmpty else { return false }
+
+        let title = bushiDeck.title.isEmpty ? "부시나비 덱" : bushiDeck.title
+        let newDeck = SavedDeckState(id: UUID(), title: title, entries: entries)
+        savedDecks.append(newDeck)
+        persistSavedDecks()
+        return true
+    }
+
+    // MARK: - 홀로듀얼 코드 내보내기
+    private func exportHoloDuelCodeToClipboard(_ deck: SavedDeckState) {
+        let entries = deck.entries.map { (cardNumber: $0.card.cardNumber, qty: $0.qty, card: $0.card) }
+        guard let code = DeckCodeConverter.exportHoloDuel(entries: entries) else {
+            showDeckToast("오시 카드가 없습니다. 덱을 확인해 주세요.")
             return
         }
-        UIPasteboard.general.string = text
-        showDeckToast("덱 코드가 클립보드에 복사되었습니다.")
+        UIPasteboard.general.string = code
+        showDeckToast("홀로듀얼 코드가 클립보드에 복사되었습니다.")
+    }
+
+    // MARK: - 부시나비 코드 내보내기 (비동기, DeckLog 업로드)
+    private func exportBushiroadCodeToClipboard(_ deck: SavedDeckState) {
+        Task {
+            await MainActor.run { showDeckToast("부시나비에 업로드 중...") }
+            let entries = deck.entries.map { (cardNumber: $0.card.cardNumber, qty: $0.qty, card: $0.card) }
+            do {
+                let url = try await DeckCodeConverter.publishBushiDeck(
+                    entries: entries,
+                    title: deck.title,
+                    manageIdLookup: { printId in
+                        viewModel.getManageIdJp(printId: printId)
+                    }
+                )
+                await MainActor.run {
+                    UIPasteboard.general.string = url
+                    showDeckToast("부시나비 URL이 클립보드에 복사되었습니다.")
+                }
+            } catch {
+                await MainActor.run {
+                    showDeckToast("부시나비 업로드 실패: \(error.localizedDescription)")
+                }
+            }
+        }
     }
 
     private func exportDeckImage(_ deck: SavedDeckState) {
@@ -563,7 +685,15 @@ struct ContentView: View {
 
         let oshiEntries = entries.filter { isOshi($0.card) }
         let yellEntries = entries.filter { !isOshi($0.card) && isYell($0.card) }
-        let mainEntries = entries.filter { !isOshi($0.card) && !isYell($0.card) }
+        // 오시 홀로멤 → 옐 → 홀로멤 → 서포트 순 정렬
+        func mainSortOrder(_ card: DeckCardCandidate) -> Int {
+            let ct = card.cardType.lowercased()
+            if ct.contains("홀로멤") || ct.contains("holomem") || ct.contains("ホロメン") { return 0 }
+            return 1 // 서포트
+        }
+        let mainEntries = entries
+            .filter { !isOshi($0.card) && !isYell($0.card) }
+            .sorted { mainSortOrder($0.card) < mainSortOrder($1.card) }
 
         let mainColumns = 5
         let sideColumns = 2
@@ -918,9 +1048,19 @@ struct ContentView: View {
             .sheet(isPresented: $showingDeckImportSheet) {
                 NavigationStack {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("클립보드의 덱 코드를 붙여넣어 주세요.")
+                        Picker("가져오기 방식", selection: $deckImportMode) {
+                            ForEach(DeckImportMode.allCases, id: \.self) { mode in
+                                Text(mode.rawValue).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        Text(deckImportMode == .holoDuel
+                             ? "홀로듀얼 덱 코드(Base64)를 붙여넣어 주세요."
+                             : "부시나비 URL 또는 코드를 붙여넣어 주세요.\n예: https://decklog.bushiroad.com/view/6ADJR")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
+
                         TextEditor(text: $deckImportText)
                             .font(.system(.footnote, design: .monospaced))
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -931,7 +1071,7 @@ struct ContentView: View {
                             )
                     }
                     .padding(14)
-                    .navigationTitle("덱 코드 가져오기")
+                    .navigationTitle("덱 가져오기")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
@@ -1999,8 +2139,13 @@ struct ContentView: View {
                             Button("이름 수정") {
                                 startRenameDeck(deck)
                             }
-                            Button("코드로 내보내기") {
-                                exportDeckCodeToClipboard(deck)
+                            Menu("코드로 내보내기") {
+                                Button("홀로듀얼 코드") {
+                                    exportHoloDuelCodeToClipboard(deck)
+                                }
+                                Button("부시나비 코드") {
+                                    exportBushiroadCodeToClipboard(deck)
+                                }
                             }
                             Button("이미지로 내보내기") {
                                 exportDeckImage(deck)

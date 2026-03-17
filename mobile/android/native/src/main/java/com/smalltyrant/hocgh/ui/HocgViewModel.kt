@@ -556,6 +556,8 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun getDbRepository(): DbRepository = dbRepository
+
     suspend fun searchDeckCards(query: String, limit: Int = 240): List<DeckCardCandidate> {
         return withContext(Dispatchers.IO) {
             dbRepository.listDeckCards(query, limit).map { candidate ->

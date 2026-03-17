@@ -568,6 +568,42 @@ final class DatabaseRepository {
         }
     }
 
+    /// prints 테이블의 manage_id_jp 컬럼 값 반환 (부시나비 내보내기용)
+    func getManageIdJp(printId: Int64) -> Int? {
+        do {
+            return try withSQLite(path: paths.dbURL.path, readOnly: true) { db in
+                let cols = try tableColumns(db: db, table: "prints", fingerprint: nil)
+                guard cols.contains("manage_id_jp") else { return nil }
+                let stmt = try sqlitePrepare(db: db, sql: "SELECT manage_id_jp FROM prints WHERE print_id=?")
+                defer { sqlite3_finalize(stmt) }
+                try sqliteBind([.int64(printId)], to: stmt)
+                guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+                if sqlite3_column_type(stmt, 0) == SQLITE_NULL { return nil }
+                return Int(sqliteColumnInt64(stmt, index: 0))
+            }
+        } catch {
+            return nil
+        }
+    }
+
+    /// card_number 로 manage_id_jp 조회
+    func getManageIdJpByCardNumber(_ cardNumber: String) -> Int? {
+        do {
+            return try withSQLite(path: paths.dbURL.path, readOnly: true) { db in
+                let cols = try tableColumns(db: db, table: "prints", fingerprint: nil)
+                guard cols.contains("manage_id_jp") else { return nil }
+                let stmt = try sqlitePrepare(db: db, sql: "SELECT manage_id_jp FROM prints WHERE card_number=?")
+                defer { sqlite3_finalize(stmt) }
+                try sqliteBind([.text(cardNumber)], to: stmt)
+                guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+                if sqlite3_column_type(stmt, 0) == SQLITE_NULL { return nil }
+                return Int(sqliteColumnInt64(stmt, index: 0))
+            }
+        } catch {
+            return nil
+        }
+    }
+
     func loadMultiWordTags() -> [String] {
         do {
             return try withSQLite(path: paths.dbURL.path, readOnly: true) { db in

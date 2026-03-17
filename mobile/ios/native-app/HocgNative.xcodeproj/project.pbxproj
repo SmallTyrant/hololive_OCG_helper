@@ -17,6 +17,7 @@
 		BA14BD4451AECFAF68119078 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9603D1D04CD297198102AD25 /* Assets.xcassets */; };
 		CDDC674876F63A49F9F3007E /* HocgNativeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29C4641F9604D02DB2CFF94C /* HocgNativeApp.swift */; };
 		CDFB533A08933C799F1FEC93 /* HocgViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F007AFAF43817A0850C349D2 /* HocgViewModel.swift */; };
+		F374A035EBCE56F8F7A07BFB /* DeckCodeConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE8D38CD39E2A3250DBA8D9E /* DeckCodeConverter.swift */; };
 		FF3F0F509713C78AFA934B03 /* UpdateRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 291FF72E3F7A01E2500DC8BA /* UpdateRepository.swift */; };
 /* End PBXBuildFile section */
 
@@ -31,6 +32,7 @@
 		D305EF7964069DF9EF0FD66E /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		E493BBCC1ADAB6DE6855C75C /* DateParsers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateParsers.swift; sourceTree = "<group>"; };
 		E692FA0945DA2DFF8358D3BF /* SQLiteHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SQLiteHelpers.swift; sourceTree = "<group>"; };
+		EE8D38CD39E2A3250DBA8D9E /* DeckCodeConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckCodeConverter.swift; sourceTree = "<group>"; };
 		F007AFAF43817A0850C349D2 /* HocgViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HocgViewModel.swift; sourceTree = "<group>"; };
 		F120BAF9FA9219B23FB0DB24 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -60,6 +62,7 @@
 				D305EF7964069DF9EF0FD66E /* ContentView.swift */,
 				6E5FD97D93472DF615F79C98 /* DatabaseRepository.swift */,
 				E493BBCC1ADAB6DE6855C75C /* DateParsers.swift */,
+				EE8D38CD39E2A3250DBA8D9E /* DeckCodeConverter.swift */,
 				29C4641F9604D02DB2CFF94C /* HocgNativeApp.swift */,
 				F007AFAF43817A0850C349D2 /* HocgViewModel.swift */,
 				69F0C227FF764F76D70C93DA /* ImageRepository.swift */,
@@ -176,6 +179,7 @@
 				4C50D373A3C9ECC240A1C784 /* ContentView.swift in Sources */,
 				49B9EFA341BFDE4DE4FB73B7 /* DatabaseRepository.swift in Sources */,
 				873B97528ABEEC7AC7D983FE /* DateParsers.swift in Sources */,
+				F374A035EBCE56F8F7A07BFB /* DeckCodeConverter.swift in Sources */,
 				CDDC674876F63A49F9F3007E /* HocgNativeApp.swift in Sources */,
 				CDFB533A08933C799F1FEC93 /* HocgViewModel.swift in Sources */,
 				5A16BC42B9FD509785C01A0F /* ImageRepository.swift in Sources */,

@@ -436,6 +436,10 @@ final class HocgViewModel: ObservableObject {
         pushToast(dbMissingToast)
     }
 
+    func getManageIdJp(printId: Int64) -> Int? {
+        dbRepository.getManageIdJp(printId: printId)
+    }
+
     func searchDeckCards(_ query: String, limit: Int = 240) async -> [DeckCardCandidate] {
         await runIO {
             self.dbRepository.listDeckCards(query: query, limit: limit).map { row in

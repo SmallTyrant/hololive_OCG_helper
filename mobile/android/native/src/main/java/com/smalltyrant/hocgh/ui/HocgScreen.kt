@@ -100,6 +100,7 @@ import coil.ImageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
 import com.smalltyrant.hocgh.data.AppPaths
+import com.smalltyrant.hocgh.data.DeckCodeConverter
 import com.smalltyrant.hocgh.data.DeckStorage
 import com.smalltyrant.hocgh.data.DbRepository
 import com.smalltyrant.hocgh.model.DeckEntryRecord
@@ -255,6 +256,11 @@ private val DIGIT_TOKEN_PATTERN = Regex("^\\d{2,3}$")
 private enum class DetailTextLanguage {
     KOREAN,
     JAPANESE,
+}
+
+private enum class DeckImportMode(val label: String) {
+    HOLODUEL("홀로듀얼"),
+    BUSHIROAD("부시나비"),
 }
 
 private data class DeckEntryUi(
@@ -438,7 +444,14 @@ private suspend fun buildDeckExportBitmap(
 
     val oshiEntries = entries.filter { isOshi(it.card) }
     val yellEntries = entries.filter { !isOshi(it.card) && isYell(it.card) }
-    val mainEntries = entries.filter { !isOshi(it.card) && !isYell(it.card) }
+    // 오시 홀로멤 → 옐 → 홀로멤 → 서포트 순 정렬
+    fun mainSortOrder(card: DeckCardCandidate): Int {
+        val ct = card.cardType.lowercase()
+        return if (ct.contains("홀로멤") || ct.contains("holomem") || ct.contains("ホロメン")) 0 else 1
+    }
+    val mainEntries = entries
+        .filter { !isOshi(it.card) && !isYell(it.card) }
+        .sortedBy { mainSortOrder(it.card) }
 
     val mainColumns = 5
     val sideColumns = 2
@@ -779,6 +792,7 @@ fun HocgScreen(
     var renamingDeckTitle by remember { mutableStateOf("") }
     var showingDeckImportDialog by remember { mutableStateOf(false) }
     var deckImportText by remember { mutableStateOf("") }
+    var deckImportMode by remember { mutableStateOf(DeckImportMode.HOLODUEL) }
     val deckDraft = remember { mutableStateListOf<DeckEntryUi>() }
     val savedDecks = remember { mutableStateListOf<DeckUi>() }
     val imageLoader = remember(context) { ImageLoader(context) }
@@ -912,17 +926,42 @@ fun HocgScreen(
     if (showingDeckImportDialog) {
         AlertDialog(
             onDismissRequest = { showingDeckImportDialog = false },
-            title = { Text("덱 코드 가져오기") },
+            title = { Text("덱 가져오기") },
             text = {
-                OutlinedTextField(
-                    value = deckImportText,
-                    onValueChange = { deckImportText = it },
-                    label = { Text("덱 코드") },
-                    placeholder = { Text("클립보드 코드를 붙여넣어 주세요") },
-                    minLines = 10,
-                    maxLines = 14,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // 탭 선택
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        DeckImportMode.entries.forEach { mode ->
+                            ElevatedButton(
+                                onClick = { deckImportMode = mode },
+                                modifier = Modifier.weight(1f),
+                                colors = androidx.compose.material3.ButtonDefaults.elevatedButtonColors(
+                                    containerColor = if (deckImportMode == mode)
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    else
+                                        MaterialTheme.colorScheme.surface,
+                                ),
+                            ) { Text(mode.label) }
+                        }
+                    }
+                    Text(
+                        text = if (deckImportMode == DeckImportMode.HOLODUEL)
+                            "홀로듀얼 덱 코드(Base64)를 붙여넣어 주세요."
+                        else
+                            "부시나비 URL 또는 코드를 붙여넣어 주세요.\n예: https://decklog.bushiroad.com/view/6ADJR",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                    OutlinedTextField(
+                        value = deckImportText,
+                        onValueChange = { deckImportText = it },
+                        label = { Text(if (deckImportMode == DeckImportMode.HOLODUEL) "홀로듀얼 코드" else "부시나비 URL / 코드") },
+                        placeholder = { Text(if (deckImportMode == DeckImportMode.HOLODUEL) "Base64 코드를 붙여넣어 주세요" else "URL 또는 5자리 코드") },
+                        minLines = 4,
+                        maxLines = 8,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             },
             confirmButton = {
                 TextButton(
@@ -933,43 +972,78 @@ fun HocgScreen(
                             return@TextButton
                         }
                         showingDeckImportDialog = false
-                        scope.launch {
-                            val importedRecords = withContext(Dispatchers.IO) {
-                                runCatching { deckStorage.importText(raw) }.getOrElse { emptyList() }
+                        when (deckImportMode) {
+                            DeckImportMode.HOLODUEL -> scope.launch {
+                                // 1) HoloDuel Base64 시도
+                                val holoDuelDeck = withContext(Dispatchers.IO) {
+                                    DeckCodeConverter.importHoloDuel(raw)
+                                }
+                                if (holoDuelDeck != null) {
+                                    val allCards = viewModel.searchDeckCards("", limit = 5000)
+                                    val byNumber = allCards.associateBy { it.cardNumber.uppercase() }
+                                    val entries = mutableListOf<DeckEntryUi>()
+                                    byNumber[holoDuelDeck.oshiCardNumber.uppercase()]?.let {
+                                        entries += DeckEntryUi(it, 1, maxPerCard(it))
+                                    }
+                                    for ((cn, qty) in holoDuelDeck.deckEntries) {
+                                        byNumber[cn.uppercase()]?.let { entries += DeckEntryUi(it, qty, maxPerCard(it)) }
+                                    }
+                                    for ((cn, qty) in holoDuelDeck.cheerEntries) {
+                                        byNumber[cn.uppercase()]?.let { entries += DeckEntryUi(it, qty, maxPerCard(it)) }
+                                    }
+                                    if (entries.isEmpty()) {
+                                        snackbarHostState.showSnackbar("카드 정보를 찾을 수 없습니다.")
+                                    } else {
+                                        val deck = DeckUi(id = java.util.UUID.randomUUID().toString(), title = "가져온 덱", entries = entries, updatedAt = System.currentTimeMillis())
+                                        savedDecks.add(deck)
+                                        withContext(Dispatchers.IO) { deckStorage.saveLibrary(DeckLibraryRecord(decks = toDeckRecords(savedDecks))) }
+                                        deckImportText = ""
+                                        snackbarHostState.showSnackbar("홀로듀얼 덱 가져오기가 완료되었습니다.")
+                                    }
+                                    return@launch
+                                }
+                                // 2) 폴백: 기존 앱 JSON
+                                val importedRecords = withContext(Dispatchers.IO) {
+                                    runCatching { deckStorage.importText(raw) }.getOrElse { emptyList() }
+                                }
+                                if (importedRecords.isEmpty()) { snackbarHostState.showSnackbar("가져올 덱이 없습니다."); return@launch }
+                                val allCards = viewModel.searchDeckCards("", limit = 5000)
+                                val importedDecks = resolveDecksFromRecords(importedRecords, allCards)
+                                if (importedDecks.isEmpty()) { snackbarHostState.showSnackbar("가져온 코드에서 카드 정보를 찾을 수 없습니다."); return@launch }
+                                importedDecks.forEach { deck ->
+                                    val existing = savedDecks.indexOfFirst { it.id == deck.id }
+                                    if (existing >= 0) savedDecks[existing] = deck else savedDecks.add(deck)
+                                }
+                                withContext(Dispatchers.IO) { deckStorage.saveLibrary(DeckLibraryRecord(decks = toDeckRecords(savedDecks))) }
+                                deckImportText = ""
+                                snackbarHostState.showSnackbar("덱 가져오기가 완료되었습니다.")
                             }
-                            if (importedRecords.isEmpty()) {
-                                snackbarHostState.showSnackbar("가져올 덱이 없습니다.")
-                                return@launch
-                            }
-                            val allCards = viewModel.searchDeckCards("", limit = 5000)
-                            val importedDecks = resolveDecksFromRecords(importedRecords, allCards)
-                            if (importedDecks.isEmpty()) {
-                                snackbarHostState.showSnackbar("가져온 코드에서 카드 정보를 찾을 수 없습니다.")
-                                return@launch
-                            }
-                            importedDecks.forEach { deck ->
-                                val existing = savedDecks.indexOfFirst { it.id == deck.id }
-                                if (existing >= 0) {
-                                    savedDecks[existing] = deck
-                                } else {
+                            DeckImportMode.BUSHIROAD -> scope.launch {
+                                snackbarHostState.showSnackbar("부시나비에서 덱 정보를 불러오는 중...")
+                                runCatching {
+                                    val bushiDeck = DeckCodeConverter.fetchBushiDeck(raw)
+                                    val allCards = viewModel.searchDeckCards("", limit = 5000)
+                                    val byNumber = allCards.associateBy { it.cardNumber.uppercase() }
+                                    val entries = (bushiDeck.pList + bushiDeck.list + bushiDeck.subList).mapNotNull { bc ->
+                                        byNumber[bc.cardNumber.uppercase()]?.let { DeckEntryUi(it, bc.num, maxPerCard(it)) }
+                                    }
+                                    if (entries.isEmpty()) error("카드 정보를 찾을 수 없습니다.")
+                                    val title = bushiDeck.title.ifBlank { "부시나비 덱" }
+                                    val deck = DeckUi(id = java.util.UUID.randomUUID().toString(), title = title, entries = entries, updatedAt = System.currentTimeMillis())
                                     savedDecks.add(deck)
+                                    withContext(Dispatchers.IO) { deckStorage.saveLibrary(DeckLibraryRecord(decks = toDeckRecords(savedDecks))) }
+                                    deckImportText = ""
+                                    snackbarHostState.showSnackbar("부시나비 덱 가져오기가 완료되었습니다.")
+                                }.onFailure { e ->
+                                    snackbarHostState.showSnackbar("부시나비 불러오기 실패: ${e.message?.take(80)}")
                                 }
                             }
-                            withContext(Dispatchers.IO) {
-                                deckStorage.saveLibrary(DeckLibraryRecord(decks = toDeckRecords(savedDecks)))
-                            }
-                            deckImportText = ""
-                            snackbarHostState.showSnackbar("덱 코드 가져오기가 완료되었습니다.")
                         }
                     },
-                ) {
-                    Text("가져오기")
-                }
+                ) { Text("가져오기") }
             },
             dismissButton = {
-                TextButton(onClick = { showingDeckImportDialog = false }) {
-                    Text("취소")
-                }
+                TextButton(onClick = { showingDeckImportDialog = false }) { Text("취소") }
             },
         )
     }
@@ -1046,10 +1120,34 @@ fun HocgScreen(
                         showingDeckImportDialog = true
                     },
                     onExportCode = { deck ->
-                        val code = deckStorage.exportText(toDeckRecords(listOf(deck)))
-                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                        clipboard?.setPrimaryClip(ClipData.newPlainText("deck_code", code))
-                        scope.launch { snackbarHostState.showSnackbar("덱 코드가 클립보드에 복사되었습니다.") }
+                        val entries = deck.entries.map { Triple(it.card.cardNumber, it.qty, it.card) }
+                        val code = DeckCodeConverter.exportHoloDuel(entries)
+                        if (code == null) {
+                            scope.launch { snackbarHostState.showSnackbar("오시 카드가 없습니다. 덱을 확인해 주세요.") }
+                        } else {
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                            clipboard?.setPrimaryClip(ClipData.newPlainText("holoduel_deck_code", code))
+                            scope.launch { snackbarHostState.showSnackbar("홀로듀얼 코드가 클립보드에 복사되었습니다.") }
+                        }
+                    },
+                    onExportBushi = { deck ->
+                        scope.launch {
+                            snackbarHostState.showSnackbar("부시나비에 업로드 중...")
+                            val entries = deck.entries.map { Triple(it.card.cardNumber, it.qty, it.card) }
+                            runCatching {
+                                val dbRepo = viewModel.getDbRepository()
+                                val url = DeckCodeConverter.publishBushiDeck(
+                                    entries = entries,
+                                    title = deck.title,
+                                    manageIdLookup = { printId -> dbRepo.getManageIdJp(printId) },
+                                )
+                                val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                clipboard?.setPrimaryClip(ClipData.newPlainText("bushiroad_deck_url", url))
+                                snackbarHostState.showSnackbar("부시나비 URL이 클립보드에 복사되었습니다.")
+                            }.onFailure { e ->
+                                snackbarHostState.showSnackbar("부시나비 업로드 실패: ${e.message?.take(80)}")
+                            }
+                        }
                     },
                     onExportImage = { deck ->
                         scope.launch {
@@ -1207,6 +1305,7 @@ private fun DeckListScreen(
     onBack: () -> Unit,
     onImport: () -> Unit,
     onExportCode: (DeckUi) -> Unit,
+    onExportBushi: (DeckUi) -> Unit,
     onExportImage: (DeckUi) -> Unit,
     onAdd: () -> Unit,
     onEdit: (DeckUi) -> Unit,
@@ -1266,10 +1365,17 @@ private fun DeckListScreen(
                                     },
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("코드로 내보내기") },
+                                    text = { Text("홀로듀얼 코드로 내보내기") },
                                     onClick = {
                                         menuExpanded = false
                                         onExportCode(deck)
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("부시나비 코드로 내보내기") },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onExportBushi(deck)
                                     },
                                 )
                                 DropdownMenuItem(

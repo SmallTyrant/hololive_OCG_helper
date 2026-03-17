@@ -621,6 +621,26 @@ class DbRepository(private val paths: AppPaths) {
         }
     }
 
+    /** prints 테이블의 manage_id_jp 컬럼 값 반환 (부시나비 내보내기용) */
+    fun getManageIdJp(printId: Long): Int? {
+        return try {
+            openReadOnly().useDb { db ->
+                val cols = tableColumns(db, "prints", dbFingerprint())
+                if (!cols.contains("manage_id_jp")) return null
+                db.rawQuery(
+                    "SELECT manage_id_jp FROM prints WHERE print_id=?",
+                    arrayOf(printId.toString()),
+                ).useCursor { cursor ->
+                    if (!cursor.moveToFirst()) return@useCursor null
+                    if (cursor.isNull(0)) return@useCursor null
+                    cursor.getInt(0)
+                }
+            }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
     fun loadMultiWordTags(): List<String> {
         return try {
             openReadOnly().useDb { db ->
