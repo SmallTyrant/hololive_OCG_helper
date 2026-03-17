@@ -1,23 +1,100 @@
-# hololive_OCG_helper
+# hololive OCG Helper
 
-안드로이드, iOS, Window, MAC OS 지원하는 홀로라이브 OCG 카드효과 찾는 도우미입니다.
-현재 한국어만 지원합니다.
+홀로라이브 OCG 카드 정보를 빠르게 검색하고 카드 효과를 확인할 수 있는 멀티 플랫폼 앱입니다.
 
-# 사용방법
-1. 각 OS에서 설치를 진행합니다.
-1-1. 안드로이드 release > apk 설치
-1-2. iOS  https://testflight.apple.com/join/xfQ2hPbT 테스트플라이트 참여
-2. 실행 후 원하는 카드 번호를 검색하면 이미지와 카드 본문 번역된것이 보입니다.
+---
 
-# DB/CSV 변환
-- DB -> CSV 내보내기
-  - `python3 tools/export_db_to_csv.py --db data/hololive_ocg.sqlite --out-dir data/csv_dump`
-- CSV -> DB 가져오기
-  - `python3 tools/import_db_from_csv.py --csv-dir data/csv_dump --db data/hololive_from_csv.sqlite --overwrite-db`
+## 📌 Overview
+- Android / iOS / Windows / macOS 지원
+- 카드 번호 기반 검색
+- 카드 이미지 및 효과 텍스트 제공
+- 로컬 DB 기반 빠른 조회
+- JSON / 이미지 형태 덱 공유 지원
 
-`export_db_to_csv.py`는 테이블별 CSV와 `schema.sql`을 같이 생성하며,
-`import_db_from_csv.py`는 `schema.sql`이 있으면 자동으로 스키마를 복원한 뒤 CSV 데이터를 넣습니다.
+---
 
-# TO DO
-- 덱 제작 및 공유
-- 카드 신규 추가시 DB업데이트
+## 🎯 Problem
+- 카드 효과가 텍스트 형태로 제공되어 검색이 어려움
+- 공식 데이터 접근이 제한적
+- 반복적인 카드 확인 과정이 비효율적
+
+---
+
+## 💡 Solution
+- 크롤링을 통해 카드 데이터를 수집
+- 불규칙한 텍스트 데이터를 정제하여 DB 저장
+- 네이티브 앱으로 구현하여 사용자 경험 개선
+- GitHub 기반 DB 업데이트 방식으로 서버 없이 운영
+
+---
+
+## 🛠 Tech Stack
+- Python (크롤링 / 데이터 처리)
+- Playwright (크롤링 안정성 확보)
+- SQLite (로컬 DB)
+- Kotlin (Android)
+- Swift (iOS)
+
+---
+
+## ⚙️ Architecture
+크롤링 → 데이터 정제 → SQLite 저장 → 앱에서 조회
+
+---
+
+## 🔄 Data Pipeline
+1. 크롤링 데이터 수집
+2. 카드 효과 텍스트 정제
+3. DB 저장
+4. 앱에서 조회 및 표시
+5. DB 변경 시 GitHub 통해 업데이트
+
+---
+
+## 📱 Features
+- 카드 번호 검색
+- 카드 이미지 및 효과 확인
+- 덱 저장 (앱 내부)
+- JSON 기반 덱 공유
+- 이미지 형태 내보내기
+
+---
+
+## 🚀 Installation
+
+### Android
+- APK 설치
+
+### iOS
+- TestFlight 참여
+https://testflight.apple.com/join/xfQ2hPbT
+
+---
+
+## 📊 DB / CSV 변환
+
+### DB → CSV
+python3 tools/export_db_to_csv.py --db data/hololive_ocg.sqlite --out-dir data/csv_dump
+
+### CSV → DB
+python3 tools/import_db_from_csv.py --csv-dir data/csv_dump --db data/hololive_from_csv.sqlite --overwrite-db
+
+---
+
+## 🤔 Why No Server?
+- 정적인 카드 데이터 특성상 서버 필요성 낮음
+- GitHub 기반 DB 배포로 유지 비용 최소화
+- 앱에서 직접 DB 업데이트 가능
+
+---
+
+## 📌 Challenges
+- 카드 효과 텍스트 구조가 일정하지 않아 정제 작업이 어려움
+- 크롤링 대상 사이트의 DOM 변경 대응 필요
+
+---
+
+## 🔧 Future Work
+- 카드 이미지 선택 기능 추가
+- 자동 DB 업데이트 개선
+- 테스트 자동화 강화
