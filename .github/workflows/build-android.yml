@@ -103,6 +103,23 @@ jobs:
         run: |
           TAG_NAME="android-v${{ steps.build_number.outputs.version_name }}"
           echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+
+      - name: 릴리즈 노트 로드
+        id: release_notes
+        run: |
+          NOTES_FILE=".github/release-notes/android/${{ steps.build_number.outputs.version_name }}.md"
+          if [ ! -f "$NOTES_FILE" ]; then
+            echo "❌ 릴리즈 노트 파일이 없습니다: $NOTES_FILE"
+            echo "버전이 올라갈 때마다 .github/release-notes/android/<version>.md 파일을 추가하세요."
+            exit 1
+          fi
+
+          echo "notes_path=$NOTES_FILE" >> $GITHUB_OUTPUT
+          {
+            echo "body<<'EOF'"
+            cat "$NOTES_FILE"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
       
       - name: GitHub Release 생성 및 APK 업로드
         uses: softprops/action-gh-release@v1
@@ -117,7 +134,7 @@ jobs:
             **커밋**: ${{ github.sha }}
             
             ### 변경사항
-            ${{ github.event.head_commit.message }}
+            ${{ steps.release_notes.outputs.body }}
             
             ### 설치 방법
             1. APK 파일을 Android 기기에 다운로드
