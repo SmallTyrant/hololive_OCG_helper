@@ -3,6 +3,7 @@ package com.smalltyrant.hocgh.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ContentValues
+import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -975,7 +976,7 @@ fun HocgScreen(
                         text = if (deckImportMode == DeckImportMode.HOLODUEL)
                             "홀로듀얼 덱 코드(Base64)를 붙여넣어 주세요."
                         else
-                            "부시나비 URL 또는 코드를 붙여넣어 주세요.\n예: https://decklog.bushiroad.com/view/6ADJR",
+                            "부시나비 URL 또는 코드를 붙여넣어 주세요.\n예: 6ADJR (URL 전체 입력 불필요)",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.outline,
                     )
@@ -983,11 +984,93 @@ fun HocgScreen(
                         value = deckImportText,
                         onValueChange = { deckImportText = it },
                         label = { Text(if (deckImportMode == DeckImportMode.HOLODUEL) "홀로듀얼 코드" else "부시나비 URL / 코드") },
-                        placeholder = { Text(if (deckImportMode == DeckImportMode.HOLODUEL) "Base64 코드를 붙여넣어 주세요" else "URL 또는 5자리 코드") },
+                        placeholder = { Text(if (deckImportMode == DeckImportMode.HOLODUEL) "Base64 코드를 붙여넣어 주세요" else "예: 6ADJR") },
                         minLines = 4,
                         maxLines = 8,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    ElevatedButton(
+                        onClick = {
+                            val raw = deckImportText.trim()
+                            if (raw.isEmpty()) {
+                                scope.launch { snackbarHostState.showSnackbar("변환할 코드가 비어 있습니다.") }
+                                return@ElevatedButton
+                            }
+                            scope.launch {
+                                when (deckImportMode) {
+                                    DeckImportMode.HOLODUEL -> {
+                                        snackbarHostState.showSnackbar("부시나비 코드로 변환 중...")
+                                        val holoDuelDeck = withContext(Dispatchers.IO) {
+                                            DeckCodeConverter.importHoloDuel(raw)
+                                        }
+                                        if (holoDuelDeck == null) {
+                                            snackbarHostState.showSnackbar("홀로듀얼 코드 형식이 올바르지 않습니다.")
+                                            return@launch
+                                        }
+                                        val allCards = viewModel.searchDeckCards("", limit = 5000)
+                                        val byNumber = allCards.associateBy { it.cardNumber.uppercase() }
+                                        val entries = mutableListOf<Triple<String, Int, DeckCardCandidate>>()
+                                        byNumber[holoDuelDeck.oshiCardNumber.uppercase()]?.let {
+                                            entries += Triple(it.cardNumber, 1, it)
+                                        }
+                                        for ((cn, qty) in holoDuelDeck.deckEntries) {
+                                            byNumber[cn.uppercase()]?.let { entries += Triple(it.cardNumber, qty, it) }
+                                        }
+                                        for ((cn, qty) in holoDuelDeck.cheerEntries) {
+                                            byNumber[cn.uppercase()]?.let { entries += Triple(it.cardNumber, qty, it) }
+                                        }
+                                        if (entries.isEmpty()) {
+                                            snackbarHostState.showSnackbar("카드 정보를 찾을 수 없습니다.")
+                                            return@launch
+                                        }
+                                        runCatching {
+                                            val dbRepo = viewModel.getDbRepository()
+                                            DeckCodeConverter.publishBushiDeck(
+                                                entries = entries,
+                                                title = "변환 덱",
+                                                manageIdLookup = { printId -> dbRepo.getManageIdJp(printId) },
+                                            )
+                                        }.onSuccess { url ->
+                                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                            clipboard?.setPrimaryClip(ClipData.newPlainText("bushiroad_deck_url", url))
+                                            deckImportText = ""
+                                            showingDeckImportDialog = false
+                                            snackbarHostState.showSnackbar("부시나비 URL이 클립보드에 복사되었습니다.")
+                                        }.onFailure { e ->
+                                            snackbarHostState.showSnackbar("변환 실패: ${e.message?.take(80)}")
+                                        }
+                                    }
+                                    DeckImportMode.BUSHIROAD -> {
+                                        snackbarHostState.showSnackbar("홀로듀얼 코드로 변환 중...")
+                                        runCatching {
+                                            val bushiDeck = DeckCodeConverter.fetchBushiDeck(raw)
+                                            val allCards = viewModel.searchDeckCards("", limit = 5000)
+                                            val byNumber = allCards.associateBy { it.cardNumber.uppercase() }
+                                            val entries = (bushiDeck.pList + bushiDeck.list + bushiDeck.subList).mapNotNull { bc ->
+                                                byNumber[bc.cardNumber.uppercase()]?.let { Triple(it.cardNumber, bc.num, it) }
+                                            }
+                                            DeckCodeConverter.exportHoloDuel(entries)
+                                        }.onSuccess { code ->
+                                            if (code.isNullOrBlank()) {
+                                                snackbarHostState.showSnackbar("변환 실패: 오시 카드가 없습니다.")
+                                            } else {
+                                                val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                                clipboard?.setPrimaryClip(ClipData.newPlainText("holoduel_deck_code", code))
+                                                deckImportText = ""
+                                                showingDeckImportDialog = false
+                                                snackbarHostState.showSnackbar("홀로듀얼 코드가 클립보드에 복사되었습니다.")
+                                            }
+                                        }.onFailure { e ->
+                                            snackbarHostState.showSnackbar("변환 실패: ${e.message?.take(80)}")
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (deckImportMode == DeckImportMode.HOLODUEL) "부시나비 코드로 변환" else "홀로듀얼 코드로 변환")
+                    }
                 }
             },
             confirmButton = {
@@ -1169,6 +1252,23 @@ fun HocgScreen(
                             selectedLanguage = preferredLanguage,
                             onSelected = onPreferredLanguageChange,
                         )
+                    }
+                    HorizontalDivider()
+                    Text("About", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "Deck conversion uses hocg-deck-convert. Licensed under MIT.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                    TextButton(onClick = {
+                        openExternalUrl(context, "https://github.com/Qrimpuff/hocg-deck-convert")
+                    }) {
+                        Text("hocg-deck-convert GitHub")
+                    }
+                    TextButton(onClick = {
+                        openExternalUrl(context, "https://github.com/Qrimpuff/hocg-deck-convert/blob/main/LICENSE")
+                    }) {
+                        Text("MIT License")
                     }
                 }
             }
@@ -1477,7 +1577,7 @@ private fun DeckListScreen(
                     ) {
                         deck.entries.take(8).forEach { entry ->
                             DeckThumbnail(
-                                imageUrl = entry.card.imageUrl,
+                                imageUrl = entry.effectiveImageUrl,
                                 qty = entry.qty,
                                 width = 42.dp,
                                 height = 58.dp,
@@ -2707,6 +2807,14 @@ private fun protectMultiWordTags(text: String, tags: List<String>): String {
 
 private fun restoreMultiWordTags(text: String): String {
     return text.replace(MW_PLACEHOLDER, " ")
+}
+
+private fun openExternalUrl(context: android.content.Context, url: String) {
+    val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return
+    val intent = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching {
+        context.startActivity(intent)
+    }
 }
 
 /**

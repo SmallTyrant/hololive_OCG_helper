@@ -112,22 +112,26 @@ object DeckCodeConverter {
 
     /** DeckLog 코드 또는 URL → BushiDeck  (IO 디스패처에서 실행) */
     suspend fun fetchBushiDeck(codeOrURL: String): BushiDeck = withContext(Dispatchers.IO) {
-        val trimmed = codeOrURL.trim()
-        val (baseUrl, code) = parseBushiUrl(trimmed)
-
-        val normalizedCode = code.lowercase()
+        val normalizedCode = normalizeBushiCode(codeOrURL)
         require(normalizedCode.isNotEmpty() && normalizedCode.all { it.isLetterOrDigit() }) {
             "올바르지 않은 부시나비 코드입니다."
         }
 
-        val apiUrl = URL("$baseUrl/system/app/api/view/$normalizedCode")
+        val proxyBaseUrl = "https://hocg-deck-convert-api.onrender.com"
+        val apiUrl = URL("$proxyBaseUrl/view-deck")
         val conn = apiUrl.openConnection() as HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.doOutput = true
+        conn.setRequestProperty("Content-Type", "application/json")
         conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
-        conn.setRequestProperty("Accept", "application/json, */*")
-        conn.setRequestProperty("Referer", "$baseUrl/view/$normalizedCode")
-        conn.setRequestProperty("Origin", baseUrl)
         conn.connectTimeout = 15000
         conn.readTimeout    = 20000
+
+        val body = JSONObject().apply {
+            put("game_title_id", 9)
+            put("code", normalizedCode)
+        }.toString()
+        OutputStreamWriter(conn.outputStream).use { it.write(body) }
 
         val text = conn.inputStream.bufferedReader().readText()
         conn.disconnect()
@@ -169,15 +173,14 @@ object DeckCodeConverter {
             put("sub_list", subList)
         }.toString()
 
-        val baseUrl = "https://decklog.bushiroad.com"
-        val apiUrl  = URL("$baseUrl/system/app/api/deck/publish")
+        val deckLogBaseUrl = "https://decklog.bushiroad.com"
+        val proxyBaseUrl = "https://hocg-deck-convert-api.onrender.com"
+        val apiUrl  = URL("$proxyBaseUrl/publish-deck")
         val conn = apiUrl.openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
         conn.doOutput = true
         conn.setRequestProperty("Content-Type", "application/json")
         conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
-        conn.setRequestProperty("Referer", "$baseUrl/")
-        conn.setRequestProperty("Origin", baseUrl)
         conn.connectTimeout = 15000
         conn.readTimeout    = 20000
 
@@ -190,21 +193,29 @@ object DeckCodeConverter {
         val deckId = json.optString("deck_id", "").takeIf { it.isNotEmpty() }
             ?: error("부시나비 업로드 실패: ${respText.take(200)}")
 
-        "$baseUrl/view/$deckId"
+        "$deckLogBaseUrl/view/$deckId"
     }
 
     // ─── private helpers ───
 
-    private fun parseBushiUrl(input: String): Pair<String, String> {
-        val lower = input.lowercase()
-        return when {
+    fun normalizeBushiCode(rawInput: String): String {
+        val trimmed = rawInput.trim()
+        if (trimmed.isEmpty()) return ""
+
+        val lower = trimmed.lowercase()
+        val extracted = when {
+            lower.startsWith("https://decklog-en.bushiroad.com/ja/view/") ->
+                trimmed.drop("https://decklog-en.bushiroad.com/ja/view/".length)
             lower.startsWith("https://decklog-en.bushiroad.com/view/") ->
-                "https://decklog-en.bushiroad.com" to input.drop("https://decklog-en.bushiroad.com/view/".length)
+                trimmed.drop("https://decklog-en.bushiroad.com/view/".length)
             lower.startsWith("https://decklog.bushiroad.com/view/") ->
-                "https://decklog.bushiroad.com" to input.drop("https://decklog.bushiroad.com/view/".length)
-            else ->
-                "https://decklog.bushiroad.com" to input
+                trimmed.drop("https://decklog.bushiroad.com/view/".length)
+            else -> trimmed
         }
+
+        val withoutQuery = extracted.substringBefore('?')
+        val withoutHash = withoutQuery.substringBefore('#')
+        return withoutHash.trim().trim('/').lowercase()
     }
 
     private fun parseBushiResponse(text: String, code: String): BushiDeck {

@@ -600,6 +600,108 @@ struct ContentView: View {
         }
     }
 
+    private func convertDeckCodeFromText() {
+        let raw = deckImportText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else {
+            showDeckToast("변환할 코드가 비어 있습니다.")
+            return
+        }
+
+        Task {
+            switch deckImportMode {
+            case .holoDuel:
+                await convertHoloDuelToBushiroad(raw)
+            case .bushiroad:
+                await convertBushiroadToHoloDuel(raw)
+            }
+        }
+    }
+
+    private func convertHoloDuelToBushiroad(_ raw: String) async {
+        guard let holoDuelDeck = DeckCodeConverter.importHoloDuel(raw) else {
+            await MainActor.run {
+                showDeckToast("홀로듀얼 코드 형식이 올바르지 않습니다.")
+            }
+            return
+        }
+
+        let allCards = await viewModel.searchDeckCards("", limit: 5000)
+        let byCardNumber = Dictionary(uniqueKeysWithValues: allCards.map { ($0.cardNumber.uppercased(), $0) })
+
+        var entries: [(cardNumber: String, qty: Int, card: DeckCardCandidate)] = []
+        if let card = byCardNumber[holoDuelDeck.oshiCardNumber.uppercased()] {
+            entries.append((card.cardNumber, 1, card))
+        }
+        for (cn, qty) in holoDuelDeck.deckEntries {
+            if let card = byCardNumber[cn.uppercased()] {
+                entries.append((card.cardNumber, qty, card))
+            }
+        }
+        for (cn, qty) in holoDuelDeck.cheerEntries {
+            if let card = byCardNumber[cn.uppercased()] {
+                entries.append((card.cardNumber, qty, card))
+            }
+        }
+
+        guard !entries.isEmpty else {
+            await MainActor.run {
+                showDeckToast("카드 정보를 찾을 수 없습니다.")
+            }
+            return
+        }
+
+        await MainActor.run { showDeckToast("부시나비 코드로 변환 중...") }
+        do {
+            let url = try await DeckCodeConverter.publishBushiDeck(
+                entries: entries,
+                title: "변환 덱",
+                manageIdLookup: { printId in viewModel.getManageIdJp(printId: printId) }
+            )
+            await MainActor.run {
+                UIPasteboard.general.string = url
+                showDeckToast("부시나비 URL이 클립보드에 복사되었습니다.")
+                showingDeckImportSheet = false
+                deckImportText = ""
+            }
+        } catch {
+            await MainActor.run {
+                showDeckToast("변환 실패: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func convertBushiroadToHoloDuel(_ raw: String) async {
+        await MainActor.run { showDeckToast("홀로듀얼 코드로 변환 중...") }
+        do {
+            let bushiDeck = try await DeckCodeConverter.fetchBushiDeck(codeOrURL: raw)
+            let allCards = await viewModel.searchDeckCards("", limit: 5000)
+            let byCardNumber = Dictionary(uniqueKeysWithValues: allCards.map { ($0.cardNumber.uppercased(), $0) })
+            let entries: [(cardNumber: String, qty: Int, card: DeckCardCandidate)] =
+                (bushiDeck.pList + bushiDeck.list + bushiDeck.subList).compactMap { bc in
+                    guard let card = byCardNumber[bc.cardNumber.uppercased()] else { return nil }
+                    return (card.cardNumber, bc.num, card)
+                }
+
+            guard let code = DeckCodeConverter.exportHoloDuel(entries: entries) else {
+                await MainActor.run {
+                    showDeckToast("변환 실패: 오시 카드가 없습니다.")
+                }
+                return
+            }
+
+            await MainActor.run {
+                UIPasteboard.general.string = code
+                showDeckToast("홀로듀얼 코드가 클립보드에 복사되었습니다.")
+                showingDeckImportSheet = false
+                deckImportText = ""
+            }
+        } catch {
+            await MainActor.run {
+                showDeckToast("변환 실패: \(error.localizedDescription)")
+            }
+        }
+    }
+
     private func mergeHoloDuelDeck(_ holoDuelDeck: DeckCodeConverter.HoloDuelDeck) async -> Bool {
         let allCards = await viewModel.searchDeckCards("", limit: 5000)
         let byCardNumber = Dictionary(uniqueKeysWithValues: allCards.map { ($0.cardNumber.uppercased(), $0) })
@@ -1135,7 +1237,7 @@ struct ContentView: View {
 
                         Text(deckImportMode == .holoDuel
                              ? "홀로듀얼 덱 코드(Base64)를 붙여넣어 주세요."
-                             : "부시나비 URL 또는 코드를 붙여넣어 주세요.\n예: https://decklog.bushiroad.com/view/6ADJR")
+                             : "부시나비 URL 또는 코드를 붙여넣어 주세요.\n예: 6ADJR (URL 전체 입력 불필요)")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
 
@@ -1147,6 +1249,11 @@ struct ContentView: View {
                                 RoundedRectangle(cornerRadius: 8)
                                     .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
                             )
+
+                        Button(deckImportMode == .holoDuel ? "부시나비 코드로 변환" : "홀로듀얼 코드로 변환") {
+                            convertDeckCodeFromText()
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
                     .padding(14)
                     .navigationTitle("덱 가져오기")
@@ -2541,6 +2648,16 @@ private struct MenuSheet: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.inline)
+                }
+
+                Section("About") {
+                    Text("Deck conversion uses hocg-deck-convert.")
+                        .font(.footnote)
+                    Text("Licensed under MIT.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                    Link("hocg-deck-convert GitHub", destination: URL(string: "https://github.com/Qrimpuff/hocg-deck-convert")!)
+                    Link("MIT License", destination: URL(string: "https://github.com/Qrimpuff/hocg-deck-convert/blob/main/LICENSE")!)
                 }
             }
             .navigationTitle("메뉴")

@@ -114,22 +114,23 @@ enum DeckCodeConverter {
     // MARK: - DeckLog Fetch (import)
 
     static func fetchBushiDeck(codeOrURL: String) async throws -> BushiDeck {
-        let trimmed = codeOrURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        let (baseURL, code) = parseBushiURL(trimmed)
-
-        // code 유효성 검사 (소문자+숫자)
-        let normalizedCode = code.lowercased()
+        let normalizedCode = normalizeBushiCode(codeOrURL)
         guard !normalizedCode.isEmpty,
               normalizedCode.allSatisfy({ $0.isLetter || $0.isNumber }) else {
             throw DeckCodeError.parseError("올바르지 않은 부시나비 코드입니다.")
         }
 
-        let apiURL = URL(string: "\(baseURL)/system/app/api/view/\(normalizedCode)")!
+        let proxyBaseURL = "https://hocg-deck-convert-api.onrender.com"
+        let apiURL = URL(string: "\(proxyBaseURL)/view-deck")!
         var req = URLRequest(url: apiURL)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
-        req.setValue("application/json, */*", forHTTPHeaderField: "Accept")
-        req.setValue("\(baseURL)/view/\(normalizedCode)", forHTTPHeaderField: "Referer")
-        req.setValue(baseURL, forHTTPHeaderField: "Origin")
+        let requestBody: [String: Any] = [
+            "game_title_id": 9,
+            "code": normalizedCode,
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
 
         let (data, resp) = try await URLSession.shared.data(for: req)
         let statusCode = (resp as? HTTPURLResponse)?.statusCode ?? 0
@@ -174,14 +175,13 @@ enum DeckCodeConverter {
             "sub_list": cheerList,
         ]
 
-        let baseURL = "https://decklog.bushiroad.com"
-        let apiURL = URL(string: "\(baseURL)/system/app/api/deck/publish")!
+        let deckLogBaseURL = "https://decklog.bushiroad.com"
+        let proxyBaseURL = "https://hocg-deck-convert-api.onrender.com"
+        let apiURL = URL(string: "\(proxyBaseURL)/publish-deck")!
         var req = URLRequest(url: apiURL)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
-        req.setValue("\(baseURL)/", forHTTPHeaderField: "Referer")
-        req.setValue(baseURL, forHTTPHeaderField: "Origin")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, resp) = try await URLSession.shared.data(for: req)
@@ -196,22 +196,30 @@ enum DeckCodeConverter {
             throw DeckCodeError.publishFailed(raw.prefix(120).description)
         }
 
-        return "\(baseURL)/view/\(deckId)"
+        return "\(deckLogBaseURL)/view/\(deckId)"
     }
 
     // MARK: - Private helpers
 
-    private static func parseBushiURL(_ input: String) -> (base: String, code: String) {
-        let lower = input.lowercased()
-        if lower.hasPrefix("https://decklog-en.bushiroad.com/view/") {
-            return ("https://decklog-en.bushiroad.com",
-                    String(input.dropFirst("https://decklog-en.bushiroad.com/view/".count)))
+    static func normalizeBushiCode(_ rawInput: String) -> String {
+        let trimmed = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        let lower = trimmed.lowercased()
+
+        let extracted: String
+        if lower.hasPrefix("https://decklog-en.bushiroad.com/ja/view/") {
+            extracted = String(trimmed.dropFirst("https://decklog-en.bushiroad.com/ja/view/".count))
+        } else if lower.hasPrefix("https://decklog-en.bushiroad.com/view/") {
+            extracted = String(trimmed.dropFirst("https://decklog-en.bushiroad.com/view/".count))
+        } else if lower.hasPrefix("https://decklog.bushiroad.com/view/") {
+            extracted = String(trimmed.dropFirst("https://decklog.bushiroad.com/view/".count))
+        } else {
+            extracted = trimmed
         }
-        if lower.hasPrefix("https://decklog.bushiroad.com/view/") {
-            return ("https://decklog.bushiroad.com",
-                    String(input.dropFirst("https://decklog.bushiroad.com/view/".count)))
-        }
-        return ("https://decklog.bushiroad.com", input)
+
+        let withoutQuery = extracted.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? extracted
+        let withoutHash = withoutQuery.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? withoutQuery
+        return withoutHash.trimmingCharacters(in: CharacterSet(charactersIn: "/").union(.whitespacesAndNewlines)).lowercased()
     }
 
     private static func parseBushiResponse(data: Data, code: String) throws -> BushiDeck {
