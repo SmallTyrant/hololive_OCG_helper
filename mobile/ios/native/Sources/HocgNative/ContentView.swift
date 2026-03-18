@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import Foundation
 import Photos
+import UniformTypeIdentifiers
 
 private let sectionLabels: [String] = [
     "SP 오시 스킬",
@@ -206,6 +207,8 @@ struct ContentView: View {
     @State private var showingDeckImportSheet = false
     @State private var deckImportText = ""
     @State private var deckImportMode: DeckImportMode = .holoDuel
+    @State private var showingDeckJsonFileImporter = false
+    @State private var exportFileItem: ExportFileItem?
 
     private enum DeckImportMode: String, CaseIterable {
         case holoDuel = "홀로듀얼"
@@ -279,6 +282,11 @@ struct ContentView: View {
         var id: UUID
         var title: String
         var entries: [DeckEntryState]
+    }
+
+    private struct ExportFileItem: Identifiable {
+        let id = UUID()
+        let url: URL
     }
 
     private func isOshi(_ card: DeckCardCandidate) -> Bool {
@@ -548,6 +556,27 @@ struct ContentView: View {
             importHoloDeltaCode(raw)
         case .bushiroad:
             importBushiroadCode(raw)
+        }
+    }
+
+    private func importDeckFromJsonFile(_ url: URL) {
+        let canAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if canAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        do {
+            let data = try Data(contentsOf: url)
+            guard let text = String(data: data, encoding: .utf8) else {
+                showDeckToast("JSON 파일 인코딩을 읽을 수 없습니다.")
+                return
+            }
+            deckImportText = text
+            importDeckLibraryFromText()
+        } catch {
+            showDeckToast("JSON 파일을 읽지 못했습니다.")
         }
     }
 
@@ -901,8 +930,26 @@ struct ContentView: View {
             showDeckToast("오시 카드가 없습니다. 덱을 확인해 주세요.")
             return
         }
-        UIPasteboard.general.string = code
-        showDeckToast("홀로델타 코드가 클립보드에 복사되었습니다.")
+        let safeName = sanitizeDeckFilename(deck.title)
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("deck_\(safeName)_\(Int(Date().timeIntervalSince1970)).json")
+
+        do {
+            try code.write(to: fileURL, atomically: true, encoding: .utf8)
+            exportFileItem = ExportFileItem(url: fileURL)
+            showDeckToast("홀로델타 .json 파일 저장 위치를 선택해 주세요.")
+        } catch {
+            showDeckToast("홀로델타 .json 파일 생성에 실패했습니다.")
+        }
+    }
+
+    private func sanitizeDeckFilename(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "deck" }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-가-힣"))
+        let mapped = trimmed.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" }
+        let value = String(mapped)
+        return value.isEmpty ? "deck" : value
     }
 
     // MARK: - 부시나비 코드 내보내기 (비동기, DeckLog 업로드)
@@ -1395,6 +1442,13 @@ struct ContentView: View {
                                     .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
                             )
 
+                        if deckImportMode == .holoDelta {
+                            Button("홀로델타 JSON 파일 선택") {
+                                showingDeckJsonFileImporter = true
+                            }
+                            .buttonStyle(.bordered)
+                        }
+
                         Button(
                             deckImportMode == .holoDuel
                             ? "홀로델타 코드로 변환"
@@ -1421,6 +1475,23 @@ struct ContentView: View {
                             }
                         }
                     }
+                }
+            }
+            .sheet(item: $exportFileItem) { item in
+                ActivityShareSheet(activityItems: [item.url])
+            }
+            .fileImporter(
+                isPresented: $showingDeckJsonFileImporter,
+                allowedContentTypes: [.json],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    if let url = urls.first {
+                        importDeckFromJsonFile(url)
+                    }
+                case .failure:
+                    showDeckToast("JSON 파일 선택에 실패했습니다.")
                 }
             }
             // 레어리티 선택 시트
@@ -2500,7 +2571,7 @@ struct ContentView: View {
                                 Button("홀로듀얼 코드") {
                                     exportHoloDuelCodeToClipboard(deck)
                                 }
-                                Button("홀로델타 코드") {
+                                Button("홀로델타 .json 파일") {
                                     exportHoloDeltaCodeToClipboard(deck)
                                 }
                                 Button("부시나비 코드") {
@@ -2908,4 +2979,14 @@ private struct RarityOptionCell: View {
         }
         .buttonStyle(.plain)
     }
+}
+
+private struct ActivityShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

@@ -15,6 +15,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -750,6 +752,57 @@ private suspend fun saveDeckBitmapToGallery(
     }
 }
 
+private suspend fun saveDeckJsonToDownloads(
+    context: android.content.Context,
+    deckTitle: String,
+    jsonText: String,
+): Boolean = withContext(Dispatchers.IO) {
+    val resolver = context.contentResolver
+    val safeName = sanitizeDeckFilename(deckTitle)
+    val fileName = "deck_${safeName}_${System.currentTimeMillis()}.json"
+
+    val values = ContentValues().apply {
+        put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+        put(MediaStore.Downloads.MIME_TYPE, "application/json")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+    }
+
+    val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+    } else {
+        MediaStore.Downloads.EXTERNAL_CONTENT_URI
+    }
+
+    var savedUri: Uri? = null
+    runCatching {
+        savedUri = resolver.insert(collection, values) ?: error("다운로드 저장 URI 생성에 실패했습니다.")
+        resolver.openOutputStream(savedUri!!)?.use { stream ->
+            stream.write(jsonText.toByteArray(Charsets.UTF_8))
+            stream.flush()
+        } ?: error("다운로드 출력 스트림 생성에 실패했습니다.")
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val publish = ContentValues().apply {
+                put(MediaStore.Downloads.IS_PENDING, 0)
+            }
+            resolver.update(savedUri!!, publish, null, null)
+        }
+        true
+    }.getOrElse {
+        savedUri?.let { resolver.delete(it, null, null) }
+        false
+    }
+}
+
+private fun readTextFromUri(context: android.content.Context, uri: Uri): String? {
+    return runCatching {
+        context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+    }.getOrNull()
+}
+
 @Composable
 private fun DeckThumbnail(
     imageUrl: String,
@@ -825,6 +878,85 @@ fun HocgScreen(
     val deckDraft = remember { mutableStateListOf<DeckEntryUi>() }
     val savedDecks = remember { mutableStateListOf<DeckUi>() }
     val imageLoader = remember(context) { ImageLoader(context) }
+    val jsonFilePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val raw = withContext(Dispatchers.IO) { readTextFromUri(context, uri) }
+            if (raw.isNullOrBlank()) {
+                snackbarHostState.showSnackbar("JSON 파일을 읽지 못했습니다.")
+                return@launch
+            }
+            deckImportText = raw
+            if (deckImportMode != DeckImportMode.HOLODELTA) {
+                snackbarHostState.showSnackbar("JSON 파일을 불러왔습니다. 가져오기 방식을 홀로델타로 선택해 주세요.")
+                return@launch
+            }
+
+            runCatching {
+                val holoDeltaDeck = DeckCodeConverter.importHoloDelta(raw)
+                    ?: error("홀로델타 코드 형식이 올바르지 않습니다.")
+                val allCards = viewModel.searchDeckCards("", limit = 5000)
+                val byNumber = allCards.associateBy { it.cardNumber.uppercase() }
+
+                fun selectedRarity(card: DeckCardCandidate, artIndex: Int): String? {
+                    if (artIndex < 0 || artIndex >= card.illustrations.size) return null
+                    val rarity = card.illustrations[artIndex].rarity
+                    return if (card.selectableIllustrations.any { it.rarity == rarity }) rarity else null
+                }
+
+                val entries = mutableListOf<DeckEntryUi>()
+                byNumber[holoDeltaDeck.oshiCardNumber.uppercase()]?.let {
+                    entries += DeckEntryUi(
+                        card = it,
+                        qty = 1,
+                        maxPerCard = maxPerCard(it),
+                        selectedRarity = selectedRarity(it, holoDeltaDeck.oshiArtIndex),
+                    )
+                }
+                holoDeltaDeck.deckEntries.forEach { row ->
+                    byNumber[row.cardNumber.uppercase()]?.let {
+                        entries += DeckEntryUi(
+                            card = it,
+                            qty = row.qty,
+                            maxPerCard = maxPerCard(it),
+                            selectedRarity = selectedRarity(it, row.artIndex),
+                        )
+                    }
+                }
+                holoDeltaDeck.cheerEntries.forEach { row ->
+                    byNumber[row.cardNumber.uppercase()]?.let {
+                        entries += DeckEntryUi(
+                            card = it,
+                            qty = row.qty,
+                            maxPerCard = maxPerCard(it),
+                            selectedRarity = selectedRarity(it, row.artIndex),
+                        )
+                    }
+                }
+
+                if (entries.isEmpty()) error("카드 정보를 찾을 수 없습니다.")
+                val title = holoDeltaDeck.deckName?.ifBlank { "홀로델타 덱" } ?: "홀로델타 덱"
+                val deck = DeckUi(
+                    id = java.util.UUID.randomUUID().toString(),
+                    title = title,
+                    entries = entries,
+                    updatedAt = System.currentTimeMillis(),
+                )
+                savedDecks.add(deck)
+                withContext(Dispatchers.IO) {
+                    deckStorage.saveLibrary(DeckLibraryRecord(decks = toDeckRecords(savedDecks)))
+                }
+                deckImportText = ""
+                showingDeckImportDialog = false
+            }.onSuccess {
+                snackbarHostState.showSnackbar("홀로델타 JSON 덱 가져오기가 완료되었습니다.")
+            }.onFailure { e ->
+                snackbarHostState.showSnackbar("홀로델타 불러오기 실패: ${e.message?.take(80)}")
+            }
+        }
+    }
 
     val openDeckBuilder: () -> Unit = {
         showDeckList = false
@@ -1007,6 +1139,14 @@ fun HocgScreen(
                         maxLines = 8,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    if (deckImportMode == DeckImportMode.HOLODELTA) {
+                        TextButton(
+                            onClick = { jsonFilePicker.launch(arrayOf("application/json", "text/json", "text/plain")) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("홀로델타 JSON 파일 선택")
+                        }
+                    }
                     ElevatedButton(
                         onClick = {
                             val raw = deckImportText.trim()
@@ -1422,14 +1562,23 @@ fun HocgScreen(
                         }
                     },
                     onExportDelta = { deck ->
-                        val entries = deck.entries.map { Triple(it.card.cardNumber, it.qty, it.card) }
-                        val code = DeckCodeConverter.exportHoloDelta(entries, title = deck.title)
-                        if (code.isNullOrBlank()) {
-                            scope.launch { snackbarHostState.showSnackbar("오시 카드가 없습니다. 덱을 확인해 주세요.") }
-                        } else {
-                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                            clipboard?.setPrimaryClip(ClipData.newPlainText("holodelta_deck_code", code))
-                            scope.launch { snackbarHostState.showSnackbar("홀로델타 코드가 클립보드에 복사되었습니다.") }
+                        scope.launch {
+                            val entries = deck.entries.map { Triple(it.card.cardNumber, it.qty, it.card) }
+                            val code = DeckCodeConverter.exportHoloDelta(entries, title = deck.title)
+                            if (code.isNullOrBlank()) {
+                                snackbarHostState.showSnackbar("오시 카드가 없습니다. 덱을 확인해 주세요.")
+                            } else {
+                                val ok = saveDeckJsonToDownloads(
+                                    context = context,
+                                    deckTitle = deck.title,
+                                    jsonText = code,
+                                )
+                                if (ok) {
+                                    snackbarHostState.showSnackbar("홀로델타 .json 파일을 Downloads에 저장했습니다.")
+                                } else {
+                                    snackbarHostState.showSnackbar("홀로델타 .json 파일 저장에 실패했습니다.")
+                                }
+                            }
                         }
                     },
                     onExportBushi = { deck ->
@@ -1682,7 +1831,7 @@ private fun DeckListScreen(
                                     },
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("홀로델타 코드로 내보내기") },
+                                    text = { Text("홀로델타 .json 파일로 내보내기") },
                                     onClick = {
                                         menuExpanded = false
                                         onExportDelta(deck)
