@@ -91,7 +91,7 @@ def apply_inferred_urls(conn: sqlite3.Connection, missing: Iterable[MissingIllus
     return len(updates), updates
 
 
-def build_probe_candidates(card_number: str, rarity: str) -> list[str]:
+def build_probe_candidates(card_number: str, rarity: str, ext_candidates: list[str], promo_suffix_max: int) -> list[str]:
     m = CARD_SET_RE.match(card_number)
     set_code = m.group(1) if m else ""
     folders: list[str] = []
@@ -101,22 +101,30 @@ def build_probe_candidates(card_number: str, rarity: str) -> list[str]:
         folders.append("hPR")
 
     candidates: list[str] = []
+    exts = ext_candidates
     for folder in folders:
-        candidates.append(f"{BASE_URL}/wp-content/images/cardlist/{folder}/{card_number}_{rarity}.png")
+        for ext in exts:
+            candidates.append(f"{BASE_URL}/wp-content/images/cardlist/{folder}/{card_number}_{rarity}.{ext}")
         if rarity == "P":
-            for idx in range(2, 31):
-                candidates.append(f"{BASE_URL}/wp-content/images/cardlist/{folder}/{card_number}_{rarity}_{idx:02d}.png")
+            for idx in range(2, promo_suffix_max + 1):
+                for ext in exts:
+                    candidates.append(f"{BASE_URL}/wp-content/images/cardlist/{folder}/{card_number}_{rarity}_{idx:02d}.{ext}")
     return candidates
 
 
-def probe_one_missing(row: MissingIllustration, timeout: float) -> tuple[MissingIllustration, str] | None:
+def probe_one_missing(
+    row: MissingIllustration,
+    timeout: float,
+    ext_candidates: list[str],
+    promo_suffix_max: int,
+) -> tuple[MissingIllustration, str] | None:
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         )
     }
-    for url in build_probe_candidates(row.card_number, row.rarity):
+    for url in build_probe_candidates(row.card_number, row.rarity, ext_candidates, promo_suffix_max):
         try:
             resp = requests.get(url, headers=headers, allow_redirects=True, timeout=timeout, stream=True)
         except Exception:  # noqa: BLE001
@@ -126,13 +134,22 @@ def probe_one_missing(row: MissingIllustration, timeout: float) -> tuple[Missing
     return None
 
 
-def discover_missing_urls(missing: Iterable[MissingIllustration], timeout: float, workers: int) -> list[tuple[MissingIllustration, str]]:
+def discover_missing_urls(
+    missing: Iterable[MissingIllustration],
+    timeout: float,
+    workers: int,
+    ext_candidates: list[str],
+    promo_suffix_max: int,
+) -> list[tuple[MissingIllustration, str]]:
     rows = list(missing)
     if not rows:
         return []
     found: list[tuple[MissingIllustration, str]] = []
     with ThreadPoolExecutor(max_workers=max(1, workers)) as executor:
-        futures = [executor.submit(probe_one_missing, row, timeout) for row in rows]
+        futures = [
+            executor.submit(probe_one_missing, row, timeout, ext_candidates, promo_suffix_max)
+            for row in rows
+        ]
         for fut in as_completed(futures):
             result = fut.result()
             if result:
@@ -207,6 +224,17 @@ def main() -> int:
     parser.add_argument("--workers", type=int, default=20, help="Concurrent workers for URL verification")
     parser.add_argument("--timeout", type=float, default=12.0, help="HTTP timeout (seconds)")
     parser.add_argument("--missing-report", default="", help="Write remaining missing rows to CSV file")
+    parser.add_argument(
+        "--probe-exts",
+        default="png,jpg,jpeg,webp",
+        help="Comma-separated extension candidates for probing",
+    )
+    parser.add_argument(
+        "--probe-p-suffix-max",
+        type=int,
+        default=99,
+        help="Max promo suffix number for P rarity probing (e.g. _P_02 ...)",
+    )
     args = parser.parse_args()
 
     db_path = Path(args.db)
@@ -228,7 +256,16 @@ def main() -> int:
 
         if args.probe_missing:
             current_missing = collect_missing_illustrations(conn)
-            discovered = discover_missing_urls(current_missing, timeout=args.timeout, workers=max(1, args.workers))
+            ext_candidates = [x.strip().lower() for x in args.probe_exts.split(",") if x.strip()]
+            if not ext_candidates:
+                ext_candidates = ["png"]
+            discovered = discover_missing_urls(
+                current_missing,
+                timeout=args.timeout,
+                workers=max(1, args.workers),
+                ext_candidates=ext_candidates,
+                promo_suffix_max=max(2, args.probe_p_suffix_max),
+            )
             discovered_count = apply_discovered_urls(conn, discovered)
             print(f"[INFO] Probed updates applied: {discovered_count}")
             if discovered:
