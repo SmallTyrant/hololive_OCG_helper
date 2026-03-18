@@ -96,13 +96,17 @@ jobs:
           ls -lh ${{ env.apk_path }}
           echo "APK 크기: $(du -h ${{ env.apk_path }} | cut -f1)"
           cp ${{ env.apk_path }} ${{ env.apk_name }}
+          cp ${{ env.apk_path }} android-latest.apk
           echo "renamed_apk=mobile/android/native-app/${{ env.apk_name }}" >> $GITHUB_ENV
+          echo "latest_apk=mobile/android/native-app/android-latest.apk" >> $GITHUB_ENV
       
       - name: 태그 이름 설정
         id: create_tag
         run: |
-          TAG_NAME="android-v${{ steps.build_number.outputs.version_name }}"
+          TAG_NAME="android-v${{ steps.build_number.outputs.version_name }}-build${{ steps.build_number.outputs.build_number }}"
+          RELEASE_NAME="Android v${{ steps.build_number.outputs.version_name }} (build ${{ steps.build_number.outputs.build_number }})"
           echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "release_name=$RELEASE_NAME" >> $GITHUB_OUTPUT
 
       - name: 릴리즈 노트 로드
         id: release_notes
@@ -125,7 +129,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.create_tag.outputs.tag_name }}
-          name: Android v${{ steps.build_number.outputs.version_name }}
+          name: ${{ steps.create_tag.outputs.release_name }}
           body: |
             ## Android APK 빌드
             
@@ -142,14 +146,51 @@ jobs:
             3. 앱 실행
           files: |
             ${{ env.renamed_apk }}
+            ${{ env.latest_apk }}
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 릴리즈 자산 업로드 검증 및 요약
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          TAG="${{ steps.create_tag.outputs.tag_name }}"
+          ASSET_NAME="${{ env.apk_name }}"
+          LATEST_ASSET_NAME="android-latest.apk"
+
+          RELEASE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}")"
+          RELEASE_URL="$(echo "$RELEASE_JSON" | jq -r '.html_url')"
+          APK_URL="$(echo "$RELEASE_JSON" | jq -r --arg n "$ASSET_NAME" '.assets[] | select(.name == $n) | .browser_download_url')"
+          LATEST_URL="$(echo "$RELEASE_JSON" | jq -r --arg n "$LATEST_ASSET_NAME" '.assets[] | select(.name == $n) | .browser_download_url')"
+
+          if [ -z "$APK_URL" ] || [ "$APK_URL" = "null" ]; then
+            echo "❌ 릴리즈에 빌드 APK가 업로드되지 않았습니다: $ASSET_NAME"
+            exit 1
+          fi
+
+          if [ -z "$LATEST_URL" ] || [ "$LATEST_URL" = "null" ]; then
+            echo "❌ 릴리즈에 최신 APK가 업로드되지 않았습니다: $LATEST_ASSET_NAME"
+            exit 1
+          fi
+
+          {
+            echo "## Android Release 결과"
+            echo ""
+            echo "- 태그: \\`$TAG\\`"
+            echo "- 릴리즈: $RELEASE_URL"
+            echo "- 빌드 APK: [$ASSET_NAME]($APK_URL)"
+            echo "- 최신 APK: [$LATEST_ASSET_NAME]($LATEST_URL)"
+          } >> "$GITHUB_STEP_SUMMARY"
       
       - name: APK 아티팩트 업로드
         uses: actions/upload-artifact@v4
         with:
           name: android-apk-${{ github.run_number }}
-          path: ${{ env.renamed_apk }}
+          path: |
+            ${{ env.renamed_apk }}
+            ${{ env.latest_apk }}
           retention-days: 30

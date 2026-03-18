@@ -247,7 +247,7 @@ struct ContentView: View {
         /// 현재 선택된 레어리티의 이미지 URL
         var effectiveImageUrl: String {
             guard let rarity = selectedRarity,
-                  let option = card.illustrations.first(where: { $0.rarity == rarity }),
+                  let option = card.selectableIllustrations.first(where: { $0.rarity == rarity }),
                   !option.imageUrl.isEmpty else {
                 return card.imageUrl
             }
@@ -257,13 +257,21 @@ struct ContentView: View {
         /// 현재 선택된 레어리티의 manage_id (DeckLog 내보내기용)
         var effectiveManageId: Int? {
             guard let rarity = selectedRarity else {
-                return card.illustrations.first(where: { $0.rarity == card.rarity })?.manageIdJp
+                return card.selectableIllustrations.first(where: { $0.rarity == card.rarity })?.manageIdJp
+                    ?? card.illustrations.first(where: { $0.rarity == card.rarity })?.manageIdJp
             }
-            return card.illustrations.first(where: { $0.rarity == rarity })?.manageIdJp
+            return card.selectableIllustrations.first(where: { $0.rarity == rarity })?.manageIdJp
+                ?? card.illustrations.first(where: { $0.rarity == rarity })?.manageIdJp
         }
 
         /// 현재 선택된 레어리티 표시 문자열
-        var displayRarity: String { selectedRarity ?? card.rarity }
+        var displayRarity: String {
+            if let rarity = selectedRarity,
+               card.selectableIllustrations.contains(where: { $0.rarity == rarity }) {
+                return rarity
+            }
+            return card.rarity
+        }
     }
 
     private struct SavedDeckState: Identifiable {
@@ -459,7 +467,8 @@ struct ContentView: View {
                     DeckEntryRecord(
                         printId: $0.card.printId,
                         cardNumber: $0.card.cardNumber,
-                        qty: $0.qty
+                        qty: $0.qty,
+                        selectedRarity: $0.selectedRarity
                     )
                 },
                 updatedAt: Date()
@@ -475,11 +484,16 @@ struct ContentView: View {
                 let card = byPrintId[entry.printId] ?? byCardNumber[entry.cardNumber.uppercased()]
                 guard let card else { return nil }
                 let qty = max(1, entry.qty)
+                let selectedRarity = entry.selectedRarity?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let resolvedRarity = selectedRarity.flatMap { rarity in
+                    card.selectableIllustrations.contains(where: { $0.rarity == rarity }) ? rarity : nil
+                }
                 return DeckEntryState(
                     id: card.printId,
                     card: card,
                     qty: qty,
-                    maxPerCard: maxPerCard(card)
+                    maxPerCard: maxPerCard(card),
+                    selectedRarity: resolvedRarity
                 )
             }
             guard !resolvedEntries.isEmpty else { return nil }
@@ -2263,7 +2277,15 @@ struct ContentView: View {
                 Button("저장") {
                     let normalized = deckEntries
                         .filter { $0.qty > 0 }
-                        .map { DeckEntryState(id: $0.id, card: $0.card, qty: $0.qty, maxPerCard: $0.maxPerCard) }
+                        .map {
+                            DeckEntryState(
+                                id: $0.id,
+                                card: $0.card,
+                                qty: $0.qty,
+                                maxPerCard: $0.maxPerCard,
+                                selectedRarity: $0.selectedRarity
+                            )
+                        }
                     let targetID = editingDeckID ?? UUID()
                     let snapshot = SavedDeckState(
                         id: targetID,
@@ -2324,7 +2346,7 @@ struct ContentView: View {
                                             // 복수 레어리티 카드에는 선택 가능한 레어리티 칩 표시
                                             if card.hasMultipleRarities {
                                                 HStack(spacing: 4) {
-                                                    ForEach(card.illustrations) { option in
+                                                    ForEach(card.selectableIllustrations) { option in
                                                         let isSelected = option.rarity == (deckEntries.first(where: { $0.id == card.printId })?.displayRarity ?? card.rarity)
                                                         Text(option.rarity)
                                                             .font(.caption2.bold())
@@ -2548,7 +2570,7 @@ private struct RarityPickerSheet: View {
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
-                        ForEach(card.illustrations) { option in
+                        ForEach(card.selectableIllustrations) { option in
                             RarityOptionCell(
                                 option: option,
                                 fallbackImageUrl: card.imageUrl,

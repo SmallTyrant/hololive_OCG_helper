@@ -57,8 +57,13 @@ struct DeckCardCandidate: Identifiable {
 
     var id: Int64 { printId }
 
-    /// 레어리티 목록이 2개 이상일 때만 true
-    var hasMultipleRarities: Bool { illustrations.count > 1 }
+    /// 이미지 URL이 있는 레어리티만 선택 대상으로 사용
+    var selectableIllustrations: [IllustrationOption] {
+        illustrations.filter { !$0.imageUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    /// 실제 선택 가능한 레어리티가 2개 이상일 때만 true
+    var hasMultipleRarities: Bool { selectableIllustrations.count > 1 }
 }
 
 struct DeckEntryRecord: Codable {

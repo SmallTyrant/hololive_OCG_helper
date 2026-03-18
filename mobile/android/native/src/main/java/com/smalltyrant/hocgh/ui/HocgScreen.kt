@@ -279,13 +279,14 @@ private data class DeckEntryUi(
 
     val effectiveImageUrl: String get() {
         val rarity = selectedRarity ?: return card.imageUrl
-        val option = card.illustrations.firstOrNull { it.rarity == rarity }
+        val option = card.selectableIllustrations.firstOrNull { it.rarity == rarity }
         return if (option != null && option.imageUrl.isNotEmpty()) option.imageUrl else card.imageUrl
     }
 
     val effectiveManageId: Int? get() {
         val rarity = selectedRarity ?: card.rarity
-        return card.illustrations.firstOrNull { it.rarity == rarity }?.manageIdJp
+        return card.selectableIllustrations.firstOrNull { it.rarity == rarity }?.manageIdJp
+            ?: card.illustrations.firstOrNull { it.rarity == rarity }?.manageIdJp
     }
 }
 
@@ -1567,7 +1568,7 @@ private fun DeckEditorScreen(
                                 if (card.hasMultipleRarities) {
                                     // 복수 레어리티 칩
                                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        card.illustrations.take(5).forEach { option ->
+                                        card.selectableIllustrations.take(5).forEach { option ->
                                             Text(
                                                 option.rarity,
                                                 style = MaterialTheme.typography.labelSmall,
@@ -2755,7 +2756,7 @@ private fun RarityPickerBottomSheet(
             androidx.compose.foundation.lazy.LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                items(card.illustrations) { option ->
+                items(card.selectableIllustrations) { option ->
                     val isSelected = option.rarity == currentRarity
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,

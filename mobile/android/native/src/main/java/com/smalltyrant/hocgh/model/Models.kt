@@ -67,7 +67,10 @@ data class DeckCardCandidate(
     /** 선택 가능한 레어리티 목록. 1개면 선택 UI 불필요. */
     val illustrations: List<IllustrationOption> = emptyList(),
 ) {
-    val hasMultipleRarities: Boolean get() = illustrations.size > 1
+    val selectableIllustrations: List<IllustrationOption>
+        get() = illustrations.filter { it.imageUrl.trim().isNotEmpty() }
+
+    val hasMultipleRarities: Boolean get() = selectableIllustrations.size > 1
 }
 
 data class DeckEntryRecord(
