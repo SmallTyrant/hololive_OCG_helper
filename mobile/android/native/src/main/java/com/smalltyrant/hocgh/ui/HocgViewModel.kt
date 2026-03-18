@@ -263,19 +263,15 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
             paths.copyBundledDbIfMissing()
         }
 
-        var missing = withContext(Dispatchers.IO) { dbRepository.needsDbUpdate() }
-        if (missing) {
-            val recovered = withContext(Dispatchers.IO) {
-                paths.restoreBundledDb() && !dbRepository.needsDbUpdate()
-            }
-            missing = !recovered
-            if (recovered) {
-                state = state.copy(persistentMessage = null)
-            }
-        }
+        val missing = withContext(Dispatchers.IO) { dbRepository.needsDbUpdate() }
 
         if (missing) {
-            applyMissingDbState()
+            // DB 파일이 없거나 스키마가 유효하지 않으면 자동으로 다운로드 시작.
+            // 사용자가 수동으로 메뉴를 찾아야 하는 불편함 제거.
+            state = state.copy(updateStatus = "DB를 다운로드하는 중입니다...")
+            onManualUpdate()
+            // onManualUpdate() 내부에서 refreshList() 호출하므로 이후 로직 불필요.
+            return
         }
 
         multiWordTags = withContext(Dispatchers.IO) {

@@ -67,10 +67,10 @@ final class DatabaseRepository {
                 guard columns.isSuperset(of: required) else {
                     return true
                 }
-                let sql = "SELECT 1 FROM prints LIMIT 1"
-                let stmt = try sqlitePrepare(db: db, sql: sql)
-                defer { sqlite3_finalize(stmt) }
-                return sqlite3_step(stmt) != SQLITE_ROW
+                // prints 테이블 행 유무는 체크하지 않음.
+                // 행이 없어도 파일과 스키마가 정상이면 "DB 없음" 판정하지 않는다.
+                // (prints가 비어있는 상태를 "DB 없음"으로 오탐하는 버그 수정)
+                return false
             }
         } catch {
             needsUpdate = true

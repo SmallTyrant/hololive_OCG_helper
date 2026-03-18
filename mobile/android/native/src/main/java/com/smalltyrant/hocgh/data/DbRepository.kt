@@ -72,10 +72,10 @@ class DbRepository(private val paths: AppPaths) {
                     if (!cols.containsAll(required)) {
                         return@useDb true
                     }
-                    val hasRows = db.rawQuery("SELECT 1 FROM prints LIMIT 1", null).useCursor { cursor ->
-                        cursor.moveToFirst()
-                    }
-                    !hasRows
+                    // prints 테이블 행 유무는 체크하지 않음.
+                    // 행이 없어도 파일과 스키마가 정상이면 "DB 없음" 판정하지 않는다.
+                    // (prints가 비어있는 상태를 "DB 없음"으로 오탐하는 버그 수정)
+                    false
                 }
             }
         } catch (_: Throwable) {

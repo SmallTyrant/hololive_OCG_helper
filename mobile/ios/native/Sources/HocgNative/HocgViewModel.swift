@@ -231,20 +231,17 @@ final class HocgViewModel: ObservableObject {
     private func bootstrap() async {
         _ = paths.copyBundledDbIfMissing()
 
-        var missing = await runIO {
+        let missing = await runIO {
             self.dbRepository.needsDbUpdate()
         }
+
         if missing {
-            let recovered = await runIO {
-                self.paths.restoreBundledDb() && !self.dbRepository.needsDbUpdate()
-            }
-            missing = !recovered
-            if recovered {
-                state.persistentMessage = nil
-            }
-        }
-        if missing {
-            applyMissingDbState()
+            // DB 파일이 없거나 스키마가 유효하지 않으면 자동으로 다운로드 시작.
+            // 사용자가 수동으로 메뉴를 찾아야 하는 불편함 제거.
+            pushToast("DB를 다운로드하는 중입니다...")
+            onManualUpdate()
+            // onManualUpdate() 내부에서 refreshList()를 호출하므로 여기서는 호출 불필요.
+            return
         }
 
         refreshList()
