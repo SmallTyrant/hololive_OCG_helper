@@ -116,7 +116,7 @@ jobs:
 
           echo "notes_path=$NOTES_FILE" >> $GITHUB_OUTPUT
           {
-            echo "body<<'EOF'"
+            echo "body<<EOF"
             cat "$NOTES_FILE"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
