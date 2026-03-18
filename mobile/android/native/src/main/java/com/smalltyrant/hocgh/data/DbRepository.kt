@@ -421,7 +421,10 @@ class DbRepository(private val paths: AppPaths) {
                             ELSE ''
                         END AS rarity,
                         COALESCE(ko.effect_text,'') AS ko_text,
-                        COALESCE(ja.effect_text,'') AS ja_text
+                        COALESCE(ja.effect_text,'') AS ja_text,
+                        (SELECT GROUP_CONCAT(ci.rarity || '|' || COALESCE(ci.manage_id_jp,'') || '|' || COALESCE(ci.image_url,''), ';;')
+                         FROM card_illustrations ci WHERE ci.card_number = p.card_number
+                         ORDER BY ci.is_default DESC, ci.illustration_id) AS illustrations_csv
                     FROM prints p
                     LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
                     LEFT JOIN card_texts_ja ja ON ja.print_id = p.print_id
@@ -437,6 +440,8 @@ class DbRepository(private val paths: AppPaths) {
                 ).useCursor { cursor ->
                     val out = mutableListOf<com.smalltyrant.hocgh.model.DeckCardCandidate>()
                     while (cursor.moveToNext()) {
+                        val illustrationsCSV = cursor.getStringOrEmpty("illustrations_csv")
+                        val illustrations = parseIllustrationsCSV(illustrationsCSV)
                         out += com.smalltyrant.hocgh.model.DeckCardCandidate(
                             printId = cursor.getLongOrZero("print_id"),
                             cardNumber = cursor.getStringOrEmpty("card_number"),
@@ -448,6 +453,7 @@ class DbRepository(private val paths: AppPaths) {
                             rarity = cursor.getStringOrEmpty("rarity"),
                             koText = cursor.getStringOrEmpty("ko_text"),
                             jaText = cursor.getStringOrEmpty("ja_text"),
+                            illustrations = illustrations,
                         )
                     }
                     out
@@ -618,6 +624,23 @@ class DbRepository(private val paths: AppPaths) {
             "$sectionLabel\n$tagLine"
         } else {
             "$normalized\n$sectionLabel\n$tagLine"
+        }
+    }
+
+    /** "rarity|manage_id_jp|image_url;;..." 형식의 CSV를 IllustrationOption 리스트로 파싱 */
+    private fun parseIllustrationsCSV(csv: String): List<com.smalltyrant.hocgh.model.IllustrationOption> {
+        if (csv.isBlank()) return emptyList()
+        return csv.split(";;").mapNotNull { token ->
+            val parts = token.split("|")
+            if (parts.size < 3) return@mapNotNull null
+            val rarity = parts[0].trim().takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+            val manageIdJp = parts[1].trim().toIntOrNull()
+            val imageUrl = parts[2].trim()
+            com.smalltyrant.hocgh.model.IllustrationOption(
+                rarity = rarity,
+                manageIdJp = manageIdJp,
+                imageUrl = imageUrl,
+            )
         }
     }
 

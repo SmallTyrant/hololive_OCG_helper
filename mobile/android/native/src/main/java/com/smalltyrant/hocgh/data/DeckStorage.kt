@@ -59,6 +59,7 @@ class DeckStorage(private val paths: AppPaths) {
                 entryObj.put("printId", entry.printId)
                 entryObj.put("cardNumber", entry.cardNumber)
                 entryObj.put("qty", entry.qty)
+                entry.selectedRarity?.let { entryObj.put("selectedRarity", it) }
                 entries.put(entryObj)
             }
             deckObj.put("entries", entries)
@@ -85,11 +86,13 @@ class DeckStorage(private val paths: AppPaths) {
                 val printId = entryObj.optLong("printId", 0L)
                 val cardNumber = entryObj.optString("cardNumber", "")
                 val qty = entryObj.optInt("qty", 0).coerceAtLeast(0)
+                val selectedRarity = entryObj.optString("selectedRarity", "").ifBlank { null }
                 if (qty > 0 && (printId > 0 || cardNumber.isNotBlank())) {
                     entries += DeckEntryRecord(
                         printId = printId,
                         cardNumber = cardNumber,
                         qty = qty,
+                        selectedRarity = selectedRarity,
                     )
                 }
             }

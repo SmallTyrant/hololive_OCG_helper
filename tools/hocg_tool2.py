@@ -175,6 +175,26 @@ def init_db(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS card_illustrations(
+          illustration_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          card_number     TEXT NOT NULL,
+          rarity          TEXT NOT NULL,
+          manage_id_jp    INTEGER,
+          manage_id_en    INTEGER,
+          image_url       TEXT,
+          is_default      INTEGER NOT NULL DEFAULT 0,
+          UNIQUE(card_number, rarity)
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_card_illustrations_cn
+        ON card_illustrations(card_number);
+        """
+    )
     conn.commit()
 
 def normalize_tag(tag: str) -> str:
@@ -285,6 +305,54 @@ def upsert_print(conn: sqlite3.Connection, card_number: str, detail: dict) -> in
     row = conn.execute("SELECT print_id FROM prints WHERE card_number=?", (card_number,)).fetchone()
     return int(row[0])
 
+_RARITY_FROM_URL_RE = re.compile(r'_([A-Z]+\d*)\.png$', re.IGNORECASE)
+
+def _extract_rarity_from_url(image_url: str) -> str:
+    """image_url 파일명 suffix에서 레어리티 코드 추출. 예: hBP01-001_OUR.png → 'OUR'"""
+    m = _RARITY_FROM_URL_RE.search(image_url)
+    return m.group(1).upper() if m else ""
+
+
+def upsert_illustration_from_crawl(conn: sqlite3.Connection, card_number: str, detail_id: int | None, image_url: str) -> None:
+    """크롤링 시 card_illustrations 테이블 동시 업데이트.
+    - 같은 card_number를 여러 번 크롤링할 때 각 레어리티 버전을 누적 저장.
+    - is_default: 가장 처음(낮은 detail_id) 버전을 default로 유지.
+    """
+    if not image_url:
+        return
+    rarity = _extract_rarity_from_url(image_url)
+    if not rarity:
+        return
+
+    # 이미 해당 (card_number, rarity) 행이 있으면 manage_id_jp를 MIN으로 유지
+    existing = conn.execute(
+        "SELECT illustration_id, manage_id_jp FROM card_illustrations WHERE card_number=? AND rarity=?",
+        (card_number, rarity),
+    ).fetchone()
+
+    if existing:
+        # manage_id_jp 는 더 낮은 값(첫 등록)을 유지
+        if detail_id and (existing[1] is None or detail_id < existing[1]):
+            conn.execute(
+                "UPDATE card_illustrations SET manage_id_jp=?, image_url=COALESCE(image_url,?) WHERE illustration_id=?",
+                (detail_id, image_url, existing[0]),
+            )
+    else:
+        # 신규 삽입 — is_default 는 해당 card_number 에 행이 전혀 없을 때만 1
+        has_any = conn.execute(
+            "SELECT 1 FROM card_illustrations WHERE card_number=? LIMIT 1", (card_number,)
+        ).fetchone()
+        is_default = 0 if has_any else 1
+        conn.execute(
+            """
+            INSERT INTO card_illustrations(card_number, rarity, manage_id_jp, image_url, is_default)
+            VALUES(?,?,?,?,?)
+            ON CONFLICT(card_number, rarity) DO NOTHING
+            """,
+            (card_number, rarity, detail_id, image_url, is_default),
+        )
+
+
 def upsert_text_ja(conn: sqlite3.Connection, print_id: int, name: str, raw_text: str) -> None:
     # effect_text는 raw_text 기반으로 일단 동일값(뷰어에서 사용)
     conn.execute(
@@ -347,13 +415,34 @@ def _extract_field_by_label(text: str, label: str) -> str:
             return m.group(1).strip()
     return ""
 
-def normalize_raw_text(text: str, *, remove_private: bool = False) -> str:
+def _detect_keyword_effect_type(keyword_name: str, full_text: str) -> str:
+    """Q&A 섹션을 포함한 전체 텍스트에서 키워드 이펙트 타입을 판별합니다.
+
+    Returns:
+        'ブルームエフェクト' 또는 'コラボエフェクト'
+    """
+    import re as _re
+    bloom_qa_re = _re.compile(r'ブルームエフェクト[「『]' + _re.escape(keyword_name))
+    collab_qa_re = _re.compile(r'コラボエフェクト[「『]' + _re.escape(keyword_name))
+    bloom_effect_re = _re.compile(r'自分のブルームエフェクト[「『]')
+
+    if bloom_effect_re.search(full_text):
+        return 'ブルームエフェクト'
+    if bloom_qa_re.search(full_text):
+        return 'ブルームエフェクト'
+    if collab_qa_re.search(full_text):
+        return 'コラボエフェクト'
+    return 'コラボエフェクト'
+
+
+def normalize_raw_text(text: str, *, remove_private: bool = False, full_page_text: str = "") -> str:
     """Normalize raw page text for stable downstream parsing/UI.
 
     - Merge label/value pairs onto one line for: カードタイプ, レアリティ, 色, LIFE, HP
       (단, 다음 줄이 또 다른 라벨이면 값이 아니므로 병합하지 않음)
     - Remove the 収録商品 section block (it is noisy for offline viewer)
       (단, 페이지 네비/푸터에 등장하는 収録商品은 제거하지 않음)
+    - full_page_text: Q&A 등을 포함한 전체 페이지 텍스트 (이펙트 타입 판별에 사용)
     """
     import re as _re
 
@@ -369,11 +458,13 @@ def normalize_raw_text(text: str, *, remove_private: bool = False) -> str:
         "タグ", "推しステージスキル", "推しスキル", "SP推しスキル", "Bloomレベル",
         "アーツ", "バトンタッチ", "エクストラ", "イラストレーター名",
         "カードナンバー", "キーワード", "収録商品",
+        "コラボエフェクト", "ブルームエフェクト",
     }
 
     SECTION_START_RE = _re.compile(
-        r"^(カードタイプ|レアリティ|色|LIFE|HP|推しステージスキル|推しスキル|SP推しスキル|アーツ|バトンタッチ|エクストラ|イラストレーター名|カードナンバー|キーワード)"
+        r"^(カードタイプ|レアリティ|色|LIFE|HP|推しステージスキル|推しスキル|SP推しスキル|アーツ|バトンタッチ|エクストラ|イラストレーター名|カードナンバー|キーワード|コラボエフェクト|ブルームエフェクト)"
     )
+
     JA_TAG_OBJECT_RE = _re.compile(r"^(#[^\s#を]+(?:\s+[^\s#を]+)*)(を.+)$")
 
     def _normalize_label(line: str) -> str:
@@ -415,6 +506,18 @@ def normalize_raw_text(text: str, *, remove_private: bool = False) -> str:
                 out.extend(tail_lines)
                 i = j
                 continue
+
+        # キーワード 섹션: 다음 줄(키워드 이름)과 전체 텍스트(Q&A 포함)를 분석하여
+        # ブルームエフェクト 또는 コラボエフェクト 레이블을 자동 삽입
+        if label == "キーワード":
+            keyword_name = lines[i + 1] if i + 1 < len(lines) else ""
+            # Q&A가 포함된 전체 페이지 텍스트를 우선 사용, 없으면 현재 텍스트 사용
+            search_text = full_page_text if full_page_text else text
+            effect_type = _detect_keyword_effect_type(keyword_name, search_text)
+            out.append("キーワード")
+            out.append(effect_type)
+            i += 1
+            continue
 
         def _is_label_line(s: str) -> bool:
             s = _normalize_label(s)
@@ -517,7 +620,9 @@ def parse_detail(detail_html: bytes, fallback_card_no: str, verbose: bool) -> Op
     soup = BeautifulSoup(detail_html, "html.parser")
 
     raw_full = extract_detail_text(soup)
-    raw = normalize_raw_text(raw_full)
+    # Q&A 섹션을 포함한 전체 페이지 텍스트 (이펙트 타입 판별에 사용)
+    full_page_text = soup.get_text("\n", strip=True)
+    raw = normalize_raw_text(raw_full, full_page_text=full_page_text)
 
     # 카드 번호
     card_no = ""
@@ -572,7 +677,7 @@ def parse_detail(detail_html: bytes, fallback_card_no: str, verbose: bool) -> Op
         "color": color,
         "tags": tags,
         "image_url": image_url,
-        "raw_text": normalize_raw_text(raw_full, remove_private=True),
+        "raw_text": normalize_raw_text(raw_full, remove_private=True, full_page_text=full_page_text),
     }
 
 def detect_pagination_param(html: bytes) -> str:
@@ -720,9 +825,17 @@ def process_list_page(expansion: str | None, page: int, html: bytes, args, sessi
             card_no = (detail.get("card_number") or it_card_number or "").strip()
             detail["set_code"] = card_no.split("-", 1)[0] if "-" in card_no else ""
 
-        print_id = upsert_print(conn, detail.get("card_number") or it_card_number, detail)
+        final_card_number = detail.get("card_number") or it_card_number
+        print_id = upsert_print(conn, final_card_number, detail)
         upsert_text_ja(conn, print_id, detail.get("name") or "", detail.get("raw_text") or "")
         replace_print_tags(conn, print_id, detail.get("tags") or [])
+        # 크롤링 시 card_illustrations 테이블도 동시 업데이트
+        upsert_illustration_from_crawl(
+            conn,
+            final_card_number,
+            detail.get("detail_id"),
+            detail.get("image_url") or "",
+        )
 
         return 1
 

@@ -454,6 +454,13 @@ final class HocgViewModel: ObservableObject {
                     rarity: row.rarity,
                     koText: row.koText,
                     jaText: row.jaText,
+                    illustrations: row.illustrations.map { ill in
+                        IllustrationOption(
+                            rarity: ill.rarity,
+                            manageIdJp: ill.manageIdJp,
+                            imageUrl: self.paths.resolveImageURL(ill.imageUrl)?.absoluteString ?? ill.imageUrl
+                        )
+                    }
                 )
             }
         }

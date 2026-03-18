@@ -46,6 +46,13 @@ data class AppUpdateDialogState(
 )
 
 
+/** 레어리티별 일러스트 정보 (card_illustrations 테이블) */
+data class IllustrationOption(
+    val rarity: String,
+    val manageIdJp: Int?,
+    val imageUrl: String,  // 비어있으면 DeckCardCandidate.imageUrl 사용
+)
+
 data class DeckCardCandidate(
     val printId: Long,
     val cardNumber: String,
@@ -57,12 +64,18 @@ data class DeckCardCandidate(
     val rarity: String,
     val koText: String,
     val jaText: String,
-)
+    /** 선택 가능한 레어리티 목록. 1개면 선택 UI 불필요. */
+    val illustrations: List<IllustrationOption> = emptyList(),
+) {
+    val hasMultipleRarities: Boolean get() = illustrations.size > 1
+}
 
 data class DeckEntryRecord(
     val printId: Long,
     val cardNumber: String,
     val qty: Int,
+    /** 사용자가 선택한 레어리티. null 이면 기본 레어리티 사용. */
+    val selectedRarity: String? = null,
 )
 
 data class SavedDeckRecord(

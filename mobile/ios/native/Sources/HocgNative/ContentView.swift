@@ -213,6 +213,10 @@ struct ContentView: View {
     }
     @State private var deckToastMessage: String?
     @State private var renamingDeckID: UUID?
+    /// 레어리티 선택 시트를 위해 대기 중인 카드 (2개 이상 레어리티 보유 시)
+    @State private var pendingCardForRarity: DeckCardCandidate?
+    /// 이미 덱에 있는 엔트리의 레어리티 변경 시 대상 entryId
+    @State private var pendingRarityChangeEntryId: Int64?
     @State private var renamingDeckTitle = ""
     @State private var multiWordTags: [String] = []
     @AppStorage("theme_mode") private var themeModeRawValue: String = AppThemeMode.system.rawValue
@@ -237,6 +241,29 @@ struct ContentView: View {
         let card: DeckCardCandidate
         var qty: Int
         let maxPerCard: Int
+        /// 사용자가 선택한 레어리티. nil 이면 기본값(card.rarity) 사용.
+        var selectedRarity: String?
+
+        /// 현재 선택된 레어리티의 이미지 URL
+        var effectiveImageUrl: String {
+            guard let rarity = selectedRarity,
+                  let option = card.illustrations.first(where: { $0.rarity == rarity }),
+                  !option.imageUrl.isEmpty else {
+                return card.imageUrl
+            }
+            return option.imageUrl
+        }
+
+        /// 현재 선택된 레어리티의 manage_id (DeckLog 내보내기용)
+        var effectiveManageId: Int? {
+            guard let rarity = selectedRarity else {
+                return card.illustrations.first(where: { $0.rarity == card.rarity })?.manageIdJp
+            }
+            return card.illustrations.first(where: { $0.rarity == rarity })?.manageIdJp
+        }
+
+        /// 현재 선택된 레어리티 표시 문자열
+        var displayRarity: String { selectedRarity ?? card.rarity }
     }
 
     private struct SavedDeckState: Identifiable {
@@ -348,19 +375,56 @@ struct ContentView: View {
             showDeckToast(reason)
             return
         }
+        // 이미 덱에 있으면 수량만 증가
         if let idx = deckEntries.firstIndex(where: { $0.id == card.printId }) {
             deckEntries[idx].qty += 1
             return
         }
-
+        // 레어리티가 2개 이상이면 선택 시트를 먼저 표시
+        if card.hasMultipleRarities {
+            pendingRarityChangeEntryId = nil
+            pendingCardForRarity = card
+            return
+        }
+        // 레어리티가 1개이면 즉시 추가
         deckEntries.append(
             DeckEntryState(
                 id: card.printId,
                 card: card,
                 qty: 1,
-                maxPerCard: maxPerCard(card)
+                maxPerCard: maxPerCard(card),
+                selectedRarity: nil
             )
         )
+    }
+
+    private func addCardToDeckWithRarity(_ card: DeckCardCandidate, rarity: String) {
+        pendingCardForRarity = nil
+        if let reason = blockReason(for: card) {
+            showDeckToast(reason)
+            return
+        }
+        if let idx = deckEntries.firstIndex(where: { $0.id == card.printId }) {
+            deckEntries[idx].qty += 1
+            deckEntries[idx].selectedRarity = rarity
+            return
+        }
+        deckEntries.append(
+            DeckEntryState(
+                id: card.printId,
+                card: card,
+                qty: 1,
+                maxPerCard: maxPerCard(card),
+                selectedRarity: rarity
+            )
+        )
+    }
+
+    private func changeEntryRarity(entryId: Int64, rarity: String) {
+        pendingCardForRarity = nil
+        pendingRarityChangeEntryId = nil
+        guard let idx = deckEntries.firstIndex(where: { $0.id == entryId }) else { return }
+        deckEntries[idx].selectedRarity = rarity
     }
 
     private func deckThumbnail(url: String, qty: Int, width: CGFloat, height: CGFloat) -> some View {
@@ -655,7 +719,7 @@ struct ContentView: View {
     }
 
     private func loadDeckImages(for deck: SavedDeckState) async -> [Int64: UIImage] {
-        let unique = Dictionary(uniqueKeysWithValues: deck.entries.map { ($0.card.printId, $0.card.imageUrl) })
+        let unique = Dictionary(uniqueKeysWithValues: deck.entries.map { ($0.card.printId, $0.effectiveImageUrl) })
         return await withTaskGroup(of: (Int64, UIImage?).self) { group in
             for (printId, imageURL) in unique {
                 group.addTask {
@@ -1086,6 +1150,27 @@ struct ContentView: View {
                         }
                     }
                 }
+            }
+            // 레어리티 선택 시트
+            .sheet(item: $pendingCardForRarity) { card in
+                RarityPickerSheet(
+                    card: card,
+                    currentRarity: pendingRarityChangeEntryId.flatMap { eid in
+                        deckEntries.first(where: { $0.id == eid })?.selectedRarity
+                    } ?? card.rarity,
+                    onSelect: { rarity in
+                        if let eid = pendingRarityChangeEntryId {
+                            changeEntryRarity(entryId: eid, rarity: rarity)
+                        } else {
+                            addCardToDeckWithRarity(card, rarity: rarity)
+                        }
+                    },
+                    onCancel: {
+                        pendingCardForRarity = nil
+                        pendingRarityChangeEntryId = nil
+                    }
+                )
+                .presentationDetents([.medium])
             }
             .alert(
                 "덱 이름 수정",
@@ -2118,7 +2203,7 @@ struct ContentView: View {
                                 HStack(spacing: 8) {
                                     ForEach(deck.entries.prefix(8)) { entry in
                                         deckThumbnail(
-                                            url: entry.card.imageUrl,
+                                            url: entry.effectiveImageUrl,
                                             qty: entry.qty,
                                             width: 42,
                                             height: 58
@@ -2236,11 +2321,26 @@ struct ContentView: View {
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text("\(card.cardNumber) | \((card.nameKo.isEmpty ? card.nameJa : card.nameKo))")
                                                 .lineLimit(1)
-                                            let rarity = card.rarity.trimmingCharacters(in: .whitespacesAndNewlines)
-                                            if !rarity.isEmpty {
-                                                Text("레어리티 \(rarity)")
-                                                    .font(.caption2)
-                                                    .foregroundColor(.secondary)
+                                            // 복수 레어리티 카드에는 선택 가능한 레어리티 칩 표시
+                                            if card.hasMultipleRarities {
+                                                HStack(spacing: 4) {
+                                                    ForEach(card.illustrations) { option in
+                                                        let isSelected = option.rarity == (deckEntries.first(where: { $0.id == card.printId })?.displayRarity ?? card.rarity)
+                                                        Text(option.rarity)
+                                                            .font(.caption2.bold())
+                                                            .padding(.horizontal, 6).padding(.vertical, 2)
+                                                            .background(isSelected ? Color.accentColor : Color.secondary.opacity(0.2))
+                                                            .foregroundColor(isSelected ? .white : .primary)
+                                                            .clipShape(Capsule())
+                                                    }
+                                                }
+                                            } else {
+                                                let rarity = card.rarity.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                if !rarity.isEmpty {
+                                                    Text("레어리티 \(rarity)")
+                                                        .font(.caption2)
+                                                        .foregroundColor(.secondary)
+                                                }
                                             }
                                         }
                                         Spacer()
@@ -2269,12 +2369,39 @@ struct ContentView: View {
                     ForEach(deckEntries.indices, id: \.self) { i in
                         HStack {
                             deckThumbnail(
-                                url: deckEntries[i].card.imageUrl,
+                                url: deckEntries[i].effectiveImageUrl,
                                 qty: deckEntries[i].qty,
                                 width: 50,
                                 height: 70
                             )
-                            Text("\(deckEntries[i].card.cardNumber) | \((deckEntries[i].card.nameKo.isEmpty ? deckEntries[i].card.nameJa : deckEntries[i].card.nameKo))")
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(deckEntries[i].card.cardNumber) | \((deckEntries[i].card.nameKo.isEmpty ? deckEntries[i].card.nameJa : deckEntries[i].card.nameKo))")
+                                    .lineLimit(1)
+                                // 복수 레어리티이면 변경 버튼 표시
+                                if deckEntries[i].card.hasMultipleRarities {
+                                    Button {
+                                        pendingRarityChangeEntryId = deckEntries[i].id
+                                        pendingCardForRarity = deckEntries[i].card
+                                    } label: {
+                                        HStack(spacing: 4) {
+                                            Text(deckEntries[i].displayRarity)
+                                                .font(.caption2.bold())
+                                            Image(systemName: "chevron.down")
+                                                .font(.caption2)
+                                        }
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(Color.accentColor.opacity(0.15))
+                                        .foregroundColor(.accentColor)
+                                        .clipShape(Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                } else {
+                                    let r = deckEntries[i].displayRarity
+                                    if !r.isEmpty {
+                                        Text(r).font(.caption2).foregroundColor(.secondary)
+                                    }
+                                }
+                            }
                             Spacer()
                             Button("-") { deckEntries[i].qty -= 1; if deckEntries[i].qty <= 0 { deckEntries.remove(at: i) } }
                             Button("+") {
@@ -2397,5 +2524,95 @@ private struct MenuSheet: View {
             .navigationTitle("메뉴")
             .navigationBarTitleDisplayMode(.inline)
         }
+    }
+}
+
+// MARK: - 레어리티 선택 시트
+
+private struct RarityPickerSheet: View {
+    let card: DeckCardCandidate
+    let currentRarity: String
+    let onSelect: (String) -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                Text(card.nameKo.isEmpty ? card.nameJa : card.nameKo)
+                    .font(.headline)
+                    .padding(.vertical, 8)
+                Text("레어리티를 선택하세요")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .padding(.bottom, 12)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(card.illustrations) { option in
+                            RarityOptionCell(
+                                option: option,
+                                fallbackImageUrl: card.imageUrl,
+                                isSelected: option.rarity == currentRarity,
+                                onTap: { onSelect(option.rarity) }
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+            }
+            .padding(.vertical, 12)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("취소", action: onCancel)
+                }
+            }
+        }
+    }
+}
+
+private struct RarityOptionCell: View {
+    let option: IllustrationOption
+    let fallbackImageUrl: String
+    let isSelected: Bool
+    let onTap: () -> Void
+
+    private var imageUrl: URL? {
+        URL(string: option.imageUrl.isEmpty ? fallbackImageUrl : option.imageUrl)
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(spacing: 6) {
+                AsyncImage(url: imageUrl) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().aspectRatio(400.0/558.0, contentMode: .fit)
+                    default:
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.2))
+                            .aspectRatio(400.0/558.0, contentMode: .fit)
+                            .overlay(ProgressView())
+                    }
+                }
+                .frame(width: 100)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
+                )
+
+                Text(option.rarity)
+                    .font(.caption.bold())
+                    .foregroundColor(isSelected ? .accentColor : .primary)
+
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.accentColor)
+                        .font(.caption)
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 }

@@ -364,7 +364,10 @@ final class DatabaseRepository {
                         ELSE ''
                     END AS rarity,
                     COALESCE(ko.effect_text,'') AS ko_text,
-                    COALESCE(ja.effect_text,'') AS ja_text
+                    COALESCE(ja.effect_text,'') AS ja_text,
+                    (SELECT GROUP_CONCAT(ci.rarity || '|' || COALESCE(ci.manage_id_jp,'') || '|' || COALESCE(ci.image_url,''), ';;')
+                     FROM card_illustrations ci WHERE ci.card_number = p.card_number
+                     ORDER BY ci.is_default DESC, ci.illustration_id) AS illustrations_csv
                 FROM prints p
                 LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
                 LEFT JOIN card_texts_ja ja ON ja.print_id = p.print_id
@@ -381,6 +384,8 @@ final class DatabaseRepository {
                 try sqliteBind([.text(like), .text(like), .text(like), .text(like), .int64(Int64(limit))], to: stmt)
                 var rows: [DeckCardCandidate] = []
                 while sqlite3_step(stmt) == SQLITE_ROW {
+                    let illustrationsCSV = sqliteColumnString(stmt, index: 10)
+                    let illustrations = parseIllustrationsCSV(illustrationsCSV)
                     rows.append(
                         DeckCardCandidate(
                             printId: sqliteColumnInt64(stmt, index: 0),
@@ -393,6 +398,7 @@ final class DatabaseRepository {
                             rarity: sqliteColumnString(stmt, index: 7),
                             koText: sqliteColumnString(stmt, index: 8),
                             jaText: sqliteColumnString(stmt, index: 9),
+                            illustrations: illustrations,
                         )
                     )
                 }
@@ -1039,6 +1045,20 @@ final class DatabaseRepository {
             return false
         }
         return na.contains(nb) || nb.contains(na)
+    }
+
+    /// "rarity|manage_id_jp|image_url;;..." 형식의 CSV를 IllustrationOption 배열로 파싱
+    private func parseIllustrationsCSV(_ csv: String) -> [IllustrationOption] {
+        guard !csv.isEmpty else { return [] }
+        return csv.components(separatedBy: ";;").compactMap { token in
+            let parts = token.components(separatedBy: "|")
+            guard parts.count >= 3 else { return nil }
+            let rarity = parts[0].trimmingCharacters(in: .whitespaces)
+            guard !rarity.isEmpty else { return nil }
+            let manageId = Int(parts[1])
+            let imageUrl = parts[2].trimmingCharacters(in: .whitespaces)
+            return IllustrationOption(rarity: rarity, manageIdJp: manageId, imageUrl: imageUrl)
+        }
     }
 
     private func sqlNormalizeExpr(_ column: String) -> String {

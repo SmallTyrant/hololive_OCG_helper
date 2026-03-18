@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -33,13 +34,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BrokenImage
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -89,6 +93,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
@@ -267,7 +272,22 @@ private data class DeckEntryUi(
     val card: DeckCardCandidate,
     var qty: Int,
     val maxPerCard: Int,
-)
+    /** 사용자가 선택한 레어리티. null 이면 기본값(card.rarity) 사용. */
+    val selectedRarity: String? = null,
+) {
+    val displayRarity: String get() = selectedRarity ?: card.rarity
+
+    val effectiveImageUrl: String get() {
+        val rarity = selectedRarity ?: return card.imageUrl
+        val option = card.illustrations.firstOrNull { it.rarity == rarity }
+        return if (option != null && option.imageUrl.isNotEmpty()) option.imageUrl else card.imageUrl
+    }
+
+    val effectiveManageId: Int? get() {
+        val rarity = selectedRarity ?: card.rarity
+        return card.illustrations.firstOrNull { it.rarity == rarity }?.manageIdJp
+    }
+}
 
 private data class DeckUi(
     val id: String,
@@ -370,6 +390,7 @@ private fun toDeckRecords(decks: List<DeckUi>): List<SavedDeckRecord> {
                         printId = entry.card.printId,
                         cardNumber = entry.card.cardNumber,
                         qty = entry.qty,
+                        selectedRarity = entry.selectedRarity,
                     )
                 },
             updatedAt = deck.updatedAt,
@@ -393,6 +414,7 @@ private fun resolveDecksFromRecords(
                     card = card,
                     qty = entry.qty.coerceAtLeast(1),
                     maxPerCard = maxPerCard(card),
+                    selectedRarity = entry.selectedRarity,
                 )
             }
         }
@@ -556,7 +578,7 @@ private suspend fun buildDeckExportBitmap(
         imageCache[entry.card.printId] = loadDeckCardBitmap(
             context = context,
             imageLoader = imageLoader,
-            imageUrl = entry.card.imageUrl,
+            imageUrl = entry.effectiveImageUrl,
             width = cardW,
             height = cardH,
         )
@@ -793,6 +815,10 @@ fun HocgScreen(
     var showingDeckImportDialog by remember { mutableStateOf(false) }
     var deckImportText by remember { mutableStateOf("") }
     var deckImportMode by remember { mutableStateOf(DeckImportMode.HOLODUEL) }
+    /** 레어리티 선택 BottomSheet 용 — null 이면 닫힘 */
+    var rarityPickerEntry by remember { mutableStateOf<DeckEntryUi?>(null) }
+    /** 새 카드 추가 시 레어리티 선택용 — null 이면 닫힘 */
+    var rarityPickerNewCard by remember { mutableStateOf<DeckCardCandidate?>(null) }
     val deckDraft = remember { mutableStateListOf<DeckEntryUi>() }
     val savedDecks = remember { mutableStateListOf<DeckUi>() }
     val imageLoader = remember(context) { ImageLoader(context) }
@@ -1048,6 +1074,46 @@ fun HocgScreen(
         )
     }
 
+    // 레어리티 선택 BottomSheet — 기존 엔트리 변경
+    rarityPickerEntry?.let { entry ->
+        RarityPickerBottomSheet(
+            card = entry.card,
+            currentRarity = entry.displayRarity,
+            onSelect = { rarity ->
+                val idx = deckDraft.indexOfFirst { it.card.printId == entry.card.printId }
+                if (idx >= 0) {
+                    deckDraft[idx] = deckDraft[idx].copy(selectedRarity = rarity)
+                }
+                rarityPickerEntry = null
+            },
+            onDismiss = { rarityPickerEntry = null },
+        )
+    }
+
+    // 레어리티 선택 BottomSheet — 새 카드 추가
+    rarityPickerNewCard?.let { card ->
+        RarityPickerBottomSheet(
+            card = card,
+            currentRarity = card.rarity,
+            onSelect = { rarity ->
+                val reason = blockReason(deckDraft, card)
+                if (reason == null) {
+                    val existing = deckDraft.firstOrNull { it.card.printId == card.printId }
+                    if (existing != null) {
+                        val idx = deckDraft.indexOf(existing)
+                        deckDraft[idx] = existing.copy(qty = existing.qty + 1, selectedRarity = rarity)
+                    } else {
+                        deckDraft.add(DeckEntryUi(card = card, qty = 1, maxPerCard = maxPerCard(card), selectedRarity = rarity))
+                    }
+                } else {
+                    scope.launch { snackbarHostState.showSnackbar(reason) }
+                }
+                rarityPickerNewCard = null
+            },
+            onDismiss = { rarityPickerNewCard = null },
+        )
+    }
+
     ModalNavigationDrawer(
         modifier = Modifier
             .fillMaxSize()
@@ -1246,10 +1312,17 @@ fun HocgScreen(
                         scope.launch { deckCandidates = viewModel.searchDeckCards(deckSearchQuery) }
                     },
                     onSelectCandidate = { card ->
-                        val reason = addCardToDeck(deckDraft, card)
-                        if (reason != null) {
-                            scope.launch { snackbarHostState.showSnackbar(reason) }
+                        if (card.hasMultipleRarities) {
+                            rarityPickerNewCard = card
+                        } else {
+                            val reason = addCardToDeck(deckDraft, card)
+                            if (reason != null) {
+                                scope.launch { snackbarHostState.showSnackbar(reason) }
+                            }
                         }
+                    },
+                    onChangeRarity = { entry ->
+                        rarityPickerEntry = entry
                     },
                     quantityForCard = { card -> deckQuantity(deckDraft, card) },
                     onIncrease = { entry ->
@@ -1432,6 +1505,7 @@ private fun DeckEditorScreen(
     quantityForCard: (DeckCardCandidate) -> Int,
     onIncrease: (DeckEntryUi) -> Unit,
     onDecrease: (DeckEntryUi) -> Unit,
+    onChangeRarity: (DeckEntryUi) -> Unit = {},
 ) {
     val oshi = entries.filter { isOshi(it.card) }.sumOf { it.qty }
     val yell = entries.filter { isYell(it.card) }.sumOf { it.qty }
@@ -1490,7 +1564,21 @@ private fun DeckEditorScreen(
                             )
                             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text("${card.cardNumber} | ${card.nameKo.ifBlank { card.nameJa }}", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                if (card.rarity.isNotBlank()) {
+                                if (card.hasMultipleRarities) {
+                                    // 복수 레어리티 칩
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        card.illustrations.take(5).forEach { option ->
+                                            Text(
+                                                option.rarity,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                modifier = Modifier
+                                                    .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(4.dp))
+                                                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                                            )
+                                        }
+                                    }
+                                } else if (card.rarity.isNotBlank()) {
                                     Text(
                                         "레어리티 ${card.rarity.trim()}",
                                         style = MaterialTheme.typography.bodySmall,
@@ -1516,12 +1604,30 @@ private fun DeckEditorScreen(
             items(entries, key = { it.card.printId }) { entry ->
                 Row(modifier = Modifier.fillMaxWidth().border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(10.dp)).padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     DeckThumbnail(
-                        imageUrl = entry.card.imageUrl,
+                        imageUrl = entry.effectiveImageUrl,
                         qty = entry.qty,
                         width = 50.dp,
                         height = 70.dp,
                     )
-                    Text("${entry.card.cardNumber} | ${entry.card.nameKo.ifBlank { entry.card.nameJa }}", modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("${entry.card.cardNumber} | ${entry.card.nameKo.ifBlank { entry.card.nameJa }}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (entry.card.hasMultipleRarities) {
+                            // 레어리티 변경 버튼
+                            Row(
+                                modifier = Modifier
+                                    .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(4.dp))
+                                    .clickable { onChangeRarity(entry) }
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Text(entry.displayRarity, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
+                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "레어리티 변경", modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
+                        } else if (entry.displayRarity.isNotBlank()) {
+                            Text(entry.displayRarity, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                        }
+                    }
                     IconButton(onClick = { onDecrease(entry) }) { Icon(Icons.Default.Close, contentDescription = "감소") }
                     IconButton(onClick = { onIncrease(entry) }) { Icon(Icons.Default.Add, contentDescription = "증가") }
                 }
@@ -2614,6 +2720,84 @@ private val ConsumeScrollNestedScrollConnection = object : NestedScrollConnectio
     override suspend fun onPreFling(available: Velocity): Velocity = Velocity.Zero
 
     override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity = available
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun RarityPickerBottomSheet(
+    card: DeckCardCandidate,
+    currentRarity: String,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                card.nameKo.ifBlank { card.nameJa },
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                "레어리티 선택",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.outline,
+            )
+            androidx.compose.foundation.lazy.LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                items(card.illustrations) { option ->
+                    val isSelected = option.rarity == currentRarity
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .width(90.dp)
+                            .clickable { onSelect(option.rarity) },
+                    ) {
+                        val imgUrl = if (option.imageUrl.isNotEmpty()) option.imageUrl else card.imageUrl
+                        AsyncImage(
+                            model = imgUrl,
+                            contentDescription = option.rarity,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(400f / 558f)
+                                .clip(RoundedCornerShape(6.dp))
+                                .border(
+                                    width = if (isSelected) 3.dp else 0.dp,
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Transparent,
+                                    shape = RoundedCornerShape(6.dp),
+                                ),
+                            contentScale = ContentScale.Crop,
+                        )
+                        Text(
+                            option.rarity,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        )
+                        if (isSelected) {
+                            Icon(
+                                Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 private fun Modifier.clearFocusOnTap(focusManager: FocusManager): Modifier {
