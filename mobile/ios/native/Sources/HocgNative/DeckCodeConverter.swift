@@ -95,6 +95,107 @@ enum DeckCodeConverter {
         return importHoloDuel(code)
     }
 
+    // MARK: - holoDelta Export/Import
+
+    struct HoloDeltaEntry {
+        let cardNumber: String
+        let qty: Int
+        let artIndex: Int
+    }
+
+    struct HoloDeltaDeck {
+        let deckName: String?
+        let oshiCardNumber: String
+        let oshiArtIndex: Int
+        let deckEntries: [HoloDeltaEntry]
+        let cheerEntries: [HoloDeltaEntry]
+    }
+
+    static func exportHoloDelta(
+        entries: [(cardNumber: String, qty: Int, card: DeckCardCandidate)],
+        title: String
+    ) -> String? {
+        var oshi: [Any]?
+        var deck: [[Any]] = []
+        var cheer: [[Any]] = []
+
+        for (cardNumber, qty, card) in entries {
+            let artIndex = deltaArtIndex(card: card)
+            if isOshiCard(card) {
+                oshi = [cardNumber, artIndex]
+            } else if isYellCard(card) {
+                cheer.append([cardNumber, qty, artIndex])
+            } else {
+                deck.append([cardNumber, qty, artIndex])
+            }
+        }
+        guard let oshi else { return nil }
+
+        let payload: [String: Any] = [
+            "deckName": title,
+            "oshi": oshi,
+            "deck": deck,
+            "cheerDeck": cheer,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let json = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return json
+    }
+
+    static func importHoloDelta(_ code: String) -> HoloDeltaDeck? {
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let rawData: Data?
+        if trimmed.hasPrefix("{") {
+            rawData = trimmed.data(using: .utf8)
+        } else {
+            rawData = decodeBase64URLSafe(trimmed)
+        }
+
+        guard let rawData,
+              let json = try? JSONSerialization.jsonObject(with: rawData) as? [String: Any] else {
+            return nil
+        }
+
+        guard let oshiArr = json["oshi"] as? [Any], oshiArr.count >= 2,
+              let oshiCN = oshiArr[0] as? String,
+              let oshiArt = toInt(oshiArr[1]) else {
+            return nil
+        }
+
+        func parseEntryList(_ key: String) -> [HoloDeltaEntry]? {
+            guard let arr = json[key] as? [[Any]] else { return [] }
+            var result: [HoloDeltaEntry] = []
+            for row in arr {
+                guard row.count >= 3,
+                      let cardNumber = row[0] as? String,
+                      let qty = toInt(row[1]), qty > 0,
+                      let art = toInt(row[2]) else {
+                    return nil
+                }
+                result.append(HoloDeltaEntry(cardNumber: cardNumber, qty: qty, artIndex: art))
+            }
+            return result
+        }
+
+        guard let deck = parseEntryList("deck"),
+              let cheer = parseEntryList("cheerDeck") else {
+            return nil
+        }
+
+        let deckName = (json["deckName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return HoloDeltaDeck(
+            deckName: deckName?.isEmpty == true ? nil : deckName,
+            oshiCardNumber: oshiCN,
+            oshiArtIndex: oshiArt,
+            deckEntries: deck,
+            cheerEntries: cheer
+        )
+    }
+
     // MARK: - Bushiroad (DeckLog) 구조체
 
     struct BushiDeckCard {
@@ -253,6 +354,32 @@ enum DeckCodeConverter {
             list: parseList("list"),
             subList: parseList("sub_list")
         )
+    }
+
+    private static func decodeBase64URLSafe(_ text: String) -> Data? {
+        var base64 = text
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let remainder = base64.count % 4
+        if remainder != 0 {
+            base64 += String(repeating: "=", count: 4 - remainder)
+        }
+        return Data(base64Encoded: base64)
+    }
+
+    private static func toInt(_ value: Any) -> Int? {
+        if let i = value as? Int { return i }
+        if let s = value as? String { return Int(s) }
+        if let d = value as? Double { return Int(d) }
+        return nil
+    }
+
+    private static func deltaArtIndex(card: DeckCardCandidate) -> Int {
+        guard !card.illustrations.isEmpty else { return 0 }
+        if let idx = card.illustrations.firstIndex(where: { $0.rarity == card.rarity }) {
+            return idx
+        }
+        return 0
     }
 }
 

@@ -9,6 +9,7 @@ import org.json.JSONObject
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
+import java.nio.charset.StandardCharsets
 
 // ──────────────────────────────────────────────
 // HoloDuel 덱 코드 포맷
@@ -97,6 +98,89 @@ object DeckCodeConverter {
         val deck  = parseEntries(deckPart)  ?: return null
         val cheer = parseEntries(cheerPart) ?: return null
         return HoloDuelDeck(oshi, deck, cheer)
+    }
+
+    // ─── holoDelta Export / Import ───
+
+    data class HoloDeltaEntry(val cardNumber: String, val qty: Int, val artIndex: Int)
+    data class HoloDeltaDeck(
+        val deckName: String?,
+        val oshiCardNumber: String,
+        val oshiArtIndex: Int,
+        val deckEntries: List<HoloDeltaEntry>,
+        val cheerEntries: List<HoloDeltaEntry>,
+    )
+
+    fun exportHoloDelta(entries: List<Triple<String, Int, DeckCardCandidate>>, title: String): String? {
+        var oshi: JSONArray? = null
+        val deck = JSONArray()
+        val cheer = JSONArray()
+
+        for ((cn, qty, card) in entries) {
+            val artIndex = deltaArtIndex(card)
+            val row = JSONArray().apply {
+                put(cn)
+                put(qty)
+                put(artIndex)
+            }
+            when {
+                isOshi(card) -> oshi = JSONArray().apply { put(cn); put(artIndex) }
+                isYell(card) -> cheer.put(row)
+                else -> deck.put(row)
+            }
+        }
+        val oshiRow = oshi ?: return null
+
+        return JSONObject().apply {
+            put("deckName", title)
+            put("oshi", oshiRow)
+            put("deck", deck)
+            put("cheerDeck", cheer)
+        }.toString()
+    }
+
+    fun importHoloDelta(code: String): HoloDeltaDeck? {
+        val trimmed = code.trim()
+        if (trimmed.isEmpty()) return null
+
+        val json = runCatching {
+            if (trimmed.startsWith("{")) {
+                JSONObject(trimmed)
+            } else {
+                val raw = decodeBase64UrlSafe(trimmed) ?: return null
+                JSONObject(String(raw, StandardCharsets.UTF_8))
+            }
+        }.getOrNull() ?: return null
+
+        val oshi = json.optJSONArray("oshi") ?: return null
+        val oshiCardNumber = oshi.optString(0).takeIf { it.isNotEmpty() } ?: return null
+        val oshiArtIndex = oshi.optInt(1, Int.MIN_VALUE).takeIf { it != Int.MIN_VALUE } ?: return null
+
+        fun parseList(key: String): List<HoloDeltaEntry>? {
+            val arr = json.optJSONArray(key) ?: return emptyList()
+            val result = mutableListOf<HoloDeltaEntry>()
+            for (i in 0 until arr.length()) {
+                val row = arr.optJSONArray(i) ?: return null
+                val cardNumber = row.optString(0).takeIf { it.isNotEmpty() } ?: return null
+                val qty = row.optInt(1, 0)
+                if (qty <= 0) return null
+                val artIndex = row.optInt(2, Int.MIN_VALUE).takeIf { it != Int.MIN_VALUE } ?: return null
+                result += HoloDeltaEntry(cardNumber, qty, artIndex)
+            }
+            return result
+        }
+
+        val deck = parseList("deck") ?: return null
+        val cheer = parseList("cheerDeck") ?: return null
+        val deckName = json.optString("deckName", "").trim().ifEmpty { null }
+
+        return HoloDeltaDeck(
+            deckName = deckName,
+            oshiCardNumber = oshiCardNumber,
+            oshiArtIndex = oshiArtIndex,
+            deckEntries = deck,
+            cheerEntries = cheer,
+        )
     }
 
     // ─── Bushiroad (DeckLog) ───
@@ -216,6 +300,23 @@ object DeckCodeConverter {
         val withoutQuery = extracted.substringBefore('?')
         val withoutHash = withoutQuery.substringBefore('#')
         return withoutHash.trim().trim('/').lowercase()
+    }
+
+    private fun decodeBase64UrlSafe(text: String): ByteArray? {
+        var fixed = text.replace('-', '+').replace('_', '/')
+        val rem = fixed.length % 4
+        if (rem != 0) {
+            fixed += "=".repeat(4 - rem)
+        }
+        return runCatching {
+            Base64.decode(fixed, Base64.DEFAULT)
+        }.getOrNull()
+    }
+
+    private fun deltaArtIndex(card: DeckCardCandidate): Int {
+        if (card.illustrations.isEmpty()) return 0
+        val idx = card.illustrations.indexOfFirst { it.rarity == card.rarity }
+        return if (idx >= 0) idx else 0
     }
 
     private fun parseBushiResponse(text: String, code: String): BushiDeck {

@@ -266,6 +266,7 @@ private enum class DetailTextLanguage {
 
 private enum class DeckImportMode(val label: String) {
     HOLODUEL("홀로듀얼"),
+    HOLODELTA("홀로델타"),
     BUSHIROAD("부시나비"),
 }
 
@@ -973,18 +974,35 @@ fun HocgScreen(
                         }
                     }
                     Text(
-                        text = if (deckImportMode == DeckImportMode.HOLODUEL)
-                            "홀로듀얼 덱 코드(Base64)를 붙여넣어 주세요."
-                        else
-                            "부시나비 URL 또는 코드를 붙여넣어 주세요.\n예: 6ADJR (URL 전체 입력 불필요)",
+                        text = when (deckImportMode) {
+                            DeckImportMode.HOLODUEL -> "홀로듀얼 덱 코드(Base64)를 붙여넣어 주세요."
+                            DeckImportMode.HOLODELTA -> "홀로델타 코드(JSON 또는 Base64 URL-safe)를 붙여넣어 주세요."
+                            DeckImportMode.BUSHIROAD -> "부시나비 URL 또는 코드를 붙여넣어 주세요.\n예: 6ADJR (URL 전체 입력 불필요)"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.outline,
                     )
                     OutlinedTextField(
                         value = deckImportText,
                         onValueChange = { deckImportText = it },
-                        label = { Text(if (deckImportMode == DeckImportMode.HOLODUEL) "홀로듀얼 코드" else "부시나비 URL / 코드") },
-                        placeholder = { Text(if (deckImportMode == DeckImportMode.HOLODUEL) "Base64 코드를 붙여넣어 주세요" else "예: 6ADJR") },
+                        label = {
+                            Text(
+                                when (deckImportMode) {
+                                    DeckImportMode.HOLODUEL -> "홀로듀얼 코드"
+                                    DeckImportMode.HOLODELTA -> "홀로델타 코드"
+                                    DeckImportMode.BUSHIROAD -> "부시나비 URL / 코드"
+                                }
+                            )
+                        },
+                        placeholder = {
+                            Text(
+                                when (deckImportMode) {
+                                    DeckImportMode.HOLODUEL -> "Base64 코드를 붙여넣어 주세요"
+                                    DeckImportMode.HOLODELTA -> "JSON 또는 Base64 URL-safe"
+                                    DeckImportMode.BUSHIROAD -> "예: 6ADJR"
+                                }
+                            )
+                        },
                         minLines = 4,
                         maxLines = 8,
                         modifier = Modifier.fillMaxWidth(),
@@ -999,7 +1017,7 @@ fun HocgScreen(
                             scope.launch {
                                 when (deckImportMode) {
                                     DeckImportMode.HOLODUEL -> {
-                                        snackbarHostState.showSnackbar("부시나비 코드로 변환 중...")
+                                        snackbarHostState.showSnackbar("홀로델타 코드로 변환 중...")
                                         val holoDuelDeck = withContext(Dispatchers.IO) {
                                             DeckCodeConverter.importHoloDuel(raw)
                                         }
@@ -1024,10 +1042,47 @@ fun HocgScreen(
                                             return@launch
                                         }
                                         runCatching {
+                                            DeckCodeConverter.exportHoloDelta(entries, title = "변환 덱")
+                                        }.onSuccess { code ->
+                                            if (code.isNullOrBlank()) {
+                                                snackbarHostState.showSnackbar("변환 실패: 오시 카드가 없습니다.")
+                                                return@onSuccess
+                                            }
+                                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                            clipboard?.setPrimaryClip(ClipData.newPlainText("holodelta_deck_code", code))
+                                            deckImportText = ""
+                                            showingDeckImportDialog = false
+                                            snackbarHostState.showSnackbar("홀로델타 코드가 클립보드에 복사되었습니다.")
+                                        }.onFailure { e ->
+                                            snackbarHostState.showSnackbar("변환 실패: ${e.message?.take(80)}")
+                                        }
+                                    }
+                                    DeckImportMode.HOLODELTA -> {
+                                        snackbarHostState.showSnackbar("부시나비 코드로 변환 중...")
+                                        runCatching {
+                                            val holoDeltaDeck = DeckCodeConverter.importHoloDelta(raw)
+                                                ?: error("홀로델타 코드 형식이 올바르지 않습니다.")
+                                            val allCards = viewModel.searchDeckCards("", limit = 5000)
+                                            val byNumber = allCards.associateBy { it.cardNumber.uppercase() }
+                                            val entries = mutableListOf<Triple<String, Int, DeckCardCandidate>>()
+                                            byNumber[holoDeltaDeck.oshiCardNumber.uppercase()]?.let {
+                                                entries += Triple(it.cardNumber, 1, it)
+                                            }
+                                            holoDeltaDeck.deckEntries.forEach { row ->
+                                                byNumber[row.cardNumber.uppercase()]?.let {
+                                                    entries += Triple(it.cardNumber, row.qty, it)
+                                                }
+                                            }
+                                            holoDeltaDeck.cheerEntries.forEach { row ->
+                                                byNumber[row.cardNumber.uppercase()]?.let {
+                                                    entries += Triple(it.cardNumber, row.qty, it)
+                                                }
+                                            }
+                                            if (entries.isEmpty()) error("카드 정보를 찾을 수 없습니다.")
                                             val dbRepo = viewModel.getDbRepository()
                                             DeckCodeConverter.publishBushiDeck(
                                                 entries = entries,
-                                                title = "변환 덱",
+                                                title = holoDeltaDeck.deckName ?: "변환 덱",
                                                 manageIdLookup = { printId -> dbRepo.getManageIdJp(printId) },
                                             )
                                         }.onSuccess { url ->
@@ -1069,7 +1124,13 @@ fun HocgScreen(
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text(if (deckImportMode == DeckImportMode.HOLODUEL) "부시나비 코드로 변환" else "홀로듀얼 코드로 변환")
+                        Text(
+                            when (deckImportMode) {
+                                DeckImportMode.HOLODUEL -> "홀로델타 코드로 변환"
+                                DeckImportMode.HOLODELTA -> "부시나비 코드로 변환"
+                                DeckImportMode.BUSHIROAD -> "홀로듀얼 코드로 변환"
+                            }
+                        )
                     }
                 }
             },
@@ -1127,6 +1188,69 @@ fun HocgScreen(
                                 withContext(Dispatchers.IO) { deckStorage.saveLibrary(DeckLibraryRecord(decks = toDeckRecords(savedDecks))) }
                                 deckImportText = ""
                                 snackbarHostState.showSnackbar("덱 가져오기가 완료되었습니다.")
+                            }
+                            DeckImportMode.HOLODELTA -> scope.launch {
+                                runCatching {
+                                    val holoDeltaDeck = withContext(Dispatchers.IO) {
+                                        DeckCodeConverter.importHoloDelta(raw)
+                                    } ?: error("홀로델타 코드 형식이 올바르지 않습니다.")
+                                    val allCards = viewModel.searchDeckCards("", limit = 5000)
+                                    val byNumber = allCards.associateBy { it.cardNumber.uppercase() }
+
+                                    fun selectedRarity(card: DeckCardCandidate, artIndex: Int): String? {
+                                        if (artIndex < 0 || artIndex >= card.illustrations.size) return null
+                                        val rarity = card.illustrations[artIndex].rarity
+                                        return if (card.selectableIllustrations.any { it.rarity == rarity }) rarity else null
+                                    }
+
+                                    val entries = mutableListOf<DeckEntryUi>()
+                                    byNumber[holoDeltaDeck.oshiCardNumber.uppercase()]?.let {
+                                        entries += DeckEntryUi(
+                                            card = it,
+                                            qty = 1,
+                                            maxPerCard = maxPerCard(it),
+                                            selectedRarity = selectedRarity(it, holoDeltaDeck.oshiArtIndex),
+                                        )
+                                    }
+                                    holoDeltaDeck.deckEntries.forEach { row ->
+                                        byNumber[row.cardNumber.uppercase()]?.let {
+                                            entries += DeckEntryUi(
+                                                card = it,
+                                                qty = row.qty,
+                                                maxPerCard = maxPerCard(it),
+                                                selectedRarity = selectedRarity(it, row.artIndex),
+                                            )
+                                        }
+                                    }
+                                    holoDeltaDeck.cheerEntries.forEach { row ->
+                                        byNumber[row.cardNumber.uppercase()]?.let {
+                                            entries += DeckEntryUi(
+                                                card = it,
+                                                qty = row.qty,
+                                                maxPerCard = maxPerCard(it),
+                                                selectedRarity = selectedRarity(it, row.artIndex),
+                                            )
+                                        }
+                                    }
+
+                                    if (entries.isEmpty()) error("카드 정보를 찾을 수 없습니다.")
+                                    val title = holoDeltaDeck.deckName?.ifBlank { "홀로델타 덱" } ?: "홀로델타 덱"
+                                    val deck = DeckUi(
+                                        id = java.util.UUID.randomUUID().toString(),
+                                        title = title,
+                                        entries = entries,
+                                        updatedAt = System.currentTimeMillis(),
+                                    )
+                                    savedDecks.add(deck)
+                                    withContext(Dispatchers.IO) {
+                                        deckStorage.saveLibrary(DeckLibraryRecord(decks = toDeckRecords(savedDecks)))
+                                    }
+                                    deckImportText = ""
+                                }.onSuccess {
+                                    snackbarHostState.showSnackbar("홀로델타 덱 가져오기가 완료되었습니다.")
+                                }.onFailure { e ->
+                                    snackbarHostState.showSnackbar("홀로델타 불러오기 실패: ${e.message?.take(80)}")
+                                }
                             }
                             DeckImportMode.BUSHIROAD -> scope.launch {
                                 snackbarHostState.showSnackbar("부시나비에서 덱 정보를 불러오는 중...")
@@ -1295,6 +1419,17 @@ fun HocgScreen(
                             val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? ClipboardManager
                             clipboard?.setPrimaryClip(ClipData.newPlainText("holoduel_deck_code", code))
                             scope.launch { snackbarHostState.showSnackbar("홀로듀얼 코드가 클립보드에 복사되었습니다.") }
+                        }
+                    },
+                    onExportDelta = { deck ->
+                        val entries = deck.entries.map { Triple(it.card.cardNumber, it.qty, it.card) }
+                        val code = DeckCodeConverter.exportHoloDelta(entries, title = deck.title)
+                        if (code.isNullOrBlank()) {
+                            scope.launch { snackbarHostState.showSnackbar("오시 카드가 없습니다. 덱을 확인해 주세요.") }
+                        } else {
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                            clipboard?.setPrimaryClip(ClipData.newPlainText("holodelta_deck_code", code))
+                            scope.launch { snackbarHostState.showSnackbar("홀로델타 코드가 클립보드에 복사되었습니다.") }
                         }
                     },
                     onExportBushi = { deck ->
@@ -1479,6 +1614,7 @@ private fun DeckListScreen(
     onBack: () -> Unit,
     onImport: () -> Unit,
     onExportCode: (DeckUi) -> Unit,
+    onExportDelta: (DeckUi) -> Unit,
     onExportBushi: (DeckUi) -> Unit,
     onExportImage: (DeckUi) -> Unit,
     onAdd: () -> Unit,
@@ -1543,6 +1679,13 @@ private fun DeckListScreen(
                                     onClick = {
                                         menuExpanded = false
                                         onExportCode(deck)
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("홀로델타 코드로 내보내기") },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onExportDelta(deck)
                                     },
                                 )
                                 DropdownMenuItem(

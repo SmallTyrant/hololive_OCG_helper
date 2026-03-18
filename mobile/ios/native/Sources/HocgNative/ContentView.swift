@@ -209,6 +209,7 @@ struct ContentView: View {
 
     private enum DeckImportMode: String, CaseIterable {
         case holoDuel = "홀로듀얼"
+        case holoDelta = "홀로델타"
         case bushiroad = "부시나비"
     }
     @State private var deckToastMessage: String?
@@ -543,6 +544,8 @@ struct ContentView: View {
         switch deckImportMode {
         case .holoDuel:
             importHoloDuelCode(raw)
+        case .holoDelta:
+            importHoloDeltaCode(raw)
         case .bushiroad:
             importBushiroadCode(raw)
         }
@@ -600,6 +603,23 @@ struct ContentView: View {
         }
     }
 
+    private func importHoloDeltaCode(_ raw: String) {
+        guard let holoDeltaDeck = DeckCodeConverter.importHoloDelta(raw) else {
+            showDeckToast("홀로델타 코드 형식이 올바르지 않습니다.")
+            return
+        }
+        showingDeckImportSheet = false
+        deckImportText = ""
+        Task {
+            let merged = await mergeHoloDeltaDeck(holoDeltaDeck)
+            if merged {
+                showDeckToast("홀로델타 덱 가져오기가 완료되었습니다.")
+            } else {
+                showDeckToast("카드 정보를 찾을 수 없습니다.")
+            }
+        }
+    }
+
     private func convertDeckCodeFromText() {
         let raw = deckImportText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else {
@@ -610,14 +630,16 @@ struct ContentView: View {
         Task {
             switch deckImportMode {
             case .holoDuel:
-                await convertHoloDuelToBushiroad(raw)
+                await convertHoloDuelToHoloDelta(raw)
+            case .holoDelta:
+                await convertHoloDeltaToBushiroad(raw)
             case .bushiroad:
                 await convertBushiroadToHoloDuel(raw)
             }
         }
     }
 
-    private func convertHoloDuelToBushiroad(_ raw: String) async {
+    private func convertHoloDuelToHoloDelta(_ raw: String) async {
         guard let holoDuelDeck = DeckCodeConverter.importHoloDuel(raw) else {
             await MainActor.run {
                 showDeckToast("홀로듀얼 코드 형식이 올바르지 않습니다.")
@@ -650,11 +672,60 @@ struct ContentView: View {
             return
         }
 
+        await MainActor.run { showDeckToast("홀로델타 코드로 변환 중...") }
+        guard let holoDeltaCode = DeckCodeConverter.exportHoloDelta(entries: entries, title: "변환 덱") else {
+            await MainActor.run {
+                showDeckToast("변환 실패: 오시 카드가 없습니다.")
+            }
+            return
+        }
+
+        await MainActor.run {
+            UIPasteboard.general.string = holoDeltaCode
+            showDeckToast("홀로델타 코드가 클립보드에 복사되었습니다.")
+            showingDeckImportSheet = false
+            deckImportText = ""
+        }
+    }
+
+    private func convertHoloDeltaToBushiroad(_ raw: String) async {
+        guard let holoDeltaDeck = DeckCodeConverter.importHoloDelta(raw) else {
+            await MainActor.run {
+                showDeckToast("홀로델타 코드 형식이 올바르지 않습니다.")
+            }
+            return
+        }
+
+        let allCards = await viewModel.searchDeckCards("", limit: 5000)
+        let byCardNumber = Dictionary(uniqueKeysWithValues: allCards.map { ($0.cardNumber.uppercased(), $0) })
+        var entries: [(cardNumber: String, qty: Int, card: DeckCardCandidate)] = []
+
+        if let card = byCardNumber[holoDeltaDeck.oshiCardNumber.uppercased()] {
+            entries.append((card.cardNumber, 1, card))
+        }
+        for row in holoDeltaDeck.deckEntries {
+            if let card = byCardNumber[row.cardNumber.uppercased()] {
+                entries.append((card.cardNumber, row.qty, card))
+            }
+        }
+        for row in holoDeltaDeck.cheerEntries {
+            if let card = byCardNumber[row.cardNumber.uppercased()] {
+                entries.append((card.cardNumber, row.qty, card))
+            }
+        }
+
+        guard !entries.isEmpty else {
+            await MainActor.run {
+                showDeckToast("카드 정보를 찾을 수 없습니다.")
+            }
+            return
+        }
+
         await MainActor.run { showDeckToast("부시나비 코드로 변환 중...") }
         do {
             let url = try await DeckCodeConverter.publishBushiDeck(
                 entries: entries,
-                title: "변환 덱",
+                title: holoDeltaDeck.deckName ?? "변환 덱",
                 manageIdLookup: { printId in viewModel.getManageIdJp(printId: printId) }
             )
             await MainActor.run {
@@ -753,6 +824,66 @@ struct ContentView: View {
         return true
     }
 
+    private func mergeHoloDeltaDeck(_ holoDeltaDeck: DeckCodeConverter.HoloDeltaDeck) async -> Bool {
+        let allCards = await viewModel.searchDeckCards("", limit: 5000)
+        let byCardNumber = Dictionary(uniqueKeysWithValues: allCards.map { ($0.cardNumber.uppercased(), $0) })
+
+        func selectedRarity(for card: DeckCardCandidate, artIndex: Int) -> String? {
+            guard artIndex >= 0, artIndex < card.illustrations.count else { return nil }
+            let rarity = card.illustrations[artIndex].rarity
+            return card.selectableIllustrations.contains(where: { $0.rarity == rarity }) ? rarity : nil
+        }
+
+        var entries: [DeckEntryState] = []
+
+        if let card = byCardNumber[holoDeltaDeck.oshiCardNumber.uppercased()] {
+            entries.append(
+                DeckEntryState(
+                    id: card.printId,
+                    card: card,
+                    qty: 1,
+                    maxPerCard: maxPerCard(card),
+                    selectedRarity: selectedRarity(for: card, artIndex: holoDeltaDeck.oshiArtIndex)
+                )
+            )
+        }
+
+        for row in holoDeltaDeck.deckEntries {
+            if let card = byCardNumber[row.cardNumber.uppercased()] {
+                entries.append(
+                    DeckEntryState(
+                        id: card.printId,
+                        card: card,
+                        qty: row.qty,
+                        maxPerCard: maxPerCard(card),
+                        selectedRarity: selectedRarity(for: card, artIndex: row.artIndex)
+                    )
+                )
+            }
+        }
+
+        for row in holoDeltaDeck.cheerEntries {
+            if let card = byCardNumber[row.cardNumber.uppercased()] {
+                entries.append(
+                    DeckEntryState(
+                        id: card.printId,
+                        card: card,
+                        qty: row.qty,
+                        maxPerCard: maxPerCard(card),
+                        selectedRarity: selectedRarity(for: card, artIndex: row.artIndex)
+                    )
+                )
+            }
+        }
+
+        guard !entries.isEmpty else { return false }
+        let title = (holoDeltaDeck.deckName ?? "홀로델타 덱").trimmingCharacters(in: .whitespacesAndNewlines)
+        let newDeck = SavedDeckState(id: UUID(), title: title.isEmpty ? "홀로델타 덱" : title, entries: entries)
+        savedDecks.append(newDeck)
+        persistSavedDecks()
+        return true
+    }
+
     // MARK: - 홀로듀얼 코드 내보내기
     private func exportHoloDuelCodeToClipboard(_ deck: SavedDeckState) {
         let entries = deck.entries.map { (cardNumber: $0.card.cardNumber, qty: $0.qty, card: $0.card) }
@@ -762,6 +893,16 @@ struct ContentView: View {
         }
         UIPasteboard.general.string = code
         showDeckToast("홀로듀얼 코드가 클립보드에 복사되었습니다.")
+    }
+
+    private func exportHoloDeltaCodeToClipboard(_ deck: SavedDeckState) {
+        let entries = deck.entries.map { (cardNumber: $0.card.cardNumber, qty: $0.qty, card: $0.card) }
+        guard let code = DeckCodeConverter.exportHoloDelta(entries: entries, title: deck.title) else {
+            showDeckToast("오시 카드가 없습니다. 덱을 확인해 주세요.")
+            return
+        }
+        UIPasteboard.general.string = code
+        showDeckToast("홀로델타 코드가 클립보드에 복사되었습니다.")
     }
 
     // MARK: - 부시나비 코드 내보내기 (비동기, DeckLog 업로드)
@@ -1235,9 +1376,13 @@ struct ContentView: View {
                         }
                         .pickerStyle(.segmented)
 
-                        Text(deckImportMode == .holoDuel
-                             ? "홀로듀얼 덱 코드(Base64)를 붙여넣어 주세요."
-                             : "부시나비 URL 또는 코드를 붙여넣어 주세요.\n예: 6ADJR (URL 전체 입력 불필요)")
+                        Text(
+                            deckImportMode == .holoDuel
+                            ? "홀로듀얼 덱 코드(Base64)를 붙여넣어 주세요."
+                            : deckImportMode == .holoDelta
+                                ? "홀로델타 코드(JSON 또는 Base64 URL-safe)를 붙여넣어 주세요."
+                                : "부시나비 URL 또는 코드를 붙여넣어 주세요.\n예: 6ADJR (URL 전체 입력 불필요)"
+                        )
                             .font(.subheadline)
                             .foregroundColor(.secondary)
 
@@ -1250,7 +1395,13 @@ struct ContentView: View {
                                     .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
                             )
 
-                        Button(deckImportMode == .holoDuel ? "부시나비 코드로 변환" : "홀로듀얼 코드로 변환") {
+                        Button(
+                            deckImportMode == .holoDuel
+                            ? "홀로델타 코드로 변환"
+                            : deckImportMode == .holoDelta
+                                ? "부시나비 코드로 변환"
+                                : "홀로듀얼 코드로 변환"
+                        ) {
                             convertDeckCodeFromText()
                         }
                         .buttonStyle(.borderedProminent)
@@ -2348,6 +2499,9 @@ struct ContentView: View {
                             Menu("코드로 내보내기") {
                                 Button("홀로듀얼 코드") {
                                     exportHoloDuelCodeToClipboard(deck)
+                                }
+                                Button("홀로델타 코드") {
+                                    exportHoloDeltaCodeToClipboard(deck)
                                 }
                                 Button("부시나비 코드") {
                                     exportBushiroadCodeToClipboard(deck)
