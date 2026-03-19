@@ -49,7 +49,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
@@ -274,7 +274,7 @@ private enum class DeckImportMode(val label: String) {
 
 private data class DeckEntryUi(
     val card: DeckCardCandidate,
-    var qty: Int,
+    val qty: Int,
     val maxPerCard: Int,
     /** 사용자가 선택한 레어리티. null 이면 기본값(card.rarity) 사용. */
     val selectedRarity: String? = null,
@@ -374,13 +374,42 @@ private fun addCardToDeck(entries: MutableList<DeckEntryUi>, card: DeckCardCandi
     if (reason != null) {
         return reason
     }
-    val found = entries.firstOrNull { it.card.printId == card.printId }
-    if (found == null) {
+    val index = entries.indexOfFirst { it.card.printId == card.printId }
+    if (index == -1) {
         entries.add(DeckEntryUi(card = card, qty = 1, maxPerCard = maxPerCard(card)))
         return null
     }
-    found.qty += 1
+    val found = entries[index]
+    entries[index] = found.copy(qty = found.qty + 1)
     return null
+}
+
+private fun increaseDeckEntry(entries: MutableList<DeckEntryUi>, entry: DeckEntryUi): String? {
+    val reason = blockReason(entries, entry.card)
+    if (reason != null) {
+        return reason
+    }
+    val index = entries.indexOfFirst { it.card.printId == entry.card.printId }
+    if (index == -1) {
+        entries.add(entry.copy(qty = 1))
+        return null
+    }
+    val current = entries[index]
+    entries[index] = current.copy(qty = current.qty + 1)
+    return null
+}
+
+private fun decreaseDeckEntry(entries: MutableList<DeckEntryUi>, entry: DeckEntryUi) {
+    val index = entries.indexOfFirst { it.card.printId == entry.card.printId }
+    if (index == -1) {
+        return
+    }
+    val current = entries[index]
+    if (current.qty <= 1) {
+        entries.removeAt(index)
+    } else {
+        entries[index] = current.copy(qty = current.qty - 1)
+    }
 }
 
 private fun toDeckRecords(decks: List<DeckUi>): List<SavedDeckRecord> {
@@ -1711,16 +1740,13 @@ fun HocgScreen(
                     },
                     quantityForCard = { card -> deckQuantity(deckDraft, card) },
                     onIncrease = { entry ->
-                        val reason = blockReason(deckDraft, entry.card)
-                        if (reason == null) {
-                            entry.qty += 1
-                        } else {
+                        val reason = increaseDeckEntry(deckDraft, entry)
+                        if (reason != null) {
                             scope.launch { snackbarHostState.showSnackbar(reason) }
                         }
                     },
                     onDecrease = { entry ->
-                        entry.qty -= 1
-                        if (entry.qty <= 0) deckDraft.remove(entry)
+                        decreaseDeckEntry(deckDraft, entry)
                     },
                 )
             } else if (isMobileLayout) {
@@ -2021,7 +2047,7 @@ private fun DeckEditorScreen(
                             Text(entry.displayRarity, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
                         }
                     }
-                    IconButton(onClick = { onDecrease(entry) }) { Icon(Icons.Default.Close, contentDescription = "감소") }
+                    IconButton(onClick = { onDecrease(entry) }) { Icon(Icons.Default.Remove, contentDescription = "감소") }
                     IconButton(onClick = { onIncrease(entry) }) { Icon(Icons.Default.Add, contentDescription = "증가") }
                 }
             }
