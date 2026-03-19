@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
@@ -384,23 +385,22 @@ private fun addCardToDeck(entries: MutableList<DeckEntryUi>, card: DeckCardCandi
     return null
 }
 
-private fun increaseDeckEntry(entries: MutableList<DeckEntryUi>, entry: DeckEntryUi): String? {
-    val reason = blockReason(entries, entry.card)
+private fun increaseDeckEntryByPrintId(entries: MutableList<DeckEntryUi>, printId: Long): String? {
+    val index = entries.indexOfFirst { it.card.printId == printId }
+    if (index == -1) {
+        return "카드를 찾을 수 없습니다."
+    }
+    val current = entries[index]
+    val reason = blockReason(entries, current.card)
     if (reason != null) {
         return reason
     }
-    val index = entries.indexOfFirst { it.card.printId == entry.card.printId }
-    if (index == -1) {
-        entries.add(entry.copy(qty = 1))
-        return null
-    }
-    val current = entries[index]
     entries[index] = current.copy(qty = current.qty + 1)
     return null
 }
 
-private fun decreaseDeckEntry(entries: MutableList<DeckEntryUi>, entry: DeckEntryUi) {
-    val index = entries.indexOfFirst { it.card.printId == entry.card.printId }
+private fun decreaseDeckEntryByPrintId(entries: MutableList<DeckEntryUi>, printId: Long) {
+    val index = entries.indexOfFirst { it.card.printId == printId }
     if (index == -1) {
         return
     }
@@ -1698,7 +1698,7 @@ fun HocgScreen(
                     onSave = {
                         val snapshot = deckDraft.groupBy { it.card.printId }.values.map { g ->
                             val first = g.first()
-                            DeckEntryUi(first.card, g.sumOf { it.qty }, first.maxPerCard)
+                            DeckEntryUi(first.card, g.sumOf { it.qty }, first.maxPerCard, first.selectedRarity)
                         }
                         val now = System.currentTimeMillis()
                         val targetId = editingDeckId ?: UUID.randomUUID().toString()
@@ -1739,14 +1739,14 @@ fun HocgScreen(
                         rarityPickerEntry = entry
                     },
                     quantityForCard = { card -> deckQuantity(deckDraft, card) },
-                    onIncrease = { entry ->
-                        val reason = increaseDeckEntry(deckDraft, entry)
+                    onIncrease = { printId ->
+                        val reason = increaseDeckEntryByPrintId(deckDraft, printId)
                         if (reason != null) {
                             scope.launch { snackbarHostState.showSnackbar(reason) }
                         }
                     },
-                    onDecrease = { entry ->
-                        decreaseDeckEntry(deckDraft, entry)
+                    onDecrease = { printId ->
+                        decreaseDeckEntryByPrintId(deckDraft, printId)
                     },
                 )
             } else if (isMobileLayout) {
@@ -1813,6 +1813,7 @@ private fun DeckListScreen(
             items(decks.indices.toList(), key = { decks[it].id }) { idx ->
                 val deck = decks[idx]
                 var menuExpanded by remember(deck.id) { mutableStateOf(false) }
+                var exportMenuExpanded by remember(deck.id) { mutableStateOf(false) }
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1840,40 +1841,69 @@ private fun DeckListScreen(
                             }
                             DropdownMenu(
                                 expanded = menuExpanded,
-                                onDismissRequest = { menuExpanded = false },
+                                onDismissRequest = {
+                                    menuExpanded = false
+                                    exportMenuExpanded = false
+                                },
                             ) {
                                 DropdownMenuItem(
                                     text = { Text("이름 수정") },
                                     onClick = {
                                         menuExpanded = false
+                                        exportMenuExpanded = false
                                         onRename(deck)
                                     },
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("홀로듀얼 코드로 내보내기") },
+                                    text = {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Text("코드로 내보내기")
+                                            Icon(
+                                                imageVector = if (exportMenuExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                        }
+                                    },
                                     onClick = {
-                                        menuExpanded = false
-                                        onExportCode(deck)
+                                        exportMenuExpanded = !exportMenuExpanded
                                     },
                                 )
-                                DropdownMenuItem(
-                                    text = { Text("홀로델타 .json 파일로 내보내기") },
-                                    onClick = {
-                                        menuExpanded = false
-                                        onExportDelta(deck)
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("부시나비 코드로 내보내기") },
-                                    onClick = {
-                                        menuExpanded = false
-                                        onExportBushi(deck)
-                                    },
-                                )
+                                if (exportMenuExpanded) {
+                                    DropdownMenuItem(
+                                        text = { Text("홀로듀얼 코드") },
+                                        onClick = {
+                                            menuExpanded = false
+                                            exportMenuExpanded = false
+                                            onExportCode(deck)
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("홀로델타 .json 파일") },
+                                        onClick = {
+                                            menuExpanded = false
+                                            exportMenuExpanded = false
+                                            onExportDelta(deck)
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("부시나비 코드") },
+                                        onClick = {
+                                            menuExpanded = false
+                                            exportMenuExpanded = false
+                                            onExportBushi(deck)
+                                        },
+                                    )
+                                }
                                 DropdownMenuItem(
                                     text = { Text("이미지로 내보내기") },
                                     onClick = {
                                         menuExpanded = false
+                                        exportMenuExpanded = false
                                         onExportImage(deck)
                                     },
                                 )
@@ -1881,6 +1911,7 @@ private fun DeckListScreen(
                                     text = { Text("삭제") },
                                     onClick = {
                                         menuExpanded = false
+                                        exportMenuExpanded = false
                                         onDelete(deck)
                                     },
                                 )
@@ -1922,8 +1953,8 @@ private fun DeckEditorScreen(
     onSearchQueryChange: (String) -> Unit,
     onSelectCandidate: (DeckCardCandidate) -> Unit,
     quantityForCard: (DeckCardCandidate) -> Int,
-    onIncrease: (DeckEntryUi) -> Unit,
-    onDecrease: (DeckEntryUi) -> Unit,
+    onIncrease: (Long) -> Unit,
+    onDecrease: (Long) -> Unit,
     onChangeRarity: (DeckEntryUi) -> Unit = {},
 ) {
     val oshi = entries.filter { isOshi(it.card) }.sumOf { it.qty }
@@ -2047,8 +2078,14 @@ private fun DeckEditorScreen(
                             Text(entry.displayRarity, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
                         }
                     }
-                    IconButton(onClick = { onDecrease(entry) }) { Icon(Icons.Default.Remove, contentDescription = "감소") }
-                    IconButton(onClick = { onIncrease(entry) }) { Icon(Icons.Default.Add, contentDescription = "증가") }
+                    val blockedReason = blockReason(entries, entry.card)
+                    IconButton(
+                        onClick = { onDecrease(entry.card.printId) },
+                    ) { Icon(Icons.Default.Remove, contentDescription = "감소") }
+                    IconButton(
+                        onClick = { onIncrease(entry.card.printId) },
+                        enabled = blockedReason == null,
+                    ) { Icon(Icons.Default.Add, contentDescription = "증가") }
                 }
             }
         }
@@ -3232,10 +3269,10 @@ private fun Modifier.clearFocusOnTap(focusManager: FocusManager): Modifier {
         awaitEachGesture {
             awaitFirstDown(
                 requireUnconsumed = false,
-                pass = PointerEventPass.Initial,
+                pass = PointerEventPass.Final,
             )
             focusManager.clearFocus(force = true)
-            waitForUpOrCancellation(pass = PointerEventPass.Initial)
+            waitForUpOrCancellation(pass = PointerEventPass.Final)
         }
     }
 }
