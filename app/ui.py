@@ -550,9 +550,6 @@ def launch_app(db_path: str) -> None:
             ko_norm = _normalize_rule_text(ko_src)
             ja_norm = _normalize_rule_text(ja_src)
 
-            if "리미티드" in ko_src or "limited" in ko_src or "リミテッド" in ja_src:
-                return 1
-
             if "덱에몇장이라도넣을수있" in ko_norm:
                 return 50
             if "デッキに何枚でも入れられる" in ja_norm:

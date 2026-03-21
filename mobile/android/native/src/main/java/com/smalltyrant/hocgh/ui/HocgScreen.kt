@@ -329,25 +329,30 @@ private fun hasUnlimitedPerCardRule(card: DeckCardCandidate): Boolean {
         normalizedKo.contains("수량상관없이여러장넣을수있다") ||
         (normalizedJa.contains("何枚でも") && normalizedJa.contains("入れられる"))
 }
+
+private fun hasOneCopyByRarity(card: DeckCardCandidate): Boolean {
+    val rarities = buildSet {
+        val base = card.rarity.trim().uppercase()
+        if (base.isNotEmpty()) add(base)
+        card.illustrations.forEach { option ->
+            val rarity = option.rarity.trim().uppercase()
+            if (rarity.isNotEmpty()) add(rarity)
+        }
+    }
+    return "OUR" in rarities || "OSR" in rarities
+}
+
 private fun maxPerCard(card: DeckCardCandidate): Int {
     if (isOshi(card)) return 1
+    if (hasOneCopyByRarity(card)) return 1
     if (isYell(card)) return Int.MAX_VALUE
-    val rarity = card.rarity.trim().uppercase()
-    if (rarity == "OSR" || rarity == "OUR") return 1
     if (hasUnlimitedPerCardRule(card)) return Int.MAX_VALUE
-    val src = card.koText
-    val rx = listOf(Regex("(\\d+)장만"), Regex("최대\\s*(\\d+)장"), Regex("(\\d+)장까지"))
-    for (r in rx) {
-        val m = r.find(src) ?: continue
-        val n = m.groupValues.getOrNull(1)?.toIntOrNull() ?: continue
-        return n.coerceAtLeast(1)
-    }
     return 4
 }
 
 private fun blockReason(entries: List<DeckEntryUi>, card: DeckCardCandidate): String? {
     val qty = deckQuantity(entries, card)
-    val perCardLimit = entries.firstOrNull { it.card.printId == card.printId }?.maxPerCard ?: maxPerCard(card)
+    val perCardLimit = maxPerCard(card)
     if (perCardLimit != Int.MAX_VALUE && qty >= perCardLimit) {
         return "이 카드는 최대 ${perCardLimit}장까지만 편성 가능합니다."
     }
@@ -381,7 +386,8 @@ private fun addCardToDeck(entries: MutableList<DeckEntryUi>, card: DeckCardCandi
         return null
     }
     val found = entries[index]
-    entries[index] = found.copy(qty = found.qty + 1)
+    val perCardLimit = maxPerCard(found.card)
+    entries[index] = found.copy(qty = found.qty + 1, maxPerCard = perCardLimit)
     return null
 }
 
@@ -395,7 +401,7 @@ private fun increaseDeckEntryByPrintId(entries: MutableList<DeckEntryUi>, printI
     if (reason != null) {
         return reason
     }
-    entries[index] = current.copy(qty = current.qty + 1)
+    entries[index] = current.copy(qty = current.qty + 1, maxPerCard = maxPerCard(current.card))
     return null
 }
 
@@ -444,10 +450,13 @@ private fun resolveDecksFromRecords(
             if (card == null || entry.qty <= 0) {
                 null
             } else {
+                val perCardLimit = maxPerCard(card)
+                val normalizedQty = entry.qty.coerceAtLeast(1)
+                val clampedQty = if (perCardLimit == Int.MAX_VALUE) normalizedQty else normalizedQty.coerceAtMost(perCardLimit)
                 DeckEntryUi(
                     card = card,
-                    qty = entry.qty.coerceAtLeast(1),
-                    maxPerCard = maxPerCard(card),
+                    qty = clampedQty,
+                    maxPerCard = perCardLimit,
                     selectedRarity = entry.selectedRarity,
                 )
             }
@@ -3229,20 +3238,43 @@ private fun RarityPickerBottomSheet(
                             .clickable { onSelect(option.rarity) },
                     ) {
                         val imgUrl = if (option.imageUrl.isNotEmpty()) option.imageUrl else card.imageUrl
-                        AsyncImage(
-                            model = imgUrl,
-                            contentDescription = option.rarity,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(400f / 558f)
-                                .clip(RoundedCornerShape(6.dp))
-                                .border(
-                                    width = if (isSelected) 3.dp else 0.dp,
-                                    color = if (isSelected) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Transparent,
-                                    shape = RoundedCornerShape(6.dp),
-                                ),
-                            contentScale = ContentScale.Crop,
-                        )
+                        val hasImageUrl = imgUrl.trim().isNotEmpty()
+                        if (hasImageUrl) {
+                            AsyncImage(
+                                model = imgUrl,
+                                contentDescription = option.rarity,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(400f / 558f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .border(
+                                        width = if (isSelected) 3.dp else 0.dp,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Transparent,
+                                        shape = RoundedCornerShape(6.dp),
+                                    ),
+                                contentScale = ContentScale.Crop,
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(400f / 558f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .border(
+                                        width = if (isSelected) 3.dp else 0.dp,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Transparent,
+                                        shape = RoundedCornerShape(6.dp),
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Image,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.outline,
+                                )
+                            }
+                        }
                         Text(
                             option.rarity,
                             style = MaterialTheme.typography.labelMedium,

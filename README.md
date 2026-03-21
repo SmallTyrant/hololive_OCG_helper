@@ -98,3 +98,11 @@ python3 tools/import_db_from_csv.py --csv-dir data/csv_dump --db data/hololive_f
 - 카드 이미지 선택 기능 추가
 - 자동 DB 업데이트 개선
 - 테스트 자동화 강화
+
+---
+
+## ✅ Repeatable Dev Loop
+- 로컬 반복 루프: `python3 scripts/run_quality_loop.py --max-attempts 3`
+- CI 병렬 검증: `.github/workflows/quality-loop.yml`
+- 실패 로그 분석: `python3 scripts/analyze_ci_failures.py --log-dir <dir>`
+- 운영 가이드: `docs/parallel_agent_loop.md`

@@ -1,0 +1,135 @@
+name: Quality Loop
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      python: ${{ steps.filter.outputs.python }}
+      android: ${{ steps.filter.outputs.android }}
+      ios: ${{ steps.filter.outputs.ios }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            python:
+              - 'app/**'
+              - 'tools/**'
+              - 'scripts/**'
+              - '**/*.py'
+            android:
+              - 'mobile/android/native/**'
+              - 'mobile/android/native-app/**'
+            ios:
+              - 'mobile/ios/native/**'
+              - 'mobile/ios/native-app/**'
+
+  python_checks:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run Python compile checks
+        run: python scripts/python_syntax_check.py 2>&1 | tee python-compile.log
+      - name: Run deck limit audit
+        run: |
+          if [ -f tools/audit_deck_limits.py ]; then
+            python tools/audit_deck_limits.py 2>&1 | tee audit-deck-limits.log
+          else
+            echo "SKIPPED" | tee audit-deck-limits.log
+          fi
+      - name: Run HY image audit
+        run: |
+          if [ -f tools/audit_hy_images.py ]; then
+            python tools/audit_hy_images.py 2>&1 | tee audit-hy-images.log
+          else
+            echo "SKIPPED" | tee audit-hy-images.log
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: python-logs
+          path: "*.log"
+
+  android_checks:
+    needs: changes
+    if: needs.changes.outputs.android == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile/android/native-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Run Android tests
+        run: |
+          chmod +x ./gradlew
+          ./gradlew test 2>&1 | tee android-test.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-logs
+          path: mobile/android/native-app/android-test.log
+
+  ios_checks:
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: mobile/ios/native-app
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run iOS build
+        run: |
+          xcodebuild \
+            -project HocgNative.xcodeproj \
+            -scheme HocgNative \
+            -configuration Debug \
+            -destination "generic/platform=iOS Simulator" \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee ios-build.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-logs
+          path: mobile/ios/native-app/ios-build.log
+
+  analyze_failures:
+    needs: [changes, python_checks, android_checks, ios_checks]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        if: always() && (needs.changes.outputs.python == 'true' || needs.changes.outputs.android == 'true' || needs.changes.outputs.ios == 'true')
+        with:
+          path: ci-logs
+      - name: Analyze logs
+        if: always()
+        run: |
+          python scripts/analyze_ci_failures.py --log-dir ci-logs || true
+      - name: Workflow verdict
+        run: |
+          if [ "${{ needs.python_checks.result }}" = "failure" ] || [ "${{ needs.android_checks.result }}" = "failure" ] || [ "${{ needs.ios_checks.result }}" = "failure" ]; then
+            echo "quality loop: failed"
+            exit 1
+          fi
+          echo "quality loop: passed"

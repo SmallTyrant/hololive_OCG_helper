@@ -320,16 +320,26 @@ struct ContentView: View {
             || (normalizedJa.contains("何枚でも") && normalizedJa.contains("入れられる"))
     }
 
+    private func hasOneCopyByRarity(_ card: DeckCardCandidate) -> Bool {
+        var rarities = Set<String>()
+        let base = card.rarity.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if !base.isEmpty {
+            rarities.insert(base)
+        }
+        for option in card.illustrations {
+            let rarity = option.rarity.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if !rarity.isEmpty {
+                rarities.insert(rarity)
+            }
+        }
+        return rarities.contains("OUR") || rarities.contains("OSR")
+    }
+
     private func maxPerCard(_ card: DeckCardCandidate) -> Int {
         if isOshi(card) { return 1 }
+        if hasOneCopyByRarity(card) { return 1 }
         if isYell(card) { return Int.max }
-        let rarity = card.rarity.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if rarity == "OSR" || rarity == "OUR" { return 1 }
         if hasUnlimitedPerCardRule(card) { return Int.max }
-        let patterns = ["(\\d+)장만", "최대\\s*(\\d+)장", "(\\d+)장까지"]
-        for p in patterns {
-            if let regex = try? NSRegularExpression(pattern: p), let match = regex.firstMatch(in: card.koText, range: NSRange(location: 0, length: card.koText.utf16.count)), let r = Range(match.range(at: 1), in: card.koText), let n = Int(card.koText[r]) { return max(1, n) }
-        }
         return 4
     }
 
@@ -361,7 +371,7 @@ struct ContentView: View {
 
     private func blockReason(for card: DeckCardCandidate) -> String? {
         let qty = deckQuantity(for: card)
-        let perCardLimit = deckEntries.first(where: { $0.id == card.printId })?.maxPerCard ?? maxPerCard(card)
+        let perCardLimit = maxPerCard(card)
         if perCardLimit != .max, qty >= perCardLimit {
             return "이 카드는 최대 \(perCardLimit)장까지만 편성 가능합니다."
         }
@@ -395,6 +405,7 @@ struct ContentView: View {
         // 이미 덱에 있으면 수량만 증가
         if let idx = deckEntries.firstIndex(where: { $0.id == card.printId }) {
             deckEntries[idx].qty += 1
+            deckEntries[idx].maxPerCard = maxPerCard(deckEntries[idx].card)
             return
         }
         // 레어리티가 2개 이상이면 선택 시트를 먼저 표시
@@ -500,7 +511,11 @@ struct ContentView: View {
                 return DeckEntryState(
                     id: card.printId,
                     card: card,
-                    qty: qty,
+                    qty: {
+                        let limit = maxPerCard(card)
+                        if limit == .max { return qty }
+                        return min(qty, limit)
+                    }(),
                     maxPerCard: maxPerCard(card),
                     selectedRarity: resolvedRarity
                 )
@@ -2942,29 +2957,64 @@ private struct RarityOptionCell: View {
     let onTap: () -> Void
 
     private var imageUrl: URL? {
-        URL(string: option.imageUrl.isEmpty ? fallbackImageUrl : option.imageUrl)
+        let raw = option.imageUrl.isEmpty ? fallbackImageUrl : option.imageUrl
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return URL(string: trimmed)
     }
 
     var body: some View {
         Button(action: onTap) {
             VStack(spacing: 6) {
-                AsyncImage(url: imageUrl) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().aspectRatio(400.0/558.0, contentMode: .fit)
-                    default:
-                        Rectangle()
-                            .fill(Color.secondary.opacity(0.2))
-                            .aspectRatio(400.0/558.0, contentMode: .fit)
-                            .overlay(ProgressView())
+                if let imageUrl {
+                    AsyncImage(url: imageUrl) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().aspectRatio(400.0/558.0, contentMode: .fit)
+                        case .failure:
+                            Rectangle()
+                                .fill(Color.secondary.opacity(0.2))
+                                .aspectRatio(400.0/558.0, contentMode: .fit)
+                                .overlay(
+                                    Image(systemName: "photo.badge.exclamationmark")
+                                        .foregroundColor(.secondary)
+                                )
+                        case .empty:
+                            Rectangle()
+                                .fill(Color.secondary.opacity(0.2))
+                                .aspectRatio(400.0/558.0, contentMode: .fit)
+                                .overlay(ProgressView())
+                        @unknown default:
+                            Rectangle()
+                                .fill(Color.secondary.opacity(0.2))
+                                .aspectRatio(400.0/558.0, contentMode: .fit)
+                                .overlay(
+                                    Image(systemName: "photo")
+                                        .foregroundColor(.secondary)
+                                )
+                        }
                     }
+                    .frame(width: 100)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
+                    )
+                } else {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.2))
+                        .aspectRatio(400.0/558.0, contentMode: .fit)
+                        .frame(width: 100)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(
+                            Image(systemName: "photo")
+                                .foregroundColor(.secondary)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
+                        )
                 }
-                .frame(width: 100)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
-                )
 
                 Text(option.rarity)
                     .font(.caption.bold())
