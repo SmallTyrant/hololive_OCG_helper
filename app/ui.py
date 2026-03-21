@@ -540,18 +540,24 @@ def launch_app(db_path: str) -> None:
             deck_file.parent.mkdir(parents=True, exist_ok=True)
             deck_file.write_text(json.dumps(decks, ensure_ascii=False, indent=2), encoding="utf-8")
 
-        def card_limit_from_text(text: str) -> int:
-            src = (text or "").lower()
-            if "리미티드" in src or "limited" in src:
+        def _normalize_rule_text(text: str) -> str:
+            src = (text or "").lower().strip()
+            return re.sub(r"\s+", "", src)
+
+        def card_limit_from_text(ko_text: str, ja_text: str = "") -> int:
+            ko_src = (ko_text or "").lower()
+            ja_src = (ja_text or "").lower()
+            ko_norm = _normalize_rule_text(ko_src)
+            ja_norm = _normalize_rule_text(ja_src)
+
+            if "리미티드" in ko_src or "limited" in ko_src or "リミテッド" in ja_src:
                 return 1
-            patterns = [r"(\d+)장만", r"최대\s*(\d+)장", r"(\d+)장까지"]
-            for pattern in patterns:
-                m = re.search(pattern, src)
-                if m:
-                    try:
-                        return max(1, int(m.group(1)))
-                    except Exception:
-                        pass
+
+            if "덱에몇장이라도넣을수있" in ko_norm:
+                return 50
+            if "デッキに何枚でも入れられる" in ja_norm:
+                return 50
+
             return 4
 
         def is_oshi(card: dict) -> bool:
@@ -577,21 +583,95 @@ def launch_app(db_path: str) -> None:
                     main += qty
             return oshi, yell, main
 
+        def next_deck_count_error(is_oshi_card: bool, is_yell_card: bool, entries: list[dict]) -> str | None:
+            oshi_count, yell_count, main_count = get_entry_counts(entries)
+            if is_oshi_card and oshi_count + 1 > 1:
+                return "오시카드는 1장만 선택 가능합니다."
+            if is_yell_card and yell_count + 1 > 20:
+                return "옐 카드는 최대 20장까지 가능합니다."
+            if not is_oshi_card and not is_yell_card and main_count + 1 > 50:
+                return "오시/옐 제외 카드는 최대 50장까지 가능합니다."
+            return None
+
+        def rebuild_deck_entries_for_rules(entries: list[dict]) -> list[dict]:
+            if not entries:
+                return []
+
+            normalized: list[dict] = []
+            print_ids = sorted({int(e.get("print_id") or 0) for e in entries if int(e.get("print_id") or 0) > 0})
+            meta_by_pid: dict[int, dict] = {}
+
+            if print_ids:
+                try:
+                    conn = get_conn()
+                    placeholders = ",".join(["?"] * len(print_ids))
+                    rows = conn.execute(
+                        f"""
+                        SELECT
+                            p.print_id,
+                            COALESCE(p.card_type,'') AS card_type,
+                            COALESCE(p.color,'') AS color,
+                            COALESCE(ko.effect_text,'') AS ko_text,
+                            COALESCE(ja.effect_text,'') AS ja_text
+                        FROM prints p
+                        LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
+                        LEFT JOIN card_texts_ja ja ON ja.print_id = p.print_id
+                        WHERE p.print_id IN ({placeholders})
+                        """,
+                        print_ids,
+                    ).fetchall()
+                    meta_by_pid = {int(row["print_id"]): dict(row) for row in rows}
+                except Exception:
+                    meta_by_pid = {}
+
+            for raw in entries:
+                entry = dict(raw)
+                pid = int(entry.get("print_id") or 0)
+                meta = meta_by_pid.get(pid, {})
+
+                probe = {
+                    "card_type": meta.get("card_type") or entry.get("card_type") or "",
+                    "color": meta.get("color") or entry.get("color") or "",
+                }
+                is_oshi_card = is_oshi(probe) or bool(entry.get("is_oshi"))
+                is_yell_card = is_yell(probe) or bool(entry.get("is_yell"))
+
+                if is_oshi_card:
+                    max_per_card = 1
+                elif meta:
+                    max_per_card = card_limit_from_text(meta.get("ko_text") or "", meta.get("ja_text") or "")
+                else:
+                    old_limit = int(entry.get("max_per_card", 4) or 4)
+                    max_per_card = 50 if old_limit >= 50 else 4
+
+                qty = max(0, int(entry.get("qty", 0) or 0))
+                qty = min(qty, max_per_card)
+                if qty <= 0:
+                    continue
+
+                entry["is_oshi"] = is_oshi_card
+                entry["is_yell"] = is_yell_card
+                entry["max_per_card"] = max_per_card
+                normalized.append(entry)
+
+            return normalized
+
         def try_add_card_to_deck(card: dict) -> str | None:
             entries = deck_editor_state["entries"]
-            oshi_count, yell_count, main_count = get_entry_counts(entries)
-            max_per_card = 1 if is_oshi(card) else card_limit_from_text(card.get("ko_text") or "")
+            is_oshi_card = is_oshi(card)
+            is_yell_card = is_yell(card)
+            max_per_card = 1 if is_oshi_card else card_limit_from_text(card.get("ko_text") or "", card.get("ja_text") or "")
             card_id = int(card.get("print_id") or 0)
             found = next((entry for entry in entries if int(entry.get("print_id") or 0) == card_id), None)
 
-            if is_oshi(card) and oshi_count >= 1 and not found:
-                return "오시카드는 1장만 선택 가능합니다."
-            if is_yell(card) and yell_count >= 20 and not found:
-                return "옐 카드는 최대 20장까지 가능합니다."
-            if not is_oshi(card) and not is_yell(card) and main_count >= 50 and not found:
-                return "오시/옐 제외 카드는 최대 50장까지 가능합니다."
+            count_error = next_deck_count_error(is_oshi_card, is_yell_card, entries)
+            if count_error:
+                return count_error
 
             if found:
+                found["max_per_card"] = max_per_card
+                found["is_oshi"] = is_oshi_card
+                found["is_yell"] = is_yell_card
                 if int(found.get("qty", 0)) >= int(found.get("max_per_card", max_per_card)):
                     return f"이 카드는 최대 {found.get('max_per_card', max_per_card)}장까지 가능합니다."
                 found["qty"] = int(found.get("qty", 0)) + 1
@@ -603,9 +683,11 @@ def launch_app(db_path: str) -> None:
                     "card_number": (card.get("card_number") or "").strip(),
                     "name": (card.get("name_ko") or card.get("name_ja") or "(이름 없음)").strip(),
                     "image_url": resolve_url((card.get("image_url") or "").strip()),
-                    "is_oshi": is_oshi(card),
-                    "is_yell": is_yell(card),
+                    "is_oshi": is_oshi_card,
+                    "is_yell": is_yell_card,
                     "max_per_card": max_per_card,
+                    "card_type": (card.get("card_type") or "").strip(),
+                    "color": (card.get("color") or "").strip(),
                     "qty": 1,
                 }
             )
@@ -628,13 +710,9 @@ def launch_app(db_path: str) -> None:
             max_per_card = int(target.get("max_per_card", 4))
             if qty >= max_per_card:
                 return f"이 카드는 최대 {max_per_card}장까지 가능합니다."
-            oshi_count, yell_count, main_count = get_entry_counts(deck_editor_state["entries"])
-            if target.get("is_oshi") and oshi_count >= 1:
-                return "오시카드는 1장만 선택 가능합니다."
-            if target.get("is_yell") and yell_count >= 20:
-                return "옐 카드는 최대 20장까지 가능합니다."
-            if not target.get("is_oshi") and not target.get("is_yell") and main_count >= 50:
-                return "오시/옐 제외 카드는 최대 50장까지 가능합니다."
+            count_error = next_deck_count_error(bool(target.get("is_oshi")), bool(target.get("is_yell")), deck_editor_state["entries"])
+            if count_error:
+                return count_error
             target["qty"] = qty + 1
             return None
 
@@ -656,7 +734,7 @@ def launch_app(db_path: str) -> None:
                 deck = next((d for d in decks if int(d.get("id", -1)) == int(deck_id)), None)
                 if deck:
                     deck_editor_state["title"] = deck.get("title") or "덱"
-                    deck_editor_state["entries"] = [dict(x) for x in (deck.get("entries") or [])]
+                    deck_editor_state["entries"] = rebuild_deck_entries_for_rules([dict(x) for x in (deck.get("entries") or [])])
             build_layout(force=True)
             page.update()
 

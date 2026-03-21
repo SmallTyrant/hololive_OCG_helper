@@ -369,9 +369,11 @@ def list_cards_for_deck(conn: sqlite3.Connection, limit: int = 600) -> list[dict
                 COALESCE(p.image_url,'') AS image_url,
                 COALESCE(p.card_type,'') AS card_type,
                 COALESCE(p.color,'') AS color,
-                COALESCE(ko.effect_text,'') AS ko_text
+                COALESCE(ko.effect_text,'') AS ko_text,
+                COALESCE(ja.effect_text,'') AS ja_text
             FROM prints p
             LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
+            LEFT JOIN card_texts_ja ja ON ja.print_id = p.print_id
             ORDER BY p.card_number
             LIMIT ?
             """,
