@@ -405,7 +405,6 @@ struct ContentView: View {
         // 이미 덱에 있으면 수량만 증가
         if let idx = deckEntries.firstIndex(where: { $0.id == card.printId }) {
             deckEntries[idx].qty += 1
-            deckEntries[idx].maxPerCard = maxPerCard(deckEntries[idx].card)
             return
         }
         // 레어리티가 2개 이상이면 선택 시트를 먼저 표시
