@@ -45,7 +45,7 @@ jobs:
           BASE_BUILD_NUMBER=136
           BUILD_NUMBER=$((BASE_BUILD_NUMBER + ${{ github.run_number }}))
           echo "build_number=$BUILD_NUMBER" >> $GITHUB_OUTPUT
-          echo "version_name=1.2.12" >> $GITHUB_OUTPUT
+          echo "version_name=1.2.13" >> $GITHUB_OUTPUT
       
       - name: keystore.properties 생성 (Release 빌드용)
         working-directory: mobile/android/native-app
