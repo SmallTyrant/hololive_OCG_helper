@@ -15,25 +15,27 @@ from urllib.error import URLError, HTTPError
 
 CARD_NUMBER_RE = re.compile(r"\b[hH][A-Za-z]{1,5}\d{2}-\d{3}\b")
 GITHUB_REPO = "SmallTyrant/hololive_OCG_helper"
+DB_RELEASE_TAG = "DB"
+DB_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/tags/{DB_RELEASE_TAG}"
 LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-LATEST_DB_DIRECT_URL = f"https://github.com/{GITHUB_REPO}/releases/latest/download/hololive_ocg.sqlite"
+LATEST_DB_DIRECT_URL = f"https://github.com/{GITHUB_REPO}/releases/download/{DB_RELEASE_TAG}/hololive_ocg.sqlite"
 
 
 def _fetch_latest_release(timeout: int = 20) -> dict | None:
-    req = Request(
-        LATEST_RELEASE_API,
-        headers={
-            "User-Agent": "hOCG_H/1.1",
-            "Accept": "application/vnd.github+json",
-        },
-    )
-    try:
-        with urlopen(req, timeout=timeout) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-            if isinstance(payload, dict):
-                return payload
-    except Exception:
-        return None
+    headers = {
+        "User-Agent": "hOCG_H/1.1",
+        "Accept": "application/vnd.github+json",
+    }
+
+    for api_url in (DB_RELEASE_API, LATEST_RELEASE_API):
+        req = Request(api_url, headers=headers)
+        try:
+            with urlopen(req, timeout=timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+                if isinstance(payload, dict):
+                    return payload
+        except Exception:
+            continue
     return None
 
 

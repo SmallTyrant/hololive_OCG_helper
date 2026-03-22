@@ -1,0 +1,59 @@
+name: DB 파일 릴리즈 업로드
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'app/assets/hololive_ocg.sqlite'
+      - '.github/workflows/publish-db.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish-db:
+    name: DB 태그 릴리즈 업로드
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: DB 해시 계산
+        id: db_hash
+        run: |
+          SHA256=$(sha256sum app/assets/hololive_ocg.sqlite | awk '{print $1}')
+          SIZE=$(stat -c %s app/assets/hololive_ocg.sqlite)
+          echo "sha256=$SHA256" >> $GITHUB_OUTPUT
+          echo "size=$SIZE" >> $GITHUB_OUTPUT
+
+      - name: DB 릴리즈 태그 준비
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view DB >/dev/null 2>&1; then
+            echo "DB release exists"
+          else
+            gh release create DB --title "DB 파일" --notes "앱 최신 DB 배포 태그"
+          fi
+
+      - name: DB 파일 업로드 (DB 태그)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload DB app/assets/hololive_ocg.sqlite --clobber
+
+      - name: 릴리즈 노트 갱신
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTES=$(cat <<EOF
+          자동 업데이트: main @ ${GITHUB_SHA}
+          - file: hololive_ocg.sqlite
+          - size: ${{ steps.db_hash.outputs.size }} bytes
+          - sha256: ${{ steps.db_hash.outputs.sha256 }}
+          EOF
+          )
+          gh release edit DB --title "DB 파일" --notes "$NOTES"
