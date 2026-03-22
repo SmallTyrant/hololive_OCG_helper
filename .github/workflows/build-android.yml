@@ -7,7 +7,6 @@ on:
     paths:
       - 'mobile/android/native-app/**'
       - 'mobile/android/native/**'
-      - 'app/assets/hololive_ocg.sqlite'
       - '.github/workflows/build-android.yml'
   workflow_dispatch:
 

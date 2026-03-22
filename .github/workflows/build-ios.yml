@@ -7,7 +7,6 @@ on:
     paths:
       - 'mobile/ios/native-app/**'
       - 'mobile/ios/native/**'
-      - 'app/assets/hololive_ocg.sqlite'
       - '.github/workflows/build-ios.yml'
   workflow_dispatch:
 
