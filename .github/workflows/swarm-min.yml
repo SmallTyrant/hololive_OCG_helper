@@ -1,5 +1,8 @@
 name: Swarm Minimal (native-app full auto)
 
+env:
+  DEFAULT_MODEL: "openai/gpt-5.3-codex"
+
 on:
   workflow_dispatch:
     inputs:
@@ -27,14 +30,11 @@ on:
     types: [opened, synchronize, reopened, labeled]
 
 permissions:
-  id-token: write
-  contents: write
-  pull-requests: write
-  issues: write
+  contents: read
 
 concurrency:
   group: swarm-min-${{ github.event.pull_request.number || github.event.issue.number || github.sha }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
 
@@ -45,6 +45,8 @@ jobs:
   bootstrap_labels:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.run == 'bootstrap-labels'
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
     steps:
       - uses: actions/github-script@v7
         with:
@@ -73,7 +75,9 @@ jobs:
                   color: label.color,
                   description: label.description
                 });
-              } catch (e) {}
+              } catch (e) {
+                if (e.status !== 422) console.warn(`Label "${label.name}" error:`, e.message);
+              }
             }
 
   # ============================================================
@@ -83,6 +87,10 @@ jobs:
   opencode_dispatch:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.run == 'run-agent'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
     steps:
       - uses: actions/checkout@v4
 
@@ -107,6 +115,10 @@ jobs:
       (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'go') ||
       (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/go'))
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
     steps:
       - uses: actions/checkout@v4
 
@@ -116,7 +128,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         with:
-          model: openai/gpt-5.3-codex
+          model: ${{ env.DEFAULT_MODEL }}
           use_github_token: true
           prompt: |
             Create PR(s) for this request.
@@ -140,6 +152,8 @@ jobs:
   changes:
     if: github.event_name == 'pull_request' && (github.event.action == 'opened' || github.event.action == 'synchronize' || github.event.action == 'reopened')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       ios: ${{ steps.filter.outputs.ios }}
       android: ${{ steps.filter.outputs.android }}
@@ -155,6 +169,7 @@ jobs:
               - 'mobile/ios/native/**'
             android:
               - 'mobile/android/native/**'
+              - 'mobile/android/native-app/**'
             tools:
               - 'app/**'
               - 'tools/**'
@@ -173,7 +188,10 @@ jobs:
 
   scope_guard:
     needs: changes
+    if: always() && (needs.changes.result == 'success' || needs.changes.result == 'skipped')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Fail on mixed scopes
         run: |
@@ -189,18 +207,26 @@ jobs:
 
   db_bundle_guard:
     needs: changes
+    if: always() && (needs.changes.result == 'success' || needs.changes.result == 'skipped')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Block sqlite usage
         run: |
-          git fetch origin ${{ github.base_ref }} --depth=1
+          git fetch origin ${{ github.base_ref }}
           if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '\.sqlite$' ; then exit 1; fi
           if git diff origin/${{ github.base_ref }}...HEAD -- | grep -Ei 'hololive_ocg\.sqlite' ; then exit 1; fi
 
   secrets_scan:
     needs: changes
+    if: always() && (needs.changes.result == 'success' || needs.changes.result == 'skipped')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: gitleaks/gitleaks-action@v2
@@ -213,6 +239,8 @@ jobs:
     needs: [changes, scope_guard, db_bundle_guard, secrets_scan]
     if: needs.changes.outputs.android == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: mobile/android/native-app
@@ -230,6 +258,8 @@ jobs:
     needs: [changes, scope_guard, db_bundle_guard, secrets_scan]
     if: needs.changes.outputs.tools == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -247,6 +277,9 @@ jobs:
     needs: [changes, scope_guard, db_bundle_guard, secrets_scan, android, tools]
     if: always() && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
     steps:
       - uses: actions/github-script@v7
         with:
@@ -255,9 +288,9 @@ jobs:
             const needs = ${{ toJson(needs) }};
 
             const gatesOk =
-              needs.scope_guard.result === "success" &&
-              needs.db_bundle_guard.result === "success" &&
-              needs.secrets_scan.result === "success";
+              (needs.scope_guard.result === "success" || needs.scope_guard.result === "skipped") &&
+              (needs.db_bundle_guard.result === "success" || needs.db_bundle_guard.result === "skipped") &&
+              (needs.secrets_scan.result === "success" || needs.secrets_scan.result === "skipped");
 
             const testsOk =
               (needs.android?.result === "success" || needs.android?.result === "skipped") &&
@@ -286,6 +319,9 @@ jobs:
   auto_merge:
     if: github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'tests-passed'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - uses: actions/github-script@v7
         with:
@@ -306,6 +342,10 @@ jobs:
   fix_once:
     if: github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'tests-failed'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
     steps:
       - uses: actions/checkout@v4
 
@@ -335,10 +375,21 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         with:
-          model: openai/gpt-5.3-codex
+          model: ${{ env.DEFAULT_MODEL }}
           use_github_token: true
           prompt: |
             FIX MODE (single attempt).
             Only fix failing CI checks with minimal change.
             Do not change deps/signing/Gradle/AGP.
             Never bundle data/hololive_ocg.sqlite.
+
+      - uses: actions/github-script@v7
+        if: steps.guard.outputs.attempted != 'true'
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              labels: ["fix-attempted"]
+            });
