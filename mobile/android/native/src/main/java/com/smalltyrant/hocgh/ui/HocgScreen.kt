@@ -2724,10 +2724,10 @@ private fun SectionChip(text: String) {
 private fun DetailLine(line: String, highlightRegex: Regex) {
     splitSectionLabel(line)?.let { (label, rest) ->
         if (rest.isBlank()) {
-            SectionChip(label)
+            Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                SectionChip(label)
+                Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 Text(buildHighlightedTagText(rest, MaterialTheme.colorScheme.primary, highlightRegex), style = MaterialTheme.typography.bodyMedium)
             }
         }

@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -25,7 +25,7 @@
 		0523452861739FF5D06F3527 /* AppPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPaths.swift; sourceTree = "<group>"; };
 		291FF72E3F7A01E2500DC8BA /* UpdateRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateRepository.swift; sourceTree = "<group>"; };
 		29C4641F9604D02DB2CFF94C /* HocgNativeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HocgNativeApp.swift; sourceTree = "<group>"; };
-		5835C037323480C083E658CD /* HocgNative.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = HocgNative.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		5835C037323480C083E658CD /* HocgNative.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HocgNative.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		69F0C227FF764F76D70C93DA /* ImageRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageRepository.swift; sourceTree = "<group>"; };
 		6E5FD97D93472DF615F79C98 /* DatabaseRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseRepository.swift; sourceTree = "<group>"; };
 		9603D1D04CD297198102AD25 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -112,11 +112,6 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
-				TargetAttributes = {
-					7F5E75AA39F1F85257C702D8 = {
-						DevelopmentTeam = "";
-					};
-				};
 			};
 			buildConfigurationList = 94605081041E8888577C7C1D /* Build configuration list for PBXProject "HocgNative" */;
 			compatibilityVersion = "Xcode 14.0";
@@ -128,7 +123,6 @@
 			);
 			mainGroup = 3067F417DBEE32A4C55DBD09;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -197,12 +191,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = "";
+				CURRENT_PROJECT_VERSION = 171;
+				DEVELOPMENT_TEAM = R777443GCA;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MARKETING_VERSION = 1.7.0;
 				PRODUCT_NAME = HocgNative;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -296,12 +292,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = "";
+				CURRENT_PROJECT_VERSION = 171;
+				DEVELOPMENT_TEAM = R777443GCA;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MARKETING_VERSION = 1.7.0;
 				PRODUCT_NAME = HocgNative;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";

@@ -1,6 +1,6 @@
-# Parallel Agent Quality Loop
+# OpenCode Parallel Agent Quality Loop
 
-This repository uses a repeatable delivery loop:
+This repository uses a repeatable delivery loop in OpenCode:
 
 1. Apply code changes.
 2. Run automated checks.
@@ -40,13 +40,15 @@ Workflow: `.github/workflows/quality-loop.yml`
 
 ## Parallel Agent Model
 
-For large tasks, split work by scope and run agents in parallel:
+For large tasks, split work by scope and run OpenCode agents in parallel:
 
 - Agent A: `app/**`, `tools/**`, `scripts/**` (rules/data/tools)
 - Agent B: `mobile/android/**`
 - Agent C: `mobile/ios/**`
 - Agent D: verification/log analysis (`scripts/analyze_ci_failures.py`)
 - Agent E: final diff review and PR write-up
+
+When using background tasks, keep each agent on a non-overlapping path and collect results before final verification.
 
 Recommended merge order:
 

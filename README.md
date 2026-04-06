@@ -106,3 +106,4 @@ python3 tools/import_db_from_csv.py --csv-dir data/csv_dump --db data/hololive_f
 - CI 병렬 검증: `.github/workflows/quality-loop.yml`
 - 실패 로그 분석: `python3 scripts/analyze_ci_failures.py --log-dir <dir>`
 - 운영 가이드: `docs/parallel_agent_loop.md`
+- OpenCode 병렬 작업 가이드: `docs/opencode_parallel.md`

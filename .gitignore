@@ -10,6 +10,7 @@ data/*.db
 /hOCG_H.spec
 /main.spec
 /docs/*.docx
+/docs/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md
 app/build/
 mobile/android/native-app/.kotlin/
 mobile/ios/native-app/build/DerivedDataAltStore/

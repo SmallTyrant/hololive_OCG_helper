@@ -2247,11 +2247,17 @@ struct ContentView: View {
     private func detailLine(_ line: String) -> AnyView {
         if let (label, rest) = splitSectionLabel(line) {
             if rest.isEmpty {
-                return AnyView(sectionChip(label))
+                return AnyView(
+                    Text(label)
+                        .font(.caption)
+                        .fontWeight(.bold)
+                )
             }
             return AnyView(
                 VStack(alignment: .leading, spacing: 4) {
-                    sectionChip(label)
+                    Text(label)
+                        .font(.caption)
+                        .fontWeight(.bold)
                     highlightedTagText(rest)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }

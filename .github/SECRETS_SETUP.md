@@ -95,6 +95,28 @@ cd mobile/ios/native-app
 DEVELOPMENT_TEAM=YOUR_TEAM_ID ./ship.sh
 ```
 
+## SDK 버전 요구사항
+
+### iOS/iPadOS 앱
+
+Apple은 **2026년 4월 28일**부터 다음을 요구합니다:
+- **필수 SDK**: iOS 26 SDK 이상 (Xcode 26+)
+- **현재 설정**: 워크플로우는 자동으로 Xcode 26.3을 선택하도록 설정됨
+
+#### SDK vs Deployment Target
+
+- **SDK 버전**: 앱을 빌드하는 데 사용되는 도구 버전 (Xcode에 포함)
+- **Deployment Target**: 앱이 지원하는 최소 iOS 버전 (현재 16.0)
+
+⚠️ **중요**: iOS 26 SDK로 빌드해도 deployment target은 iOS 16.0으로 유지되므로, 기존 사용자에게 영향을 주지 않습니다.
+
+#### 워크플로우 검증
+
+GitHub Actions 워크플로우는 자동으로 다음을 확인합니다:
+1. Xcode 26.3 선택
+2. iOS 26 SDK 존재 여부 확인
+3. SDK 버전이 요구사항을 충족하지 않으면 빌드 실패
+
 ## 워크플로우 트리거
 
 ### 자동 트리거
