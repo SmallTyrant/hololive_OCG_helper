@@ -5,6 +5,7 @@ data/images/
 data/*.sqlite
 data/*.db
 .DS_Store
+.cursorrules
 /build/
 /dist/
 /hOCG_H.spec
