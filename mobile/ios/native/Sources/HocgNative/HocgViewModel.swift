@@ -29,7 +29,7 @@ final class HocgViewModel: ObservableObject {
     private var searchTask: Task<Void, Never>?
     private var detailTask: Task<Void, Never>?
     private var prefetchTask: Task<Void, Never>?
-    private var remotePromptShown = false
+    private var remotePromptMarker: String?
 
     init(
         paths: AppPaths = AppPaths(),
@@ -60,6 +60,23 @@ final class HocgViewModel: ObservableObject {
 
     func onToggleImagePanel() {
         state.imageCollapsed.toggle()
+    }
+
+    func onSelectIllustration(rarity: String, imageURL: String) {
+        guard let printId = state.selectedPrintId else { return }
+        let cardNumber = state.selectedCardNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cardNumber.isEmpty else { return }
+
+        detailTask?.cancel()
+        detailTask = Task {
+            state.selectedRarity = rarity
+            state.imageState = .loading
+            let loaded = await imageRepository.downloadIfNeeded(cardNumber: cardNumber, imageURL: imageURL, variant: rarity)
+            guard !Task.isCancelled, state.selectedPrintId == printId, state.selectedRarity == rarity else {
+                return
+            }
+            state.imageState = loaded
+        }
     }
 
     func onUpdateDialogDismiss() {
@@ -256,6 +273,10 @@ final class HocgViewModel: ObservableObject {
             prefetchTask?.cancel()
             state.results = []
             state.selectedPrintId = nil
+            state.selectedCardNumber = ""
+            state.selectedImageUrl = ""
+            state.selectedRarity = ""
+            state.selectedIllustrations = []
             state.detailKoText = ""
             state.detailJaText = ""
             state.detailLoading = false
@@ -280,6 +301,10 @@ final class HocgViewModel: ObservableObject {
                 applyMissingDbState()
                 state.results = []
                 state.selectedPrintId = nil
+                state.selectedCardNumber = ""
+                state.selectedImageUrl = ""
+                state.selectedRarity = ""
+                state.selectedIllustrations = []
                 state.detailKoText = ""
                 state.detailJaText = ""
                 state.detailLoading = false
@@ -310,6 +335,10 @@ final class HocgViewModel: ObservableObject {
             } else {
                 prefetchTask?.cancel()
                 state.selectedPrintId = nil
+                state.selectedCardNumber = ""
+                state.selectedImageUrl = ""
+                state.selectedRarity = ""
+                state.selectedIllustrations = []
                 state.detailKoText = ""
                 state.detailJaText = ""
                 state.detailLoading = false
@@ -322,6 +351,10 @@ final class HocgViewModel: ObservableObject {
         detailTask?.cancel()
         detailTask = Task {
             state.selectedPrintId = printId
+            state.selectedCardNumber = ""
+            state.selectedImageUrl = ""
+            state.selectedRarity = ""
+            state.selectedIllustrations = []
             state.detailKoText = ""
             state.detailJaText = ""
             state.detailLoading = true
@@ -337,6 +370,10 @@ final class HocgViewModel: ObservableObject {
                 state.detailKoText = "[ERROR] 상세 로드 실패"
                 state.detailJaText = ""
                 state.detailLoading = false
+                state.selectedCardNumber = ""
+                state.selectedImageUrl = ""
+                state.selectedRarity = ""
+                state.selectedIllustrations = []
                 state.imageState = .error("이미지 로딩 실패")
                 return
             }
@@ -351,9 +388,17 @@ final class HocgViewModel: ObservableObject {
                 return
             }
 
+            let defaultIllustration = snapshot.brief.illustrations.first
+            let selectedRarity = defaultIllustration?.rarity ?? ""
+            let selectedImageUrl = (defaultIllustration?.imageUrl.isEmpty == false ? defaultIllustration?.imageUrl : snapshot.brief.imageUrl) ?? snapshot.brief.imageUrl
+            state.selectedCardNumber = cardNumber
+            state.selectedImageUrl = selectedImageUrl
+            state.selectedRarity = selectedRarity
+            state.selectedIllustrations = snapshot.brief.illustrations
+
             state.imageState = .loading
 
-            let loaded = await imageRepository.downloadIfNeeded(cardNumber: cardNumber, imageURL: snapshot.brief.imageUrl)
+            let loaded = await imageRepository.downloadIfNeeded(cardNumber: cardNumber, imageURL: selectedImageUrl, variant: selectedRarity)
             if state.selectedPrintId == printId {
                 state.imageState = loaded
             }
@@ -405,27 +450,39 @@ final class HocgViewModel: ObservableObject {
     }
 
     private func checkRemoteUpdateOnce() async {
-        guard !remotePromptShown else {
-            return
-        }
         guard !state.dbPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return
         }
 
-        let localDate = await runIO {
-            self.dbRepository.localDbDate()
+        async let localDateTask: String? = runIO { self.dbRepository.localDbDate() }
+        async let localDigestTask: String? = runIO { self.dbRepository.localDbDigest() }
+        guard let remoteInfo = try? await updateRepository.latestReleaseDbInfo() else {
+            return
         }
-        let remoteDate = await updateRepository.fetchRemoteDbDate()
-
+        let remoteDate = formatIsoDateOrNil(
+            !remoteInfo.assetUpdatedAt.isEmpty
+                ? remoteInfo.assetUpdatedAt
+                : (!remoteInfo.publishedAt.isEmpty ? remoteInfo.publishedAt : remoteInfo.createdAt)
+        )
         guard let remoteDate, !remoteDate.isEmpty else {
             return
         }
-        guard remoteDate != localDate else {
-            return
-        }
+        let localDate = await localDateTask
+        let localDigest = await localDigestTask
+        let remoteDigest = remoteInfo.assetDigest.isEmpty ? nil : remoteInfo.assetDigest
+        let remoteMarker = remoteDigest ?? (!remoteInfo.assetUpdatedAt.isEmpty ? remoteInfo.assetUpdatedAt : remoteDate)
 
-        remotePromptShown = true
-        state.updateDialog = UpdateDialogState(localDate: localDate, remoteDate: remoteDate)
+        let needsPrompt: Bool = {
+            if let remoteDigest, !remoteDigest.isEmpty {
+                return remoteDigest != localDigest
+            }
+            return remoteDate != localDate
+        }()
+        guard needsPrompt else { return }
+        guard remotePromptMarker != remoteMarker else { return }
+
+        remotePromptMarker = remoteMarker
+        state.updateDialog = UpdateDialogState(localDate: localDate, remoteDate: remoteDate, localDigest: localDigest, remoteDigest: remoteDigest)
     }
 
     private func applyMissingDbState() {

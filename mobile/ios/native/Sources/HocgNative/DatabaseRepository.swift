@@ -8,6 +8,7 @@ private let tagAlias: [String: [String]] = [
 
 final class DatabaseRepository {
     private let paths: AppPaths
+    private let rarityOrder = ["C", "U", "R", "RR", "SR", "S", "RE", "RRR", "OUR", "UR", "SEC", "OSR", "SY", "OC", "HR", "P"]
 
     private struct DbFingerprint: Equatable {
         let path: String
@@ -427,7 +428,7 @@ final class DatabaseRepository {
                 defer { sqlite3_finalize(stmt) }
                 try sqliteBind([.int64(printId)], to: stmt)
                 guard sqlite3_step(stmt) == SQLITE_ROW else {
-                    return nil
+                    throw NSError(domain: "DatabaseRepository", code: 404)
                 }
                 return PrintBrief(
                     printId: sqliteColumnInt64(stmt, index: 0),
@@ -470,6 +471,9 @@ final class DatabaseRepository {
                     COALESCE(p.image_url,'') AS image_url,
                     COALESCE(ko.effect_text,'') AS ko_text,
                     COALESCE(ja.effect_text,'') AS ja_text,
+                    (SELECT GROUP_CONCAT(ci.rarity || '|' || COALESCE(ci.manage_id_jp,'') || '|' || COALESCE(ci.image_url,''), ';;')
+                     FROM card_illustrations ci WHERE ci.card_number = p.card_number
+                     ORDER BY ci.is_default DESC, ci.illustration_id) AS illustrations_csv,
                     COALESCE(ko.name,'') AS ko_name
                 FROM prints p
                 LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
@@ -486,6 +490,9 @@ final class DatabaseRepository {
                     COALESCE(p.image_url,'') AS image_url,
                     COALESCE(ko.effect_text,'') AS ko_text,
                     '' AS ja_text,
+                    (SELECT GROUP_CONCAT(ci.rarity || '|' || COALESCE(ci.manage_id_jp,'') || '|' || COALESCE(ci.image_url,''), ';;')
+                     FROM card_illustrations ci WHERE ci.card_number = p.card_number
+                     ORDER BY ci.is_default DESC, ci.illustration_id) AS illustrations_csv,
                     COALESCE(ko.name,'') AS ko_name
                 FROM prints p
                 LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
@@ -495,7 +502,7 @@ final class DatabaseRepository {
                 defer { sqlite3_finalize(stmt) }
                 try sqliteBind([.int64(printId)], to: stmt)
                 guard sqlite3_step(stmt) == SQLITE_ROW else {
-                    return nil
+                    throw NSError(domain: "DatabaseRepository", code: 404)
                 }
 
                 let brief = PrintBrief(
@@ -504,11 +511,12 @@ final class DatabaseRepository {
                     nameJa: sqliteColumnString(stmt, index: 2),
                     nameKo: sqliteColumnString(stmt, index: 3),
                     imageUrl: sqliteColumnString(stmt, index: 4),
+                    illustrations: parseIllustrationsCSV(sqliteColumnString(stmt, index: 7))
                 )
 
                 var koTextRaw = sqliteColumnString(stmt, index: 5)
                 let jaTextRaw = sqliteColumnString(stmt, index: 6)
-                let koName = Self.cleanDisplayName(sqliteColumnString(stmt, index: 7))
+                let koName = Self.cleanDisplayName(sqliteColumnString(stmt, index: 8))
 
                 // Strip duplicate card name from start of effect_text
                 if !koName.isEmpty {
@@ -540,12 +548,21 @@ final class DatabaseRepository {
                 let stmt = try sqlitePrepare(
                     db: db,
                     sql: """
-                    SELECT
-                        COALESCE(p.card_number,'') AS card_number,
-                        COALESCE(p.image_url,'') AS image_url
-                    FROM prints p
-                    WHERE COALESCE(p.card_number,'') <> ''
-                    ORDER BY p.card_number
+                    SELECT card_number, image_url FROM (
+                        SELECT
+                            COALESCE(p.card_number,'') AS card_number,
+                            COALESCE(p.image_url,'') AS image_url,
+                            0 AS priority
+                        FROM prints p
+                        UNION ALL
+                        SELECT
+                            COALESCE(ci.card_number,'') AS card_number,
+                            COALESCE(ci.image_url,'') AS image_url,
+                            1 AS priority
+                        FROM card_illustrations ci
+                    ) src
+                    WHERE COALESCE(card_number,'') <> ''
+                    ORDER BY card_number, priority
                     """,
                 )
                 defer { sqlite3_finalize(stmt) }
@@ -698,6 +715,41 @@ final class DatabaseRepository {
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: modified)
+    }
+
+    func localDbDigest() -> String? {
+        let path = paths.dbURL.path
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: path) else {
+            return nil
+        }
+
+        do {
+            return try withSQLite(path: path, readOnly: true) { db in
+                guard try tableExists(db: db, table: "meta") else {
+                    return nil
+                }
+                let stmt = try sqlitePrepare(db: db, sql: "SELECT value FROM meta WHERE key=?")
+                defer { sqlite3_finalize(stmt) }
+                try sqliteBind([.text("release_asset_digest")], to: stmt)
+                if sqlite3_step(stmt) == SQLITE_ROW {
+                    return normalizeHashText(sqliteColumnOptionalString(stmt, index: 0))
+                }
+                return nil
+            }
+        } catch {
+            return nil
+        }
+    }
+
+    private func normalizeHashText(_ raw: String?) -> String? {
+        let value = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !value.isEmpty else { return nil }
+        if value.hasPrefix("sha256:") {
+            let trimmed = String(value.dropFirst("sha256:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        return value
     }
 
     private func dbFingerprint(path: String) -> DbFingerprint? {
@@ -1050,14 +1102,20 @@ final class DatabaseRepository {
     /// "rarity|manage_id_jp|image_url;;..." 형식의 CSV를 IllustrationOption 배열로 파싱
     private func parseIllustrationsCSV(_ csv: String) -> [IllustrationOption] {
         guard !csv.isEmpty else { return [] }
-        return csv.components(separatedBy: ";;").compactMap { token in
+        return csv.components(separatedBy: ";;").compactMap { token -> IllustrationOption? in
             let parts = token.components(separatedBy: "|")
             guard parts.count >= 3 else { return nil }
             let rarity = parts[0].trimmingCharacters(in: .whitespaces)
             guard !rarity.isEmpty else { return nil }
+            guard rarity.caseInsensitiveCompare("S") != .orderedSame else { return nil }
             let manageId = Int(parts[1])
             let imageUrl = parts[2].trimmingCharacters(in: .whitespaces)
             return IllustrationOption(rarity: rarity, manageIdJp: manageId, imageUrl: imageUrl)
+        }.sorted { (lhs: IllustrationOption, rhs: IllustrationOption) in
+            let left = rarityOrder.firstIndex(of: lhs.rarity.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()) ?? Int.max
+            let right = rarityOrder.firstIndex(of: rhs.rarity.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()) ?? Int.max
+            if left != right { return left < right }
+            return lhs.rarity < rhs.rarity
         }
     }
 

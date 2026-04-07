@@ -20,6 +20,26 @@ struct PrintBrief {
     let nameJa: String
     let nameKo: String
     let imageUrl: String
+    let rarity: String
+    let illustrations: [IllustrationOption]
+
+    init(
+        printId: Int64,
+        cardNumber: String,
+        nameJa: String,
+        nameKo: String,
+        imageUrl: String,
+        rarity: String = "",
+        illustrations: [IllustrationOption] = []
+    ) {
+        self.printId = printId
+        self.cardNumber = cardNumber
+        self.nameJa = nameJa
+        self.nameKo = nameKo
+        self.imageUrl = imageUrl
+        self.rarity = rarity
+        self.illustrations = illustrations
+    }
 }
 
 struct CardDetail {
@@ -38,7 +58,7 @@ struct IllustrationOption: Identifiable, Equatable {
     let manageIdJp: Int?
     let imageUrl: String   // 비어있으면 기본 imageUrl 사용
 
-    var id: String { rarity }
+    var id: String { "\(rarity)|\(imageUrl)" }
 }
 
 struct DeckCardCandidate: Identifiable {
@@ -94,6 +114,8 @@ struct DeckLibraryRecord: Codable {
 struct UpdateDialogState {
     let localDate: String?
     let remoteDate: String
+    let localDigest: String?
+    let remoteDigest: String?
 }
 
 enum CardImageState {
@@ -110,6 +132,10 @@ struct HocgUiState {
     var searchMode: SearchMode = .partial
     var results: [PrintRow] = []
     var selectedPrintId: Int64?
+    var selectedCardNumber: String = ""
+    var selectedImageUrl: String = ""
+    var selectedRarity: String = ""
+    var selectedIllustrations: [IllustrationOption] = []
     var detailKoText: String = ""
     var detailJaText: String = ""
     var detailLoading: Bool = false

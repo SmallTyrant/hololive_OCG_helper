@@ -11,6 +11,7 @@ struct ReleaseDbInfo {
     let assetName: String
     let assetURL: URL
     let assetUpdatedAt: String
+    let assetDigest: String
     let publishedAt: String
     let createdAt: String
 }
@@ -56,6 +57,7 @@ final class UpdateRepository {
                 assetName: "hololive_ocg.sqlite",
                 assetURL: dbDirectURL,
                 assetUpdatedAt: "",
+                assetDigest: "",
                 publishedAt: "",
                 createdAt: "",
             )
@@ -109,12 +111,14 @@ final class UpdateRepository {
         let assetURL = asset.url
 
         var assetUpdatedAt = ""
+        var assetDigest = ""
         for item in assets {
             let name = item["name"] as? String ?? ""
             let urlString = item["browser_download_url"] as? String ?? ""
             if (name == assetName || urlString == assetURL.absoluteString),
                let updated = item["updated_at"] as? String {
                 assetUpdatedAt = updated
+                assetDigest = normalizeHash(item["digest"] as? String)
                 break
             }
         }
@@ -124,6 +128,7 @@ final class UpdateRepository {
             assetName: assetName,
             assetURL: assetURL,
             assetUpdatedAt: assetUpdatedAt,
+            assetDigest: assetDigest,
             publishedAt: publishedAt,
             createdAt: createdAt,
         )
@@ -161,6 +166,14 @@ final class UpdateRepository {
         }
     }
 
+    private func normalizeHash(_ raw: String?) -> String {
+        let value = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if value.hasPrefix("sha256:") {
+            return String(value.dropFirst("sha256:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return value
+    }
+
     private func writeReleaseMeta(dbURL: URL, info: ReleaseDbInfo) throws {
         try withSQLite(path: dbURL.path, readOnly: false) { db in
             if sqlite3_exec(
@@ -177,6 +190,7 @@ final class UpdateRepository {
                 "release_tag": info.tag,
                 "release_asset_name": info.assetName,
                 "release_asset_updated_at": info.assetUpdatedAt,
+                "release_asset_digest": info.assetDigest,
                 "release_published_at": info.publishedAt,
                 "release_created_at": info.createdAt,
             ]

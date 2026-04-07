@@ -274,7 +274,7 @@ struct ContentView: View {
                card.selectableIllustrations.contains(where: { $0.rarity == rarity }) {
                 return rarity
             }
-            return card.rarity
+            return card.selectableIllustrations.first?.rarity ?? ""
         }
     }
 
@@ -495,17 +495,37 @@ struct ContentView: View {
         }
     }
 
+    private func unresolvedDeckCard(for entry: DeckEntryRecord) -> DeckCardCandidate {
+        let cardNumber = entry.cardNumber.isEmpty ? "UNKNOWN-\(entry.printId)" : entry.cardNumber
+        let inferredType = cardNumber.uppercased().hasPrefix("HY") ? "エール" : ""
+        let inferredRarity = entry.selectedRarity ?? ""
+        let inferredId = entry.printId > 0 ? entry.printId : Int64(-abs(cardNumber.hashValue == 0 ? 1 : cardNumber.hashValue))
+        return DeckCardCandidate(
+            printId: inferredId,
+            cardNumber: cardNumber,
+            nameJa: cardNumber,
+            nameKo: "미복원 카드",
+            imageUrl: "",
+            cardType: inferredType,
+            color: inferredType.isEmpty ? "" : "엘",
+            rarity: inferredRarity,
+            koText: "업데이트 후 현재 DB와 매칭되지 않아 원본 덱 엔트리를 보존한 카드입니다.",
+            jaText: "",
+            illustrations: []
+        )
+    }
+
     private func resolveDeckStates(from records: [SavedDeckRecord], cards: [DeckCardCandidate]) -> [SavedDeckState] {
         let byPrintId = Dictionary(uniqueKeysWithValues: cards.map { ($0.printId, $0) })
         let byCardNumber = Dictionary(uniqueKeysWithValues: cards.map { ($0.cardNumber.uppercased(), $0) })
         return records.compactMap { record in
             let resolvedEntries = record.entries.compactMap { entry -> DeckEntryState? in
-                let card = byPrintId[entry.printId] ?? byCardNumber[entry.cardNumber.uppercased()]
-                guard let card else { return nil }
+                guard entry.qty > 0 else { return nil }
+                let card = byPrintId[entry.printId] ?? byCardNumber[entry.cardNumber.uppercased()] ?? unresolvedDeckCard(for: entry)
                 let qty = max(1, entry.qty)
                 let selectedRarity = entry.selectedRarity?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let resolvedRarity = selectedRarity.flatMap { rarity in
-                    card.selectableIllustrations.contains(where: { $0.rarity == rarity }) ? rarity : nil
+                    card.selectableIllustrations.isEmpty || card.selectableIllustrations.contains(where: { $0.rarity == rarity }) ? rarity : nil
                 }
                 return DeckEntryState(
                     id: card.printId,
@@ -1412,7 +1432,9 @@ struct ContentView: View {
                     viewModel.onUpdateDialogConfirm()
                 }
             } message: { dialog in
-                Text("DB 업데이트가 있습니다. 업데이트 하시겠습니까?\n로컬 DB 날짜: \(dialog.localDate ?? "없음")\nGitHub DB 날짜: \(dialog.remoteDate)")
+                Text(
+                    "DB 업데이트가 있습니다. 업데이트 하시겠습니까?\n로컬 DB 날짜: \(dialog.localDate ?? "없음")\nGitHub DB 날짜: \(dialog.remoteDate)\(dialog.remoteDigest.map { "\nGitHub DB 식별자: \($0.prefix(8))" } ?? "")"
+                )
             }
             .onChange(of: viewModel.state.detailKoText) { _ in
                 refreshDetailLines()
@@ -1514,7 +1536,7 @@ struct ContentView: View {
                     card: card,
                     currentRarity: pendingRarityChangeEntryId.flatMap { eid in
                         deckEntries.first(where: { $0.id == eid })?.selectedRarity
-                    } ?? card.rarity,
+                    } ?? card.selectableIllustrations.first?.rarity ?? "",
                     onSelect: { rarity in
                         if let eid = pendingRarityChangeEntryId {
                             changeEntryRarity(entryId: eid, rarity: rarity)
@@ -1705,6 +1727,7 @@ struct ContentView: View {
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 } else {
+                    searchRaritySelector
                     panel(height: imageHeight) {
                         imagePanel
                     }
@@ -1774,7 +1797,10 @@ struct ContentView: View {
                         .frame(width: 1)
 
                     desktopColumn(title: "이미지", width: middleWidth) {
-                        imagePanel
+                        VStack(spacing: 8) {
+                            searchRaritySelector
+                            imagePanel
+                        }
                     }
 
                     Rectangle()
@@ -1893,6 +1919,33 @@ struct ContentView: View {
 
         case .error(let message):
             placeholder(message: message, error: true)
+        }
+    }
+
+    @ViewBuilder
+    private var searchRaritySelector: some View {
+        let options = viewModel.state.selectedIllustrations
+        if options.count > 1 {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(options) { option in
+                        let selected = option.rarity == viewModel.state.selectedRarity
+                        Button {
+                            let imageURL = option.imageUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? viewModel.state.selectedImageUrl : option.imageUrl
+                            viewModel.onSelectIllustration(rarity: option.rarity, imageURL: imageURL)
+                        } label: {
+                            Text(option.rarity)
+                                .font(.caption.bold())
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(selected ? Color.accentColor : Color.secondary.opacity(0.16))
+                                .foregroundColor(selected ? .white : .primary)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
         }
     }
 
@@ -2687,7 +2740,7 @@ struct ContentView: View {
                                 } label: {
                                     HStack(spacing: 8) {
                                         deckThumbnail(
-                                            url: card.imageUrl,
+                                            url: card.selectableIllustrations.first?.imageUrl ?? card.imageUrl,
                                             qty: qty,
                                             width: 36,
                                             height: 50
@@ -2699,7 +2752,7 @@ struct ContentView: View {
                                             if card.hasMultipleRarities {
                                                 HStack(spacing: 4) {
                                                     ForEach(card.selectableIllustrations) { option in
-                                                        let isSelected = option.rarity == (deckEntries.first(where: { $0.id == card.printId })?.displayRarity ?? card.rarity)
+                                                        let isSelected = option.rarity == (deckEntries.first(where: { $0.id == card.printId })?.displayRarity ?? card.selectableIllustrations.first?.rarity ?? "")
                                                         Text(option.rarity)
                                                             .font(.caption2.bold())
                                                             .padding(.horizontal, 6).padding(.vertical, 2)
@@ -2709,7 +2762,7 @@ struct ContentView: View {
                                                     }
                                                 }
                                             } else {
-                                                let rarity = card.rarity.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                let rarity = (card.selectableIllustrations.first?.rarity ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                                                 if !rarity.isEmpty {
                                                     Text("레어리티 \(rarity)")
                                                         .font(.caption2)
