@@ -20,6 +20,8 @@ data class PrintBrief(
     val nameJa: String,
     val nameKo: String,
     val imageUrl: String,
+    val rarity: String = "",
+    val illustrations: List<IllustrationOption> = emptyList(),
 )
 
 data class CardDetail(
@@ -35,6 +37,8 @@ data class CardSnapshot(
 data class UpdateDialogState(
     val localDate: String?,
     val remoteDate: String,
+    val localDigest: String?,
+    val remoteDigest: String?,
 )
 
 data class AppUpdateDialogState(
@@ -107,6 +111,10 @@ data class HocgUiState(
     val searchMode: SearchMode = SearchMode.PARTIAL,
     val results: List<PrintRow> = emptyList(),
     val selectedPrintId: Long? = null,
+    val selectedCardNumber: String = "",
+    val selectedImageUrl: String = "",
+    val selectedRarity: String = "",
+    val selectedIllustrations: List<IllustrationOption> = emptyList(),
     val detailKoText: String = "",
     val detailJaText: String = "",
     val detailLoading: Boolean = false,

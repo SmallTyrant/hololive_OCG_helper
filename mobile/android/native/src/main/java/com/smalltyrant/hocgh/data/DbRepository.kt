@@ -16,6 +16,9 @@ private val TAG_ALIAS: Map<String, List<String>> = mapOf(
 
 class DbRepository(private val paths: AppPaths) {
 
+    private val rarityOrder = listOf("C", "U", "R", "RR", "SR", "S", "RE", "RRR", "OUR", "UR", "SEC", "OSR", "SY", "OC", "HR", "P")
+    private val rarityOrderIndex = rarityOrder.withIndex().associate { it.value to it.index }
+
     data class ImageTarget(
         val cardNumber: String,
         val imageUrl: String,
@@ -487,9 +490,12 @@ class DbRepository(private val paths: AppPaths) {
                         COALESCE(p.name_ja,'') AS name_ja,
                         COALESCE(ko.name,'') AS name_ko,
                         COALESCE(p.image_url,'') AS image_url,
-                        COALESCE(ko.effect_text,'') AS ko_text,
-                        COALESCE(ja.effect_text,'') AS ja_text,
-                        COALESCE(ko.name,'') AS ko_name
+                         COALESCE(ko.effect_text,'') AS ko_text,
+                         COALESCE(ja.effect_text,'') AS ja_text,
+                         (SELECT GROUP_CONCAT(ci.rarity || '|' || COALESCE(ci.manage_id_jp,'') || '|' || COALESCE(ci.image_url,''), ';;')
+                          FROM card_illustrations ci WHERE ci.card_number = p.card_number
+                          ORDER BY ci.is_default DESC, ci.illustration_id) AS illustrations_csv,
+                         COALESCE(ko.name,'') AS ko_name
                     FROM prints p
                     LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
                     LEFT JOIN card_texts_ja ja ON ja.print_id = p.print_id
@@ -502,10 +508,13 @@ class DbRepository(private val paths: AppPaths) {
                         COALESCE(p.card_number,'') AS card_number,
                         COALESCE(p.name_ja,'') AS name_ja,
                         COALESCE(ko.name,'') AS name_ko,
-                        COALESCE(p.image_url,'') AS image_url,
-                        COALESCE(ko.effect_text,'') AS ko_text,
-                        '' AS ja_text,
-                        COALESCE(ko.name,'') AS ko_name
+                         COALESCE(p.image_url,'') AS image_url,
+                         COALESCE(ko.effect_text,'') AS ko_text,
+                         '' AS ja_text,
+                         (SELECT GROUP_CONCAT(ci.rarity || '|' || COALESCE(ci.manage_id_jp,'') || '|' || COALESCE(ci.image_url,''), ';;')
+                          FROM card_illustrations ci WHERE ci.card_number = p.card_number
+                          ORDER BY ci.is_default DESC, ci.illustration_id) AS illustrations_csv,
+                         COALESCE(ko.name,'') AS ko_name
                     FROM prints p
                     LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
                     WHERE p.print_id=?
@@ -525,6 +534,7 @@ class DbRepository(private val paths: AppPaths) {
                         nameJa = cursor.getStringOrEmpty("name_ja"),
                         nameKo = cursor.getStringOrEmpty("name_ko"),
                         imageUrl = cursor.getStringOrEmpty("image_url"),
+                        illustrations = parseIllustrationsCSV(cursor.getStringOrEmpty("illustrations_csv")),
                     )
 
                     var koTextRaw = cursor.getStringOrEmpty("ko_text")
@@ -634,6 +644,7 @@ class DbRepository(private val paths: AppPaths) {
             val parts = token.split("|")
             if (parts.size < 3) return@mapNotNull null
             val rarity = parts[0].trim().takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+            if (rarity.equals("S", ignoreCase = true)) return@mapNotNull null
             val manageIdJp = parts[1].trim().toIntOrNull()
             val imageUrl = parts[2].trim()
             com.smalltyrant.hocgh.model.IllustrationOption(
@@ -641,7 +652,7 @@ class DbRepository(private val paths: AppPaths) {
                 manageIdJp = manageIdJp,
                 imageUrl = imageUrl,
             )
-        }
+        }.sortedWith(compareBy({ rarityOrderIndex[it.rarity.trim().uppercase()] ?: Int.MAX_VALUE }, { it.rarity.trim().uppercase() }))
     }
 
     /** prints 테이블의 manage_id_jp 컬럼 값 반환 (부시나비 내보내기용) */
@@ -698,12 +709,21 @@ class DbRepository(private val paths: AppPaths) {
             openReadOnly().useDb { db ->
                 db.rawQuery(
                     """
-                    SELECT
-                        COALESCE(p.card_number,'') AS card_number,
-                        COALESCE(p.image_url,'') AS image_url
-                    FROM prints p
-                    WHERE COALESCE(p.card_number,'') <> ''
-                    ORDER BY p.card_number
+                    SELECT card_number, image_url FROM (
+                        SELECT
+                            COALESCE(p.card_number,'') AS card_number,
+                            COALESCE(p.image_url,'') AS image_url,
+                            0 AS priority
+                        FROM prints p
+                        UNION ALL
+                        SELECT
+                            COALESCE(ci.card_number,'') AS card_number,
+                            COALESCE(ci.image_url,'') AS image_url,
+                            1 AS priority
+                        FROM card_illustrations ci
+                    ) src
+                    WHERE COALESCE(card_number,'') <> ''
+                    ORDER BY card_number, priority
                     """.trimIndent(),
                     null,
                 ).useCursor { cursor ->
@@ -789,6 +809,36 @@ class DbRepository(private val paths: AppPaths) {
                 .toLocalDate()
                 .toString()
         }.getOrNull()
+    }
+
+    fun localDbDigest(): String? {
+        val dbFile = paths.dbFile
+        if (!dbFile.exists() || !dbFile.isFile || dbFile.length() <= 0L) {
+            return null
+        }
+
+        return try {
+            openReadOnly().useDb { db ->
+                if (!tableExists(db, "meta")) {
+                    return@useDb null
+                }
+                val value = db.rawQuery(
+                    "SELECT value FROM meta WHERE key=?",
+                    arrayOf("release_asset_digest"),
+                ).useCursor { cursor ->
+                    if (cursor.moveToFirst()) cursor.getStringOrNull(0) else null
+                }
+                normalizeHashText(value)
+            }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun normalizeHashText(raw: String?): String? {
+        val value = raw?.trim()?.lowercase().orEmpty()
+        if (value.isEmpty()) return null
+        return if (value.startsWith("sha256:")) value.removePrefix("sha256:").trim().ifEmpty { null } else value
     }
 
     private fun dbFingerprint(): DbFingerprint? {

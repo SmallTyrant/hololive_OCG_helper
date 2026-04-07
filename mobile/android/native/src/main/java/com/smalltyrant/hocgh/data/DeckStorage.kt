@@ -15,6 +15,10 @@ class DeckStorage(private val paths: AppPaths) {
         return runCatching {
             val text = file.readText()
             decodeLibrary(text)
+        }.recoverCatching {
+            val backup = java.io.File(file.parentFile, "${file.name}.bak")
+            if (!backup.exists()) throw it
+            decodeLibrary(backup.readText())
         }.getOrElse {
             DeckLibraryRecord()
         }
@@ -24,8 +28,12 @@ class DeckStorage(private val paths: AppPaths) {
         val file = paths.deckLibraryFile
         val tmp = kotlin.runCatching { java.io.File(file.parentFile, "${file.name}.tmp") }.getOrNull()
             ?: return false
+        val backup = kotlin.runCatching { java.io.File(file.parentFile, "${file.name}.bak") }.getOrNull()
         return runCatching {
             tmp.writeText(encodeLibrary(library))
+            if (file.exists() && backup != null) {
+                file.copyTo(backup, overwrite = true)
+            }
             if (file.exists()) {
                 file.delete()
             }
