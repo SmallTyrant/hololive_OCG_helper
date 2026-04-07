@@ -22,14 +22,24 @@ CARDLIST_BASE  = f"{OFFICIAL_BASE}/wp-content/images/cardlist"
 # 패턴: /wp-content/images/cardlist/<SET>/<CARD>_<RARITY>.png
 # 단, hPR 세트는 예외(프로모)라 추정 불가 → None 반환
 _SET_RE = re.compile(r'^([hH][A-Za-z]+\d+)-\d+$')
+HY_COMMON_FALLBACK = {
+    "HY01": f"{CARDLIST_BASE}/COMMON/hY01-001_C.png",
+    "HY02": f"{CARDLIST_BASE}/COMMON/hY02-001_C.png",
+    "HY03": f"{CARDLIST_BASE}/COMMON/hY03-001_C.png",
+    "HY04": f"{CARDLIST_BASE}/COMMON/hY04-001_C.png",
+    "HY05": f"{CARDLIST_BASE}/COMMON/hY05-001_C.png",
+    "HY06": f"{CARDLIST_BASE}/hSD07/hY06-001_C.png",
+}
 
 def infer_image_url(card_number: str, rarity: str) -> str | None:
     m = _SET_RE.match(card_number)
     if not m:
         return None
     set_code = m.group(1)
-    # 프로모(P) 레어리티는 폴더가 hPR이고 suffix가 _P, _P_02 등 불규칙 → 추정 불가
     if rarity == "P":
+        hy_fallback = HY_COMMON_FALLBACK.get(set_code.upper())
+        if hy_fallback:
+            return hy_fallback
         return None
     return f"{CARDLIST_BASE}/{set_code}/{card_number}_{rarity}.png"
 
@@ -72,6 +82,76 @@ def upsert_illustration(
           image_url    = COALESCE(excluded.image_url, card_illustrations.image_url),
           is_default   = excluded.is_default
     """, (card_number, rarity, manage_id_jp, manage_id_en, image_url, is_default))
+
+
+def backfill_hy_common_fallbacks(conn: sqlite3.Connection) -> int:
+    updated = 0
+    rows = conn.execute(
+        """
+        SELECT illustration_id, card_number
+        FROM card_illustrations
+        WHERE UPPER(card_number) LIKE 'HY%'
+          AND UPPER(rarity) = 'P'
+          AND (image_url IS NULL OR TRIM(image_url) = '')
+        """
+    ).fetchall()
+    for illustration_id, card_number in rows:
+        fallback = infer_image_url(card_number, "P")
+        if not fallback:
+            continue
+        existing_c = conn.execute(
+            "SELECT illustration_id FROM card_illustrations WHERE card_number=? AND UPPER(rarity)='C' LIMIT 1",
+            (card_number,),
+        ).fetchone()
+        if existing_c:
+            conn.execute(
+                "UPDATE card_illustrations SET image_url=COALESCE(NULLIF(image_url,''), ?) WHERE illustration_id=?",
+                (fallback, existing_c[0]),
+            )
+            conn.execute(
+                "DELETE FROM card_illustrations WHERE illustration_id=?",
+                (illustration_id,),
+            )
+        else:
+            conn.execute(
+                "UPDATE card_illustrations SET rarity='C', image_url=? WHERE illustration_id=?",
+                (fallback, illustration_id),
+            )
+        updated += 1
+    return updated
+
+
+def normalize_hy_common_fallback_rarity(conn: sqlite3.Connection) -> int:
+    updated = 0
+    rows = conn.execute(
+        """
+        SELECT illustration_id, card_number, COALESCE(image_url, '') AS image_url
+        FROM card_illustrations
+        WHERE UPPER(card_number) LIKE 'HY%'
+          AND UPPER(rarity) = 'P'
+        """
+    ).fetchall()
+    for illustration_id, card_number, image_url in rows:
+        fallback = infer_image_url(card_number, "P")
+        if not fallback or (image_url or '').strip() != fallback:
+            continue
+        existing_c = conn.execute(
+            "SELECT illustration_id FROM card_illustrations WHERE card_number=? AND UPPER(rarity)='C' LIMIT 1",
+            (card_number,),
+        ).fetchone()
+        if existing_c:
+            conn.execute(
+                "UPDATE card_illustrations SET image_url=COALESCE(NULLIF(image_url,''), ?) WHERE illustration_id=?",
+                (fallback, existing_c[0]),
+            )
+            conn.execute("DELETE FROM card_illustrations WHERE illustration_id=?", (illustration_id,))
+        else:
+            conn.execute(
+                "UPDATE card_illustrations SET rarity='C' WHERE illustration_id=?",
+                (illustration_id,),
+            )
+        updated += 1
+    return updated
 
 
 def derive_default_rarity(image_url: str | None) -> str | None:
@@ -161,8 +241,13 @@ def main() -> None:
                     (first[0],),
                 )
 
+        hy_backfilled = backfill_hy_common_fallbacks(conn)
+        hy_normalized = normalize_hy_common_fallback_rarity(conn)
+
         conn.commit()
         print(f"[INFO] upserted {upserted} illustrations, skipped {skipped} cards without data", flush=True)
+        print(f"[INFO] HY common fallback backfilled: {hy_backfilled}", flush=True)
+        print(f"[INFO] HY fallback rarity normalized to C: {hy_normalized}", flush=True)
 
         # 통계
         total    = conn.execute("SELECT COUNT(*) FROM card_illustrations").fetchone()[0]
