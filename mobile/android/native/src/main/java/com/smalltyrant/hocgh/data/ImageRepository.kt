@@ -16,11 +16,11 @@ class ImageRepository(private val paths: AppPaths) {
     private val lock = Any()
     private val downloading = mutableSetOf<String>()
 
-    fun resolveLocalOrRemote(cardNumber: String, imageUrl: String): ImageState {
+    fun resolveLocalOrRemote(cardNumber: String, imageUrl: String, variant: String = ""): ImageState {
         if (cardNumber.isBlank()) {
             return ImageState.Placeholder("이미지 없음")
         }
-        val local = paths.localImageFile(cardNumber)
+        val local = paths.localImageFile(cardNumber, variant)
         if (local.exists()) {
             return ImageState.Local(local)
         }
@@ -35,12 +35,12 @@ class ImageRepository(private val paths: AppPaths) {
         return ImageState.Remote(resolved)
     }
 
-    fun downloadIfNeeded(cardNumber: String, imageUrl: String): ImageState {
+    fun downloadIfNeeded(cardNumber: String, imageUrl: String, variant: String = ""): ImageState {
         if (cardNumber.isBlank()) {
             return ImageState.Placeholder("이미지 없음")
         }
 
-        val local = paths.localImageFile(cardNumber)
+        val local = paths.localImageFile(cardNumber, variant)
         if (local.exists()) {
             return ImageState.Local(local)
         }
@@ -51,10 +51,11 @@ class ImageRepository(private val paths: AppPaths) {
         }
 
         val shouldDownload = synchronized(lock) {
-            if (downloading.contains(cardNumber)) {
+            val downloadKey = "$cardNumber|$variant"
+            if (downloading.contains(downloadKey)) {
                 false
             } else {
-                downloading += cardNumber
+                downloading += downloadKey
                 true
             }
         }
@@ -74,7 +75,7 @@ class ImageRepository(private val paths: AppPaths) {
             }
         } finally {
             synchronized(lock) {
-                downloading -= cardNumber
+                downloading -= "$cardNumber|$variant"
             }
         }
     }

@@ -17,9 +17,10 @@ class AppPaths(private val context: Context) {
     val deckDir: File = File(rootDir, "decks").apply { mkdirs() }
     val deckLibraryFile: File = File(deckDir, "deck_library.json")
 
-    fun localImageFile(cardNumber: String): File {
+    fun localImageFile(cardNumber: String, variant: String = ""): File {
         val safe = sanitizeCardNumber(cardNumber)
-        return File(imageDir, "$safe.png")
+        val suffix = variant.trim().takeIf { it.isNotEmpty() }?.let { "__${sanitizeCardNumber(it)}" } ?: ""
+        return File(imageDir, "$safe$suffix.png")
     }
 
     fun resolveImageUrl(imageUrl: String): String {
