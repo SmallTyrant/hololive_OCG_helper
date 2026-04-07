@@ -1,6 +1,7 @@
 # app/services/images.py
 import os
 import re
+import hashlib
 from pathlib import Path
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
@@ -21,9 +22,11 @@ def images_dir(data_root: Path) -> Path:
     d.mkdir(parents=True, exist_ok=True)
     return d
 
-def local_image_path(data_root: Path, card_number: str) -> Path:
-    # 파일명은 card_number 그대로. 확장자 png 통일
+def local_image_path(data_root: Path, card_number: str, variant: str | None = None) -> Path:
     safe = _sanitize_card_number(card_number)
+    if variant and variant.strip():
+        variant_hash = hashlib.sha1(variant.strip().encode("utf-8")).hexdigest()[:10]
+        safe = f"{safe}__{_sanitize_card_number(variant)}__{variant_hash}"
     return images_dir(data_root) / f"{safe}.png"
 
 def resolve_url(image_url: str) -> str:

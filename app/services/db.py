@@ -8,6 +8,25 @@ _COL_CACHE: dict[int, dict[str, set[str]]] = {}
 _JOIN_CACHE: dict[int, str | None] = {}
 _MISSING = object()
 _TOKEN_SPLIT_RE = re.compile(r"[\s,|/]+")
+RARITY_ORDER = (
+    "C",
+    "U",
+    "R",
+    "RR",
+    "SR",
+    "S",
+    "RE",
+    "RRR",
+    "OUR",
+    "UR",
+    "SEC",
+    "OSR",
+    "SY",
+    "OC",
+    "HR",
+    "P",
+)
+RARITY_ORDER_INDEX = {rarity: index for index, rarity in enumerate(RARITY_ORDER)}
 
 
 def ensure_db(path: str) -> bool:
@@ -98,6 +117,12 @@ def _sql_normalize_expr(column: str) -> str:
         f"REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(COALESCE({column},'')),"
         " ' ', ''), '#', ''), '_', ''), '-', ''), '/', ''), ',', '')"
     )
+
+
+def rarity_sort_key(rarity: str) -> tuple[int, str]:
+    normalized = (rarity or "").strip().upper()
+    return (RARITY_ORDER_INDEX.get(normalized, len(RARITY_ORDER_INDEX)), normalized)
+
 
 def _cols(conn: sqlite3.Connection, table: str) -> set[str]:
     key = _conn_key(conn)
@@ -380,6 +405,67 @@ def list_cards_for_deck(conn: sqlite3.Connection, limit: int = 600) -> list[dict
             (row_limit,),
         )
     ]
+
+
+def list_card_illustrations(
+    conn: sqlite3.Connection,
+    card_number: str,
+    fallback_image_url: str = "",
+) -> list[dict]:
+    card_number = (card_number or "").strip()
+    if not card_number:
+        return []
+
+    table_names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='card_illustrations'")}
+    if "card_illustrations" not in table_names:
+        return [{"option_key": "default", "rarity": "", "image_url": fallback_image_url, "is_default": 1}] if fallback_image_url else []
+
+    rows = conn.execute(
+        """
+        SELECT
+            COALESCE(rarity, '') AS rarity,
+            COALESCE(image_url, '') AS image_url,
+            COALESCE(is_default, 0) AS is_default
+        FROM card_illustrations
+        WHERE card_number=?
+        """,
+        (card_number,),
+    ).fetchall()
+
+    options: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    fallback_image_url = (fallback_image_url or "").strip()
+    fallback_bound = False
+
+    for row in rows:
+        rarity = (row["rarity"] or "").strip().upper()
+        if rarity == "S":
+            continue
+        image_url = (row["image_url"] or "").strip()
+        is_default = int(row["is_default"] or 0)
+        if not image_url and fallback_image_url and (is_default or not fallback_bound):
+            image_url = fallback_image_url
+            fallback_bound = True
+        if not rarity and not image_url:
+            continue
+        dedupe_key = (rarity, image_url)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        options.append(
+            {
+                "option_key": f"{rarity or 'default'}::{image_url or 'none'}",
+                "rarity": rarity,
+                "image_url": image_url,
+                "is_default": is_default,
+            }
+        )
+
+    options.sort(key=lambda item: (rarity_sort_key(item.get("rarity") or ""), -(1 if item.get("is_default") else 0)))
+    if not options and fallback_image_url:
+        options.append({"option_key": "default", "rarity": "", "image_url": fallback_image_url, "is_default": 1})
+
+    return options
 
 def load_card_detail(conn: sqlite3.Connection, pid: int) -> dict | None:
     r = conn.execute(
