@@ -39,13 +39,13 @@ final class ImageRepository {
         monitor.cancel()
     }
 
-    func downloadIfNeeded(cardNumber: String, imageURL: String) async -> CardImageState {
+    func downloadIfNeeded(cardNumber: String, imageURL: String, variant: String = "") async -> CardImageState {
         let trimmedCard = cardNumber.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedCard.isEmpty else {
             return .placeholder("이미지 없음")
         }
 
-        let localURL = paths.localImageURL(cardNumber: trimmedCard)
+        let localURL = paths.localImageURL(cardNumber: trimmedCard, variant: variant)
         if FileManager.default.fileExists(atPath: localURL.path) {
             return .local(localURL)
         }
@@ -58,14 +58,14 @@ final class ImageRepository {
             return .error(offlineImageMessage)
         }
 
-        let shouldDownload = await tracker.start(trimmedCard)
+        let shouldDownload = await tracker.start("\(trimmedCard)|\(variant)")
         if !shouldDownload {
             return .remote(resolved)
         }
 
         defer {
             Task {
-                await tracker.finish(trimmedCard)
+                await tracker.finish("\(trimmedCard)|\(variant)")
             }
         }
 

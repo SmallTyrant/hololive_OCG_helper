@@ -34,9 +34,10 @@ final class AppPaths {
         decksURL.appendingPathComponent("deck_library.json")
     }
 
-    func localImageURL(cardNumber: String) -> URL {
+    func localImageURL(cardNumber: String, variant: String = "") -> URL {
         let safe = sanitizeCardNumber(cardNumber)
-        return imagesURL.appendingPathComponent("\(safe).png")
+        let suffix = variant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "__\(sanitizeCardNumber(variant))"
+        return imagesURL.appendingPathComponent("\(safe)\(suffix).png")
     }
 
     func resolveImageURL(_ raw: String) -> URL? {
@@ -137,7 +138,13 @@ final class DeckStorage {
             let data = try Data(contentsOf: url)
             return try decoder.decode(DeckLibraryRecord.self, from: data)
         } catch {
-            return DeckLibraryRecord()
+            let backup = url.appendingPathExtension("bak")
+            guard fileManager.fileExists(atPath: backup.path),
+                  let data = try? Data(contentsOf: backup),
+                  let decoded = try? decoder.decode(DeckLibraryRecord.self, from: data) else {
+                return DeckLibraryRecord()
+            }
+            return decoded
         }
     }
 
@@ -145,9 +152,16 @@ final class DeckStorage {
     func saveLibrary(_ library: DeckLibraryRecord) -> Bool {
         let url = paths.deckLibraryURL
         let tmp = url.appendingPathExtension("tmp")
+        let backup = url.appendingPathExtension("bak")
         do {
             let data = try encoder.encode(library)
             try data.write(to: tmp, options: .atomic)
+            if fileManager.fileExists(atPath: url.path) {
+                if fileManager.fileExists(atPath: backup.path) {
+                    try? fileManager.removeItem(at: backup)
+                }
+                try? fileManager.copyItem(at: url, to: backup)
+            }
             if fileManager.fileExists(atPath: url.path) {
                 try fileManager.removeItem(at: url)
             }
