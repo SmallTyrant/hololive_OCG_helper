@@ -25,6 +25,7 @@ data class ReleaseDbInfo(
     val assetName: String,
     val assetUrl: String,
     val assetUpdatedAt: String,
+    val assetDigest: String,
     val publishedAt: String,
     val createdAt: String,
 )
@@ -81,6 +82,7 @@ class UpdateRepository {
                 assetName = "hololive_ocg.sqlite",
                 assetUrl = DB_DIRECT_URL,
                 assetUpdatedAt = "",
+                assetDigest = "",
                 publishedAt = "",
                 createdAt = "",
             )
@@ -153,12 +155,14 @@ class UpdateRepository {
         val assetUrl = picked.second
 
         var updatedAt = ""
+        var digest = ""
         for (i in 0 until assets.length()) {
             val item = assets.optJSONObject(i) ?: continue
             val name = item.optString("name", "")
             val url = item.optString("browser_download_url", "")
             if (name == assetName || url == assetUrl) {
                 updatedAt = item.optString("updated_at", "")
+                digest = normalizeHash(item.optString("digest", ""))
                 break
             }
         }
@@ -168,6 +172,7 @@ class UpdateRepository {
             assetName = assetName,
             assetUrl = assetUrl,
             assetUpdatedAt = updatedAt,
+            assetDigest = digest,
             publishedAt = publishedAt,
             createdAt = createdAt,
         )
@@ -246,6 +251,11 @@ class UpdateRepository {
         return major * 100L + minor * 10L + patch
     }
 
+    private fun normalizeHash(raw: String?): String {
+        val value = raw?.trim()?.lowercase().orEmpty()
+        return if (value.startsWith("sha256:")) value.removePrefix("sha256:").trim() else value
+    }
+
     private fun validateSqlite(dbFile: File) {
         if (!dbFile.exists() || !dbFile.isFile || dbFile.length() <= 0L) {
             throw IOException("downloaded DB file is missing or empty")
@@ -287,6 +297,7 @@ class UpdateRepository {
                     "release_tag" to info.tag,
                     "release_asset_name" to info.assetName,
                     "release_asset_updated_at" to info.assetUpdatedAt,
+                    "release_asset_digest" to info.assetDigest,
                     "release_published_at" to info.publishedAt,
                     "release_created_at" to info.createdAt,
                 )
