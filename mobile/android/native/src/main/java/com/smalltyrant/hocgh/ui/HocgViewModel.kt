@@ -11,6 +11,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.smalltyrant.hocgh.data.AppPaths
 import com.smalltyrant.hocgh.data.DbRepository
+import com.smalltyrant.hocgh.data.formatIsoDateOrNull
 import com.smalltyrant.hocgh.data.ImageRepository
 import com.smalltyrant.hocgh.data.UpdateRepository
 import com.smalltyrant.hocgh.model.AppUpdateDialogState
@@ -67,7 +68,7 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
     private var searchJob: Job? = null
     private var detailJob: Job? = null
     private var prefetchJob: Job? = null
-    private var remotePromptShown = false
+    private var remotePromptMarker: String? = null
     private var appUpdatePromptShown = false
 
     init {
@@ -90,6 +91,23 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onToggleImagePanel() {
         state = state.copy(imageCollapsed = !state.imageCollapsed)
+    }
+
+    fun onSelectIllustration(rarity: String, imageUrl: String) {
+        val printId = state.selectedPrintId ?: return
+        val cardNumber = state.selectedCardNumber.trim()
+        if (cardNumber.isEmpty()) return
+
+        detailJob?.cancel()
+        detailJob = viewModelScope.launch {
+            state = state.copy(selectedRarity = rarity, imageState = ImageState.Loading)
+            val loadedImageState = withContext(Dispatchers.IO) {
+                imageRepository.downloadIfNeeded(cardNumber, imageUrl, rarity)
+            }
+            if (state.selectedPrintId == printId && state.selectedRarity == rarity) {
+                state = state.copy(imageState = loadedImageState)
+            }
+        }
     }
 
     fun onUpdateDialogDismiss() {
@@ -292,6 +310,10 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
                 state = state.copy(
                     results = emptyList(),
                     selectedPrintId = null,
+                    selectedCardNumber = "",
+                    selectedImageUrl = "",
+                    selectedRarity = "",
+                    selectedIllustrations = emptyList(),
                     detailKoText = "",
                     detailJaText = "",
                     detailLoading = false,
@@ -311,6 +333,10 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
                 state = state.copy(
                     results = emptyList(),
                     selectedPrintId = null,
+                    selectedCardNumber = "",
+                    selectedImageUrl = "",
+                    selectedRarity = "",
+                    selectedIllustrations = emptyList(),
                     detailKoText = "",
                     detailJaText = "",
                     detailLoading = false,
@@ -340,6 +366,10 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
                 prefetchJob?.cancel()
                 state = state.copy(
                     selectedPrintId = null,
+                    selectedCardNumber = "",
+                    selectedImageUrl = "",
+                    selectedRarity = "",
+                    selectedIllustrations = emptyList(),
                     detailKoText = "",
                     detailJaText = "",
                     detailLoading = false,
@@ -357,6 +387,10 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
         detailJob = viewModelScope.launch {
             state = state.copy(
                 selectedPrintId = printId,
+                selectedCardNumber = "",
+                selectedImageUrl = "",
+                selectedRarity = "",
+                selectedIllustrations = emptyList(),
                 detailKoText = "",
                 detailJaText = "",
                 detailLoading = true,
@@ -375,12 +409,24 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
                     detailKoText = "[ERROR] 상세 로드 실패",
                     detailJaText = "",
                     detailLoading = false,
+                    selectedCardNumber = "",
+                    selectedImageUrl = "",
+                    selectedRarity = "",
+                    selectedIllustrations = emptyList(),
                     imageState = ImageState.Error("이미지 로딩 실패"),
                 )
                 return@launch
             }
 
+            val defaultIllustration = snapshot.brief.illustrations.firstOrNull()
+            val selectedRarity = defaultIllustration?.rarity.orEmpty()
+            val selectedImageUrl = defaultIllustration?.imageUrl?.takeIf { it.isNotBlank() } ?: snapshot.brief.imageUrl
+
             state = state.copy(
+                selectedCardNumber = snapshot.brief.cardNumber,
+                selectedImageUrl = selectedImageUrl,
+                selectedRarity = selectedRarity,
+                selectedIllustrations = snapshot.brief.illustrations,
                 detailKoText = snapshot.detail.koText,
                 detailJaText = snapshot.detail.jaText,
                 detailLoading = false,
@@ -396,7 +442,7 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             val loadedImageState = withContext(Dispatchers.IO) {
-                imageRepository.downloadIfNeeded(snapshot.brief.cardNumber, snapshot.brief.imageUrl)
+                imageRepository.downloadIfNeeded(snapshot.brief.cardNumber, selectedImageUrl, selectedRarity)
             }
 
             if (state.selectedPrintId == printId) {
@@ -484,27 +530,38 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun checkRemoteUpdateOnce() {
-        if (remotePromptShown) {
-            return
-        }
-
         viewModelScope.launch {
             val dbPath = state.dbPath.trim()
             if (dbPath.isEmpty()) {
                 return@launch
             }
 
-            val localDate = withContext(Dispatchers.IO) {
-                dbRepository.localDbDate()
-            }
-            val remoteDate = withContext(Dispatchers.IO) {
-                updateRepository.fetchRemoteDbDate()
+            val localDateDeferred = async(Dispatchers.IO) { dbRepository.localDbDate() }
+            val localDigestDeferred = async(Dispatchers.IO) { dbRepository.localDbDigest() }
+            val remoteInfo = withContext(Dispatchers.IO) {
+                runCatching { updateRepository.getLatestReleaseDbInfo() }.getOrNull()
+            } ?: return@launch
+
+            val remoteDate = formatIsoDateOrNull(
+                remoteInfo.assetUpdatedAt.ifEmpty {
+                    remoteInfo.publishedAt.ifEmpty { remoteInfo.createdAt }
+                },
+            ) ?: return@launch
+            val remoteDigest = remoteInfo.assetDigest.ifBlank { null }
+            val localDate = localDateDeferred.await()
+            val localDigest = localDigestDeferred.await()
+            val remoteMarker = remoteDigest ?: remoteInfo.assetUpdatedAt.ifEmpty { remoteDate }
+
+            val needsPrompt = if (!remoteDigest.isNullOrBlank()) {
+                remoteDigest != localDigest
+            } else {
+                remoteDate != localDate
             }
 
-            if (remoteDate.isNullOrBlank()) {
+            if (!needsPrompt) {
                 return@launch
             }
-            if (remoteDate == localDate) {
+            if (remotePromptMarker == remoteMarker) {
                 return@launch
             }
 
@@ -512,11 +569,13 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
 
-            remotePromptShown = true
+            remotePromptMarker = remoteMarker
             state = state.copy(
                 updateDialog = UpdateDialogState(
                     localDate = localDate,
                     remoteDate = remoteDate,
+                    localDigest = localDigest,
+                    remoteDigest = remoteDigest,
                 ),
             )
         }
@@ -557,7 +616,12 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun searchDeckCards(query: String, limit: Int = 240): List<DeckCardCandidate> {
         return withContext(Dispatchers.IO) {
             dbRepository.listDeckCards(query, limit).map { candidate ->
-                candidate.copy(imageUrl = paths.resolveImageUrl(candidate.imageUrl))
+                candidate.copy(
+                    imageUrl = paths.resolveImageUrl(candidate.imageUrl),
+                    illustrations = candidate.illustrations.map { option ->
+                        option.copy(imageUrl = paths.resolveImageUrl(option.imageUrl))
+                    },
+                )
             }
         }
     }

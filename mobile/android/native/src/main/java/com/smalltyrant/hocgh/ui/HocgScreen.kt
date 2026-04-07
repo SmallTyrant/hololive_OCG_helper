@@ -280,16 +280,16 @@ private data class DeckEntryUi(
     /** 사용자가 선택한 레어리티. null 이면 기본값(card.rarity) 사용. */
     val selectedRarity: String? = null,
 ) {
-    val displayRarity: String get() = selectedRarity ?: card.rarity
+    val displayRarity: String get() = selectedRarity ?: card.selectableIllustrations.firstOrNull()?.rarity.orEmpty()
 
     val effectiveImageUrl: String get() {
-        val rarity = selectedRarity ?: return card.imageUrl
+        val rarity = selectedRarity ?: card.selectableIllustrations.firstOrNull()?.rarity ?: return card.imageUrl
         val option = card.selectableIllustrations.firstOrNull { it.rarity == rarity }
         return if (option != null && option.imageUrl.isNotEmpty()) option.imageUrl else card.imageUrl
     }
 
     val effectiveManageId: Int? get() {
-        val rarity = selectedRarity ?: card.rarity
+        val rarity = selectedRarity ?: card.selectableIllustrations.firstOrNull()?.rarity ?: return null
         return card.selectableIllustrations.firstOrNull { it.rarity == rarity }?.manageIdJp
             ?: card.illustrations.firstOrNull { it.rarity == rarity }?.manageIdJp
     }
@@ -301,6 +301,26 @@ private data class DeckUi(
     val entries: List<DeckEntryUi>,
     val updatedAt: Long,
 )
+
+private fun unresolvedDeckCard(entry: DeckEntryRecord): DeckCardCandidate {
+    val cardNumber = entry.cardNumber.ifBlank { "UNKNOWN-${entry.printId}" }
+    val inferredType = if (cardNumber.uppercase().startsWith("HY")) "エール" else ""
+    val inferredRarity = entry.selectedRarity.orEmpty()
+    val inferredId = if (entry.printId > 0) entry.printId else -kotlin.math.abs(cardNumber.hashCode().toLong()).coerceAtLeast(1L)
+    return DeckCardCandidate(
+        printId = inferredId,
+        cardNumber = cardNumber,
+        nameJa = cardNumber,
+        nameKo = "미복원 카드",
+        imageUrl = "",
+        cardType = inferredType,
+        color = if (inferredType.isNotEmpty()) "엘" else "",
+        rarity = inferredRarity,
+        koText = "업데이트 후 현재 DB와 매칭되지 않아 원본 덱 엔트리를 보존한 카드입니다.",
+        jaText = "",
+        illustrations = emptyList(),
+    )
+}
 
 private fun isOshi(card: DeckCardCandidate): Boolean = card.cardType.contains("오시") || card.cardType.contains("推し")
 private fun isYell(card: DeckCardCandidate): Boolean {
@@ -446,18 +466,21 @@ private fun resolveDecksFromRecords(
     val byCardNumber = cards.associateBy { it.cardNumber.uppercase() }
     return records.mapNotNull { deck ->
         val entries = deck.entries.mapNotNull { entry ->
-            val card = byPrintId[entry.printId] ?: byCardNumber[entry.cardNumber.uppercase()]
-            if (card == null || entry.qty <= 0) {
+            if (entry.qty <= 0) {
                 null
             } else {
+                val card = byPrintId[entry.printId] ?: byCardNumber[entry.cardNumber.uppercase()] ?: unresolvedDeckCard(entry)
                 val perCardLimit = maxPerCard(card)
                 val normalizedQty = entry.qty.coerceAtLeast(1)
                 val clampedQty = if (perCardLimit == Int.MAX_VALUE) normalizedQty else normalizedQty.coerceAtMost(perCardLimit)
+                val resolvedRarity = entry.selectedRarity?.trim()?.takeIf { rarity ->
+                    card.selectableIllustrations.isEmpty() || card.selectableIllustrations.any { it.rarity == rarity }
+                }
                 DeckEntryUi(
                     card = card,
                     qty = clampedQty,
                     maxPerCard = perCardLimit,
-                    selectedRarity = entry.selectedRarity,
+                    selectedRarity = resolvedRarity,
                 )
             }
         }
@@ -878,6 +901,33 @@ private fun DeckThumbnail(
 }
 
 @Composable
+private fun SearchRaritySelector(
+    selectedRarity: String,
+    illustrations: List<com.smalltyrant.hocgh.model.IllustrationOption>,
+    fallbackImageUrl: String,
+    onSelect: (String, String) -> Unit,
+) {
+    if (illustrations.size <= 1) return
+
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(illustrations.size) { index ->
+            val option = illustrations[index]
+            val imageUrl = option.imageUrl.takeIf { it.isNotBlank() } ?: fallbackImageUrl
+            val selected = option.rarity == selectedRarity
+            if (selected) {
+                ElevatedButton(onClick = { onSelect(option.rarity, imageUrl) }) {
+                    Text(option.rarity)
+                }
+            } else {
+                TextButton(onClick = { onSelect(option.rarity, imageUrl) }) {
+                    Text(option.rarity)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun HocgScreen(
     viewModel: HocgViewModel = viewModel(),
     themeMode: AppThemeMode,
@@ -1066,6 +1116,12 @@ fun HocgScreen(
                             text = "GitHub DB 날짜: ${dialog.remoteDate}",
                             style = MaterialTheme.typography.bodySmall,
                         )
+                        dialog.remoteDigest?.take(8)?.let { remoteDigest ->
+                            Text(
+                                text = "GitHub DB 식별자: $remoteDigest",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
                     }
                 },
                 confirmButton = {
@@ -1480,7 +1536,7 @@ fun HocgScreen(
     rarityPickerNewCard?.let { card ->
         RarityPickerBottomSheet(
             card = card,
-            currentRarity = card.rarity,
+            currentRarity = card.selectableIllustrations.firstOrNull()?.rarity.orEmpty(),
             onSelect = { rarity ->
                 val reason = blockReason(deckDraft, card)
                 if (reason == null) {
@@ -1767,6 +1823,7 @@ fun HocgScreen(
                     onOpenMenu = { scope.launch { drawerState.open() } },
                     onDismissKeyboard = { focusManager.clearFocus() },
                     onSelectPrint = viewModel::onSelectPrint,
+                    onSelectIllustration = viewModel::onSelectIllustration,
                     onToggleImagePanel = viewModel::onToggleImagePanel,
                     preferredLanguage = preferredLanguage,
                     multiWordTags = viewModel.multiWordTags,
@@ -1783,6 +1840,7 @@ fun HocgScreen(
                     keepSearchBarTop = forceDesktopLandscape,
                     twoPaneLandscape = forceDesktopLandscape,
                     onSelectPrint = viewModel::onSelectPrint,
+                    onSelectIllustration = viewModel::onSelectIllustration,
                     preferredLanguage = preferredLanguage,
                     multiWordTags = viewModel.multiWordTags,
                 )
@@ -2016,7 +2074,7 @@ private fun DeckEditorScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             DeckThumbnail(
-                                imageUrl = card.imageUrl,
+                                imageUrl = card.selectableIllustrations.firstOrNull()?.imageUrl?.takeIf { it.isNotBlank() } ?: card.imageUrl,
                                 qty = qty,
                                 width = 36.dp,
                                 height = 50.dp,
@@ -2026,14 +2084,17 @@ private fun DeckEditorScreen(
                                 if (card.hasMultipleRarities) {
                                     // 복수 레어리티 칩
                                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        val currentRarity = entries.firstOrNull { it.card.printId == card.printId }?.displayRarity
+                                            ?: card.selectableIllustrations.firstOrNull()?.rarity
+                                            ?: ""
                                         card.selectableIllustrations.take(5).forEach { option ->
                                             Text(
                                                 option.rarity,
                                                 style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSecondaryContainer,
                                                 modifier = Modifier
                                                     .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(4.dp))
                                                     .padding(horizontal = 4.dp, vertical = 1.dp),
+                                                color = if (option.rarity == currentRarity) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSecondaryContainer,
                                             )
                                         }
                                     }
@@ -2110,6 +2171,7 @@ private fun MobileLayout(
     onOpenMenu: () -> Unit,
     onDismissKeyboard: () -> Unit,
     onSelectPrint: (Long) -> Unit,
+    onSelectIllustration: (String, String) -> Unit,
     onToggleImagePanel: () -> Unit,
     preferredLanguage: PreferredLanguage,
     multiWordTags: List<String> = emptyList(),
@@ -2191,6 +2253,12 @@ private fun MobileLayout(
         if (state.imageCollapsed) {
             Text("이미지를 접었습니다.", style = MaterialTheme.typography.bodySmall)
         } else {
+            SearchRaritySelector(
+                selectedRarity = state.selectedRarity,
+                illustrations = state.selectedIllustrations,
+                fallbackImageUrl = state.selectedImageUrl,
+                onSelect = onSelectIllustration,
+            )
             Panel(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -2226,6 +2294,7 @@ private fun DesktopLayout(
     keepSearchBarTop: Boolean,
     twoPaneLandscape: Boolean,
     onSelectPrint: (Long) -> Unit,
+    onSelectIllustration: (String, String) -> Unit,
     preferredLanguage: PreferredLanguage,
     multiWordTags: List<String> = emptyList(),
 ) {
@@ -2366,6 +2435,12 @@ private fun DesktopLayout(
                 ) {
                     Column(modifier = Modifier.weight(6f).fillMaxWidth()) {
                         Text("이미지", modifier = Modifier.padding(start = 10.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall)
+                        SearchRaritySelector(
+                            selectedRarity = state.selectedRarity,
+                            illustrations = state.selectedIllustrations,
+                            fallbackImageUrl = state.selectedImageUrl,
+                            onSelect = onSelectIllustration,
+                        )
                         Panel(modifier = Modifier.fillMaxSize()) {
                             ImagePanel(state.imageState)
                         }
@@ -2399,6 +2474,12 @@ private fun DesktopLayout(
 
                 Column(modifier = Modifier.weight(6f)) {
                     Text("이미지", modifier = Modifier.padding(start = 10.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall)
+                    SearchRaritySelector(
+                        selectedRarity = state.selectedRarity,
+                        illustrations = state.selectedIllustrations,
+                        fallbackImageUrl = state.selectedImageUrl,
+                        onSelect = onSelectIllustration,
+                    )
                     Panel(modifier = Modifier.fillMaxSize()) {
                         ImagePanel(state.imageState)
                     }
