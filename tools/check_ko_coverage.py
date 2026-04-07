@@ -16,7 +16,22 @@ def check(db_path: str) -> int:
     cur = conn.cursor()
     errors = 0
 
-    # 1. ko 텍스트가 없거나 비어있는 카드
+    cur.execute("""
+        SELECT p.card_number, p.name_ja
+        FROM prints p
+        LEFT JOIN card_texts_ko ko ON ko.print_id = p.print_id
+        WHERE ko.print_id IS NULL OR TRIM(COALESCE(ko.name,'')) = ''
+        ORDER BY p.card_number
+    """)
+    rows = cur.fetchall()
+    if rows:
+        print(f"[FAIL] ko 이름 누락: {len(rows)}건")
+        for r in rows:
+            print(f"       {r['card_number']} | {r['name_ja']}")
+        errors += len(rows)
+    else:
+        print("[OK] ko 이름 누락: 0건")
+
     cur.execute("""
         SELECT p.card_number, p.name_ja
         FROM prints p
@@ -33,7 +48,6 @@ def check(db_path: str) -> int:
     else:
         print("[OK] ko 텍스트 누락: 0건")
 
-    # 2. 일본어에 アーツ가 있는데 한국어에 아츠가 없는 카드 (홀로멤/툴/마스코트 등)
     cur.execute("""
         SELECT p.card_number, p.name_ja, ko.effect_text
         FROM prints p
@@ -53,7 +67,6 @@ def check(db_path: str) -> int:
     else:
         print("[OK] 아츠 누락 카드: 0건")
 
-    # 3. 메타데이터 뭉침 패턴 (레벨 속성 HP 배턴 터치)
     cur.execute("""
         SELECT COUNT(*) FROM card_texts_ko
         WHERE effect_text LIKE '%레벨 속성%' AND effect_text LIKE '%배턴 터치%'
@@ -74,7 +87,6 @@ def check(db_path: str) -> int:
     else:
         print("[OK] 메타 뭉침 패턴: 0건")
 
-    # 4. 홀로멤/서포트 등 카드 타입이 name으로 오염
     bad_names = ('홀로멤', '오시 홀로멤', '서포트', '이벤트', '마스코트', '팬', '툴')
     placeholders = ','.join('?' for _ in bad_names)
     cur.execute(f"""
@@ -93,7 +105,6 @@ def check(db_path: str) -> int:
     else:
         print("[OK] 카드 타입 name 오염: 0건")
 
-    # 5. 커버율 요약
     cur.execute("SELECT COUNT(*) FROM prints")
     total = cur.fetchone()[0]
     cur.execute("SELECT COUNT(*) FROM card_texts_ko WHERE TRIM(COALESCE(effect_text,'')) != ''")

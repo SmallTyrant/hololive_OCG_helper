@@ -11,6 +11,16 @@ python3 scripts/mobile_build_gate.py --target ios
 
 - 위 게이트는 `mobile/ios/native/Sources/HocgNative` 누락과 Swift 소스 파일 누락을 즉시 `NO-GO`로 차단합니다.
 
+## 릴리즈 전 한국어 번역 확인 (필수)
+DB 릴리즈나 TestFlight 배포 전에 루트 경로에서 아래 검사를 먼저 실행하세요.
+
+```bash
+python3 tools/check_ko_coverage.py --db app/assets/hololive_ocg.sqlite
+```
+
+- `ko 이름 누락`, `ko 텍스트 누락`, `아츠 누락 카드`, `카드 타입 name 오염`이 하나라도 나오면 릴리즈하지 않습니다.
+- 누락이 있으면 `data/ko_input.csv` 또는 한국어 번역 입력 소스를 수정하고 DB를 다시 갱신한 뒤, 이 검사를 재실행해야 합니다.
+
 ## 프로젝트 재생성
 ```bash
 cd /Users/perlihite/Desktop/hololive_OCG_helper/mobile/ios/native-app
