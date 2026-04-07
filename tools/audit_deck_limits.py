@@ -34,7 +34,7 @@ def is_yell(row: sqlite3.Row) -> bool:
         return True
     color = (row["color"] or "").lower()
     card_type = parse_card_type(row).lower()
-    return any(x in color for x in ("옐", "yell", "エール")) or any(x in card_type for x in ("yell", "エール"))
+    return any(x in color for x in ("엘", "yell", "エール")) or any(x in card_type for x in ("yell", "エール"))
 
 
 def has_unlimited_rule(row: sqlite3.Row) -> bool:

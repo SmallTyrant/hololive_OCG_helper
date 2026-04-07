@@ -19,6 +19,7 @@ from app.services.db import (
     query_exact,
     list_cards,
     list_cards_for_deck,
+    list_card_illustrations,
     load_card_detail,
     get_print_brief,
     db_exists,
@@ -514,6 +515,8 @@ def launch_app(db_path: str) -> None:
         selected_print_id = {"id": None}
         selected_card_number = {"no": ""}
         selected_image_url = {"url": ""}
+        selected_image_variant = {"value": ""}
+        selected_rarity_state = {"value": "", "selected_key": "", "options": []}
         results_state = {"rows": []}
         image_panel_state = {"collapsed": False}
         search_mode_state = {"value": SEARCH_MODE_PARTIAL}
@@ -564,7 +567,7 @@ def launch_app(db_path: str) -> None:
         def is_yell(card: dict) -> bool:
             color = (card.get("color") or "").lower()
             card_type = (card.get("card_type") or "").lower()
-            return "옐" in color or "yell" in color or "エール" in color or "yell" in card_type
+            return "엘" in color or "yell" in color or "エール" in color or "yell" in card_type
 
         def get_entry_counts(entries: list[dict]) -> tuple[int, int, int]:
             oshi = 0
@@ -585,9 +588,9 @@ def launch_app(db_path: str) -> None:
             if is_oshi_card and oshi_count + 1 > 1:
                 return "오시카드는 1장만 선택 가능합니다."
             if is_yell_card and yell_count + 1 > 20:
-                return "옐 카드는 최대 20장까지 가능합니다."
+                return "엘 카드는 최대 20장까지 가능합니다."
             if not is_oshi_card and not is_yell_card and main_count + 1 > 50:
-                return "오시/옐 제외 카드는 최대 50장까지 가능합니다."
+                return "오시/엘 제외 카드는 최대 50장까지 가능합니다."
             return None
 
         def rebuild_deck_entries_for_rules(entries: list[dict]) -> list[dict]:
@@ -669,6 +672,10 @@ def launch_app(db_path: str) -> None:
                 found["max_per_card"] = max_per_card
                 found["is_oshi"] = is_oshi_card
                 found["is_yell"] = is_yell_card
+                if (card.get("image_url") or "").strip():
+                    found["image_url"] = resolve_url((card.get("image_url") or "").strip())
+                found["selected_rarity"] = (card.get("selected_rarity") or found.get("selected_rarity") or "").strip().upper()
+                found["selected_rarity_key"] = (card.get("selected_rarity_key") or found.get("selected_rarity_key") or "").strip()
                 if int(found.get("qty", 0)) >= int(found.get("max_per_card", max_per_card)):
                     return f"이 카드는 최대 {found.get('max_per_card', max_per_card)}장까지 가능합니다."
                 found["qty"] = int(found.get("qty", 0)) + 1
@@ -680,6 +687,8 @@ def launch_app(db_path: str) -> None:
                     "card_number": (card.get("card_number") or "").strip(),
                     "name": (card.get("name_ko") or card.get("name_ja") or "(이름 없음)").strip(),
                     "image_url": resolve_url((card.get("image_url") or "").strip()),
+                    "selected_rarity": (card.get("selected_rarity") or "").strip().upper(),
+                    "selected_rarity_key": (card.get("selected_rarity_key") or "").strip(),
                     "is_oshi": is_oshi_card,
                     "is_yell": is_yell_card,
                     "max_per_card": max_per_card,
@@ -1042,10 +1051,11 @@ def launch_app(db_path: str) -> None:
             card_number: str,
             image_url: str | None = None,
             *,
+            image_variant: str = "",
             loading: bool = False,
             placeholder_text: str = "이미지 없음",
         ) -> None:
-            image_path = local_image_path(data_root, card_number) if card_number else None
+            image_path = local_image_path(data_root, card_number, image_variant) if card_number else None
             resolved = resolve_url((image_url or "").strip())
             img_container.content = build_image_widget(
                 image_path if image_path and image_path.exists() else None,
@@ -1062,6 +1072,7 @@ def launch_app(db_path: str) -> None:
             set_image_for_card(
                 selected_card_number["no"],
                 selected_image_url["url"],
+                image_variant=selected_image_variant["value"],
                 placeholder_text="이미지 없음",
             )
             build_layout(force=True)
@@ -1074,33 +1085,34 @@ def launch_app(db_path: str) -> None:
         async def download_selected_image(
             card_number: str,
             image_url: str,
+            image_variant: str = "",
         ) -> None:
-            dest = local_image_path(data_root, card_number)
+            dest = local_image_path(data_root, card_number, image_variant)
             try:
                 append_log(f"[IMG] downloading: {card_number} -> {dest.name}")
                 await asyncio.to_thread(download_image, image_url, dest)
                 append_log("[IMG] done")
-                if selected_card_number["no"] == card_number:
-                    set_image_for_card(card_number, image_url)
+                if selected_card_number["no"] == card_number and selected_image_variant["value"] == image_variant:
+                    set_image_for_card(card_number, image_url, image_variant=image_variant)
             except Exception as ex:
                 append_log(f"[IMG][ERROR] {ex}")
-                if selected_card_number["no"] == card_number:
+                if selected_card_number["no"] == card_number and selected_image_variant["value"] == image_variant:
                     clear_image("이미지 로딩 실패")
             finally:
                 with download_lock:
-                    downloading.discard(card_number)
+                    downloading.discard((card_number, image_variant))
                 page.update()
 
-        def ensure_image_download(card_number: str, image_url: str) -> None:
+        def ensure_image_download(card_number: str, image_url: str, image_variant: str = "") -> None:
             if not card_number:
                 clear_image()
                 return
 
             resolved_url = resolve_url((image_url or "").strip())
-            dest = local_image_path(data_root, card_number)
+            dest = local_image_path(data_root, card_number, image_variant)
 
             if dest.exists():
-                set_image_for_card(card_number, resolved_url)
+                set_image_for_card(card_number, resolved_url, image_variant=image_variant)
                 return
 
             if not resolved_url:
@@ -1108,11 +1120,62 @@ def launch_app(db_path: str) -> None:
                 return
 
             with download_lock:
-                if card_number in downloading:
+                download_key = (card_number, image_variant)
+                if download_key in downloading:
                     return
-                downloading.add(card_number)
+                downloading.add(download_key)
 
-            page.run_task(download_selected_image, card_number, resolved_url)
+            page.run_task(download_selected_image, card_number, resolved_url, image_variant)
+
+        def get_rarity_options(conn: sqlite3.Connection, card_number: str, fallback_image_url: str = "") -> list[dict]:
+            return list_card_illustrations(conn, card_number, fallback_image_url=fallback_image_url)
+
+        def rarity_label(option: dict) -> str:
+            return (option.get("rarity") or "기본").strip() or "기본"
+
+        def get_default_rarity_option(options: list[dict], fallback_image_url: str = "") -> dict:
+            if options:
+                return options[0]
+            return {"option_key": "default", "rarity": "", "image_url": fallback_image_url, "is_default": 1}
+
+        def select_search_rarity(option: dict, *, update_layout: bool = False) -> None:
+            rarity = (option.get("rarity") or "").strip().upper()
+            image_url = resolve_url((option.get("image_url") or "").strip())
+            selected_rarity_state["value"] = rarity
+            selected_rarity_state["selected_key"] = (option.get("option_key") or "").strip()
+            selected_image_variant["value"] = rarity
+            selected_image_url["url"] = image_url
+            set_image_for_card(
+                selected_card_number["no"],
+                image_url,
+                image_variant=rarity,
+                loading=True,
+                placeholder_text="이미지 없음",
+            )
+            ensure_image_download(selected_card_number["no"], image_url, rarity)
+            if update_layout:
+                build_layout(force=True)
+            page.update()
+
+        def build_search_rarity_selector() -> ft.Control:
+            options = selected_rarity_state["options"]
+            if len(options) <= 1:
+                return ft.Container(height=0)
+
+            current_key = (selected_rarity_state.get("selected_key") or "").strip()
+            controls: list[ft.Control] = []
+            for option in options:
+                option_key = (option.get("option_key") or "").strip()
+                label = rarity_label(option)
+                if option_key == current_key:
+                    controls.append(ft.ElevatedButton(label, on_click=lambda e, _option=option: select_search_rarity(_option)))
+                else:
+                    controls.append(ft.OutlinedButton(label, on_click=lambda e, _option=option: select_search_rarity(_option)))
+
+            return ft.Container(
+                content=ft.Row(controls, scroll=ft.ScrollMode.AUTO, spacing=8),
+                padding=ft.padding.only(left=4, right=4, bottom=6),
+            )
 
         def build_section_chip(text: str) -> ft.Control:
             return ft.Container(
@@ -1184,6 +1247,10 @@ def launch_app(db_path: str) -> None:
             selected_print_id["id"] = None
             selected_card_number["no"] = ""
             selected_image_url["url"] = ""
+            selected_image_variant["value"] = ""
+            selected_rarity_state["value"] = ""
+            selected_rarity_state["selected_key"] = ""
+            selected_rarity_state["options"] = []
             image_zoom_state["enabled"] = False
             set_detail_text("")
             clear_image("카드를 검색 후 선택하면 이미지가 표시됩니다.")
@@ -1231,7 +1298,13 @@ def launch_app(db_path: str) -> None:
                 conn = get_conn()
                 brief = get_print_brief(conn, pid) or {}
                 selected_card_number["no"] = (brief.get("card_number") or "").strip()
-                selected_image_url["url"] = resolve_url((brief.get("image_url") or "").strip())
+                rarity_options = get_rarity_options(conn, selected_card_number["no"], (brief.get("image_url") or "").strip())
+                selected_rarity_state["options"] = rarity_options
+                default_option = get_default_rarity_option(rarity_options, (brief.get("image_url") or ""))
+                selected_rarity_state["value"] = (default_option.get("rarity") or "").strip().upper()
+                selected_rarity_state["selected_key"] = (default_option.get("option_key") or "").strip()
+                selected_image_variant["value"] = selected_rarity_state["value"]
+                selected_image_url["url"] = resolve_url((default_option.get("image_url") or "").strip())
                 image_zoom_state["enabled"] = False
                 build_layout(force=True)
 
@@ -1239,12 +1312,14 @@ def launch_app(db_path: str) -> None:
                     set_image_for_card(
                         selected_card_number["no"],
                         selected_image_url["url"],
+                        image_variant=selected_image_variant["value"],
                         loading=True,
                         placeholder_text="이미지 없음",
                     )
                     ensure_image_download(
                         selected_card_number["no"],
                         selected_image_url["url"],
+                        selected_image_variant["value"],
                     )
                 else:
                     clear_image("이미지 없음")
@@ -1721,6 +1796,80 @@ def launch_app(db_path: str) -> None:
 
             search = ft.TextField(label="카드 검색", value=deck_search_state["query"], on_change=lambda e: refresh_dialog())
             body = ft.Column(scroll=ft.ScrollMode.AUTO, height=420, spacing=6)
+            rarity_cache: dict[str, list[dict]] = {}
+
+            def get_cached_rarity_options(row: dict) -> list[dict]:
+                card_number = (row.get("card_number") or "").strip()
+                if card_number not in rarity_cache:
+                    rarity_cache[card_number] = get_rarity_options(conn, card_number, (row.get("image_url") or "").strip())
+                return rarity_cache[card_number]
+
+            def add_card_with_option(row: dict, option: dict) -> None:
+                payload = dict(row)
+                payload["image_url"] = resolve_url((option.get("image_url") or row.get("image_url") or "").strip())
+                payload["selected_rarity"] = (option.get("rarity") or "").strip().upper()
+                payload["selected_rarity_key"] = (option.get("option_key") or "").strip()
+                show_toast(try_add_card_to_deck(payload) or "카드가 추가되었습니다.", duration_ms=1200)
+                build_layout(True)
+                page.pop_dialog()
+                page.update()
+
+            def open_rarity_pick_dialog(row: dict, options: list[dict]) -> None:
+                current_option = get_default_rarity_option(options, (row.get("image_url") or ""))
+                preview = ft.Image(
+                    src=resolve_url((current_option.get("image_url") or row.get("image_url") or "").strip()),
+                    width=140,
+                    height=196,
+                    fit=IMAGE_FIT_COVER,
+                )
+                rarity_row = ft.Row(scroll=ft.ScrollMode.AUTO, spacing=8)
+
+                def sync_preview() -> None:
+                    preview.src = resolve_url((current_option.get("image_url") or row.get("image_url") or "").strip())
+                    rarity_row.controls = []
+                    current_option_key = (current_option.get("option_key") or "").strip()
+                    for option in options:
+                        option_key = (option.get("option_key") or "").strip()
+                        label = rarity_label(option)
+                        if option_key == current_option_key:
+                            rarity_row.controls.append(ft.ElevatedButton(label, on_click=lambda e, _option=option: on_select(_option)))
+                        else:
+                            rarity_row.controls.append(ft.OutlinedButton(label, on_click=lambda e, _option=option: on_select(_option)))
+                    page.update()
+
+                def on_select(option: dict) -> None:
+                    nonlocal current_option
+                    current_option = option
+                    sync_preview()
+
+                def on_add(e=None) -> None:
+                    page.pop_dialog()
+                    add_card_with_option(row, current_option)
+
+                sync_preview()
+                page.show_dialog(
+                    ft.AlertDialog(
+                        modal=True,
+                        title=ft.Text("레어도 선택"),
+                        content=ft.Column(
+                            [
+                                ft.Text(f"{row.get('card_number') or ''} | {row.get('name_ko') or row.get('name_ja') or ''}"),
+                                preview,
+                                rarity_row,
+                            ],
+                            tight=True,
+                            spacing=10,
+                        ),
+                        actions=[
+                            ft.TextButton("취소", on_click=lambda e: page.pop_dialog()),
+                            ft.ElevatedButton("추가", on_click=on_add),
+                        ],
+                    )
+                )
+
+            def open_rarity_pick_from_picker(row: dict, options: list[dict]) -> None:
+                page.pop_dialog()
+                open_rarity_pick_dialog(row, options)
 
             def refresh_dialog() -> None:
                 deck_search_state["query"] = (search.value or "").strip().lower()
@@ -1732,11 +1881,22 @@ def launch_app(db_path: str) -> None:
                     name = ((row.get("name_ko") or row.get("name_ja") or "")).lower()
                     if q and q not in card_no and q not in name:
                         continue
+                    options = get_cached_rarity_options(row)
+                    default_option = get_default_rarity_option(options, (row.get("image_url") or ""))
+                    image_src = resolve_url((default_option.get("image_url") or row.get("image_url") or "").strip())
+                    subtitle = None
+                    if len(options) > 1:
+                        subtitle = ft.Text(
+                            f"레어도: {' / '.join(rarity_label(option) for option in options)}",
+                            size=11,
+                            color=COLORS.GREY_400,
+                        )
                     body.controls.append(
                         ft.ListTile(
-                            leading=ft.Image(src=resolve_url((row.get("image_url") or "").strip()), width=36, height=50, fit=IMAGE_FIT_COVER),
+                            leading=ft.Image(src=image_src, width=36, height=50, fit=IMAGE_FIT_COVER),
                             title=ft.Text(f"{row.get('card_number') or ''} | {row.get('name_ko') or row.get('name_ja') or ''}"),
-                            on_click=lambda e, _row=row: (show_toast(try_add_card_to_deck(_row) or "카드가 추가되었습니다.", duration_ms=1200), build_layout(True), page.pop_dialog(), page.update()),
+                            subtitle=subtitle,
+                            on_click=lambda e, _row=row, _options=options: open_rarity_pick_from_picker(_row, _options) if len(_options) > 1 else add_card_with_option(_row, _options[0] if _options else {"rarity": "", "image_url": _row.get("image_url") or ""}),
                         )
                     )
                 page.update()
@@ -1813,7 +1973,14 @@ def launch_app(db_path: str) -> None:
                                 ],
                                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                             ),
-                            ft.Row([ft.Text(f"오시 {oshi_count}/1"), ft.Text(f"옐 {yell_count}/20"), ft.Text(f"기타 {main_count}/50")], spacing=14),
+                            ft.Row(
+                                [
+                                    ft.Text(f"오시 {oshi_count}/1"),
+                                    ft.Text(f"엘 {yell_count}/20"),
+                                    ft.Text(f"기타 {main_count}/50"),
+                                ],
+                                spacing=14,
+                            ),
                             ft.Row([ft.Text("카드 목록"), ft.IconButton(icon=ICONS.ADD, on_click=lambda e: open_card_pick_dialog())], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                             ft.Column(entry_controls or [ft.Text("카드를 추가해주세요.")], scroll=ft.ScrollMode.AUTO, expand=True),
                         ],
@@ -1913,6 +2080,7 @@ def launch_app(db_path: str) -> None:
                         content=ft.Column(
                             [
                                 image_section_header_mobile(),
+                                build_search_rarity_selector(),
                                 image_content,
                             ],
                             spacing=6,
@@ -2005,6 +2173,7 @@ def launch_app(db_path: str) -> None:
             middle = ft.Column(
                 [
                     ft.Container(ft.Text("이미지"), padding=ft.padding.only(left=10, top=4)),
+                    build_search_rarity_selector(),
                     img_container,
                 ],
                 expand=True,
