@@ -19,3 +19,15 @@ mobile/ios/native-app/build/ipa_altstore/
 mobile/ios/native-app/build/
 *.p8
 실수.md
+bootstrap_opencode_parallel_final_ko.sh
+CLAUDE.md
+*.log
+*.json
+*.md
+*.mdc
+*.js
+*.sh
+*.py
+*.txt
+*.png
+*.webp
