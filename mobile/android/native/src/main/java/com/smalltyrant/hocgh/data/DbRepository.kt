@@ -16,7 +16,7 @@ private val TAG_ALIAS: Map<String, List<String>> = mapOf(
 
 class DbRepository(private val paths: AppPaths) {
 
-    private val rarityOrder = listOf("C", "U", "R", "RR", "SR", "S", "RE", "RRR", "OUR", "UR", "SEC", "OSR", "SY", "OC", "HR", "P")
+    private val rarityOrder = listOf("C", "U", "R", "RR", "SR", "S", "RE", "RRR", "OSR", "OUR", "UR", "SEC", "SY", "OC", "HR", "P")
     private val rarityOrderIndex = rarityOrder.withIndex().associate { it.value to it.index }
 
     data class ImageTarget(
@@ -613,23 +613,17 @@ class DbRepository(private val paths: AppPaths) {
             return text
         }
 
-        val existingTags = text
-            .split(Regex("\\s+"))
-            .map { it.trim() }
-            .filter { it.startsWith("#") }
-            .toSet()
-
-        if (existingTags.isNotEmpty()) {
-            return text
-        }
-
-        val missing = tags.filterNot(existingTags::contains)
-        if (missing.isEmpty()) {
+        val lines = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        val hasStandaloneTagSection = lines.any { it == sectionLabel } ||
+            lines.any { line ->
+                line.startsWith("#") && line.split(Regex("\\s+")).all { token -> token.startsWith("#") }
+            }
+        if (hasStandaloneTagSection) {
             return text
         }
 
         val normalized = text.trim()
-        val tagLine = missing.joinToString(" ")
+        val tagLine = tags.joinToString(" ")
         return if (normalized.isEmpty()) {
             "$sectionLabel\n$tagLine"
         } else {

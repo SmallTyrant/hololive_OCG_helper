@@ -8,7 +8,7 @@ private let tagAlias: [String: [String]] = [
 
 final class DatabaseRepository {
     private let paths: AppPaths
-    private let rarityOrder = ["C", "U", "R", "RR", "SR", "S", "RE", "RRR", "OUR", "UR", "SEC", "OSR", "SY", "OC", "HR", "P"]
+    private let rarityOrder = ["C", "U", "R", "RR", "SR", "S", "RE", "RRR", "OSR", "OUR", "UR", "SEC", "SY", "OC", "HR", "P"]
 
     private struct DbFingerprint: Equatable {
         let path: String
@@ -947,20 +947,20 @@ final class DatabaseRepository {
             return text
         }
 
-        let hasExistingTags = text.range(of: #"#[^\s#]+"#, options: .regularExpression) != nil
-        if hasExistingTags {
-            return text
+        let lines = text
+            .split(whereSeparator: { $0.isNewline })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let hasStandaloneTagSection = lines.contains(sectionLabel) || lines.contains { line in
+            line.hasPrefix("#") &&
+            line.split(whereSeparator: { $0.isWhitespace }).allSatisfy { $0.hasPrefix("#") }
         }
-
-        let existingTags: Set<String> = []
-
-        let missing = tags.filter { !existingTags.contains($0) }
-        guard !missing.isEmpty else {
+        if hasStandaloneTagSection {
             return text
         }
 
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let tagLine = missing.joined(separator: " ")
+        let tagLine = tags.joined(separator: " ")
         if normalized.isEmpty {
             return "\(sectionLabel)\n\(tagLine)"
         }

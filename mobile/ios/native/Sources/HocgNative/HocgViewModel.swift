@@ -325,6 +325,7 @@ final class HocgViewModel: ObservableObject {
 
             if let selectedBefore,
                rows.contains(where: { $0.printId == selectedBefore }) {
+                showDetail(selectedBefore)
                 prefetchCardDetails(rows: rows, excludingPrintId: selectedBefore)
                 return
             }

@@ -357,6 +357,7 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
             )
 
             if (selectedBefore != null && rows.any { it.printId == selectedBefore }) {
+                showDetail(selectedBefore)
                 prefetchCardDetails(rows = rows, excludingPrintId = selectedBefore)
                 return@launch
             }

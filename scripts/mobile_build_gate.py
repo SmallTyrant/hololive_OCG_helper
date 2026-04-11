@@ -91,8 +91,8 @@ def read_text(path: Path) -> str:
 
 
 def parse_android_versions(gradle_text: str) -> tuple[str | None, str | None]:
-    code_match = re.search(r"versionCode\s*=\s*(\d+)", gradle_text)
-    name_match = re.search(r"versionName\s*=\s*\"([^\"]+)\"", gradle_text)
+    code_match = re.search(r"versionCode\s*=\s*(?:.*\?:\s*)?(\d+)", gradle_text)
+    name_match = re.search(r'versionName\s*=\s*(?:.*\?:\s*)?"([^"]+)"', gradle_text)
     code = code_match.group(1) if code_match else None
     name = name_match.group(1) if name_match else None
     return code, name

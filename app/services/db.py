@@ -17,10 +17,10 @@ RARITY_ORDER = (
     "S",
     "RE",
     "RRR",
+    "OSR",
     "OUR",
     "UR",
     "SEC",
-    "OSR",
     "SY",
     "OC",
     "HR",
@@ -519,10 +519,13 @@ def load_card_detail(conn: sqlite3.Connection, pid: int) -> dict | None:
                 tags.append(tag)
         if tags:
             ko_text = (detail.get("ko_text") or "").strip()
-            existing = {t for t in ko_text.split() if t.startswith("#")}
-            missing = [t for t in tags if t not in existing]
-            if missing and not existing:
-                tag_line = " ".join(missing)
+            lines = [line.strip() for line in ko_text.splitlines() if line.strip()]
+            has_standalone_tag_section = (
+                "태그" in lines
+                or any(line.startswith("#") and all(token.startswith("#") for token in line.split()) for line in lines)
+            )
+            if not has_standalone_tag_section:
+                tag_line = " ".join(tags)
                 detail["ko_text"] = f"{ko_text}\n태그\n{tag_line}" if ko_text else f"태그\n{tag_line}"
 
     return detail

@@ -31,8 +31,8 @@ android {
         applicationId = "com.smalltyrant.hocgh"
         minSdk = 26
         targetSdk = 35
-        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 177
-        versionName = (project.findProperty("versionName") as String?) ?: "1.2.15"
+        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 180
+        versionName = (project.findProperty("versionName") as String?) ?: "1.2.18"
     }
 
     if (hasReleaseSigning) {
@@ -78,6 +78,10 @@ android {
             assets.srcDirs("src/main/assets")
         }
     }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 dependencies {
@@ -94,6 +98,10 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("androidx.test:core:1.6.1")
+    testImplementation("org.robolectric:robolectric:4.14.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

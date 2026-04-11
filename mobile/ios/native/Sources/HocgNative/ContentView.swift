@@ -5,6 +5,12 @@ import Photos
 import UniformTypeIdentifiers
 
 private let sectionLabels: [String] = [
+    "서포트 / 아이템",
+    "서포트 / 스태프",
+    "서포트 / 이벤트",
+    "서포트 / 툴",
+    "서포트 / 마스코트",
+    "서포트 / 팬",
     "SP 오시 스킬",
     "오시 스테이지 스킬",
     "오시 스킬",
@@ -42,7 +48,7 @@ private let detailPrefixPattern = #"^(?:(?:.+?)\s+)?(?:서포트|サポート)\s
 private let sectionLabelsSorted = sectionLabels.sorted { $0.count > $1.count }
 private let japaneseCharPattern = "[\\u3040-\\u30ff\\u31f0-\\u31ff\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff々〆ヵヶ]"
 private let koSectionMarkerRegex = try! NSRegularExpression(
-    pattern: "SP 오시 스킬|오시 스테이지 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\\s+(?![+\\-]\\d)\\S)|#"
+    pattern: "서포트 / 아이템|서포트 / 스태프|서포트 / 이벤트|서포트 / 툴|서포트 / 마스코트|서포트 / 팬|SP 오시 스킬|오시 스테이지 스킬|오시 스킬|콜라보 이펙트|블룸 이펙트|기프트|엑스트라|아츠(?=\\s+(?![+\\-]\\d)\\S)|#"
 )
 private let jaSectionMarkerRegex = try! NSRegularExpression(
     pattern: "SP推しスキル|推しステージスキル|推しスキル|コラボエフェクト|ブルームエフェクト|ギフト|エクストラ|アーツ(?=\\s+(?![+\\-]\\d)\\S)|カードタイプ|タグ|レアリティ|能力テキスト|バトンタッチ|#"
@@ -2062,6 +2068,10 @@ struct ContentView: View {
         let noHtml = line.replacingOccurrences(of: htmlTagPattern, with: " ", options: .regularExpression)
         let noWidth = noHtml.replacingOccurrences(of: widthArtifactPattern, with: " ", options: .regularExpression)
         let trimmed = noWidth.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fullRange = NSRange(location: 0, length: trimmed.utf16.count)
+        if !trimmed.isEmpty, let match = detailPrefixRegex.firstMatch(in: trimmed, range: fullRange), match.range.location == 0, match.range.length == fullRange.length {
+            return trimmed
+        }
         let range = NSRange(location: 0, length: trimmed.utf16.count)
         return detailPrefixRegex.stringByReplacingMatches(in: trimmed, range: range, withTemplate: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2146,54 +2156,7 @@ struct ContentView: View {
                 .filter { !$0.isEmpty }
         }
 
-        var expanded: [String] = []
-        for line in lines {
-            guard line.contains("#") else {
-                expanded.append(line)
-                continue
-            }
-
-            // Japanese tag boundary: split at を after tag
-            if let jaMatch = jaTagObjectSplit(line) {
-                expanded.append(tagLabel)
-                expanded.append(normalizeInlineWhitespace(jaMatch.tag))
-                let tail = normalizeInlineWhitespace(jaMatch.rest)
-                if !tail.isEmpty {
-                    if tail.contains("#") {
-                        expanded.append(contentsOf: expandTagLinesHelper([tail], tagLabel: tagLabel))
-                    } else {
-                        expanded.append(tail)
-                    }
-                }
-                continue
-            }
-
-            guard let hashIndex = line.firstIndex(of: "#"), hashIndex != line.startIndex else {
-                expanded.append(line)
-                continue
-            }
-
-            let prefix = normalizeInlineWhitespace(String(line[..<hashIndex]))
-            let tagText = normalizeInlineWhitespace(String(line[hashIndex...]))
-
-            // Check if the tag portion has a Japanese boundary
-            if let jaMatch = jaTagObjectSplit(tagText) {
-                if !prefix.isEmpty { expanded.append(prefix) }
-                expanded.append(tagLabel)
-                expanded.append(normalizeInlineWhitespace(jaMatch.tag))
-                let tail = normalizeInlineWhitespace(jaMatch.rest)
-                if !tail.isEmpty {
-                    if tail.contains("#") {
-                        expanded.append(contentsOf: expandTagLinesHelper([tail], tagLabel: tagLabel))
-                    } else {
-                        expanded.append(tail)
-                    }
-                }
-            } else {
-                if !prefix.isEmpty { expanded.append(prefix) }
-                if !tagText.isEmpty { expanded.append(tagText) }
-            }
-        }
+        let expanded = lines
 
         let markerIndex = expanded.firstIndex(where: { splitSectionLabel($0) != nil })
         let trimmed = markerIndex.map { Array(expanded[$0...]) } ?? expanded
@@ -2201,7 +2164,7 @@ struct ContentView: View {
 
         var result: [String] = []
         for line in filtered {
-            if line.hasPrefix("#") {
+            if isStandaloneTagMetadataLine(line) {
                 if result.last != tagLabel {
                     result.append(tagLabel)
                 }
@@ -2434,6 +2397,29 @@ struct ContentView: View {
         text
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func isStandaloneTagMetadataLine(_ line: String) -> Bool {
+        let normalized = normalizeInlineWhitespace(line)
+        guard normalized.hasPrefix("#") else {
+            return false
+        }
+
+        let dynamicRegex = cachedTagRegex
+        let nsRange = NSRange(normalized.startIndex..., in: normalized)
+        let matches = dynamicRegex.matches(in: normalized, options: [], range: nsRange)
+        guard !matches.isEmpty else {
+            return false
+        }
+
+        var remainder = normalized
+        for match in matches.reversed() {
+            guard let range = Range(match.range, in: remainder) else {
+                continue
+            }
+            remainder.replaceSubrange(range, with: " ")
+        }
+        return normalizeInlineWhitespace(remainder).isEmpty
     }
 
     private func firstSectionRange(in text: String, regex: NSRegularExpression) -> Range<String.Index>? {
