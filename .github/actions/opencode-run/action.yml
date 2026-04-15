@@ -1,0 +1,68 @@
+name: "Local OpenCode runner"
+description: "Install and run OpenCode with Node24-compatible dependencies"
+
+inputs:
+  model:
+    description: "Model to use"
+    required: true
+  prompt:
+    description: "Prompt to send to OpenCode"
+    required: false
+  use_github_token:
+    description: "Use GITHUB_TOKEN directly"
+    required: false
+    default: "false"
+  share:
+    description: "Share the OpenCode session"
+    required: false
+  mentions:
+    description: "Comma-separated trigger phrases"
+    required: false
+  variant:
+    description: "Provider-specific model variant"
+    required: false
+  agent:
+    description: "Primary agent to use"
+    required: false
+  oidc_base_url:
+    description: "Custom OIDC exchange base URL"
+    required: false
+
+runs:
+  using: "composite"
+  steps:
+    - name: Get OpenCode version
+      id: version
+      shell: bash
+      run: |
+        VERSION=$(curl -sf https://api.github.com/repos/anomalyco/opencode/releases/latest | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
+        echo "version=${VERSION:-latest}" >> "$GITHUB_OUTPUT"
+
+    - name: Cache OpenCode
+      id: cache
+      uses: actions/cache@v5
+      with:
+        path: ~/.opencode/bin
+        key: opencode-${{ runner.os }}-${{ runner.arch }}-${{ steps.version.outputs.version }}
+
+    - name: Install OpenCode
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: curl -fsSL https://opencode.ai/install | bash
+
+    - name: Add OpenCode to PATH
+      shell: bash
+      run: echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+
+    - name: Run OpenCode
+      shell: bash
+      run: opencode github run
+      env:
+        MODEL: ${{ inputs.model }}
+        AGENT: ${{ inputs.agent }}
+        SHARE: ${{ inputs.share }}
+        PROMPT: ${{ inputs.prompt }}
+        USE_GITHUB_TOKEN: ${{ inputs.use_github_token }}
+        MENTIONS: ${{ inputs.mentions }}
+        VARIANT: ${{ inputs.variant }}
+        OIDC_BASE_URL: ${{ inputs.oidc_base_url }}

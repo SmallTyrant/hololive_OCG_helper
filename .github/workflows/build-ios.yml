@@ -20,7 +20,7 @@ jobs:
     
     steps:
       - name: 코드 체크아웃
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
       - name: Secrets 확인
         id: check_secrets
@@ -149,7 +149,7 @@ jobs:
       
       - name: IPA 아티팩트 업로드
         if: steps.check_secrets.outputs.has_secrets == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ios-ipa-${{ github.run_number }}
           path: mobile/ios/native-app/build/ipa/*.ipa
