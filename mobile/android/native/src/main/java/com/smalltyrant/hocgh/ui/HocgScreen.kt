@@ -228,6 +228,7 @@ private val KO_LINE_BREAK_PATTERNS = listOf(
     Regex("\\s*오시 스테이지 스킬\\s*") to "\n오시 스테이지 스킬\n",
     Regex("\\s*(?<!SP )오시 스킬\\s*") to "\n오시 스킬\n",
     Regex("\\s*콜라보 이펙트\\s*") to "\n콜라보 이펙트\n",
+    Regex("\\s*블룸 이펙트\\s*") to "\n블룸 이펙트\n",
     Regex("\\s*기프트\\s*") to "\n기프트\n",
     Regex("\\s*엑스트라\\s*") to "\n엑스트라\n",
     Regex("\\s*아츠(?=\\s+(?![+\\-]\\d)\\S)\\s*") to "\n아츠\n",
@@ -2696,7 +2697,7 @@ private fun DetailPanel(
     // Build highlight regex once per multiWordTags change, reuse for all lines
     val highlightRegex = remember(multiWordTags) {
         val base = buildTagTokenRegex(multiWordTags)
-        Regex("${base.pattern}|블룸 이펙트|ブルームエフェクト")
+        Regex("${base.pattern}|콜라보 이펙트|블룸 이펙트|기프트|コラボエフェクト|ブルームエフェクト|ギフト")
     }
 
     val hasKo = koLines.isNotEmpty()

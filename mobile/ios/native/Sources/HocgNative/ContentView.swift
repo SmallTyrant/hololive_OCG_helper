@@ -101,6 +101,7 @@ private let koLineBreakRules: [(String, String)] = [
     ("\\s*오시 스테이지 스킬\\s*", "\n오시 스테이지 스킬\n"),
     ("\\s*(?<!SP )오시 스킬\\s*", "\n오시 스킬\n"),
     ("\\s*콜라보 이펙트\\s*", "\n콜라보 이펙트\n"),
+    ("\\s*블룸 이펙트\\s*", "\n블룸 이펙트\n"),
     ("\\s*기프트\\s*", "\n기프트\n"),
     ("\\s*엑스트라\\s*", "\n엑스트라\n"),
     ("\\s*아츠(?=\\s+(?![+\\-]\\d)\\S)\\s*", "\n아츠\n"),
@@ -1662,7 +1663,7 @@ struct ContentView: View {
         parts.append("#[^\\s#]+")
         let pattern = parts.joined(separator: "|")
         let base = (try? NSRegularExpression(pattern: pattern)) ?? tagTokenRegex
-        let highlightPattern = "\(pattern)|블룸 이펙트|ブルームエフェクト"
+        let highlightPattern = "\(pattern)|콜라보 이펙트|블룸 이펙트|기프트|コラボエフェクト|ブルームエフェクト|ギフト"
         let highlight = (try? NSRegularExpression(pattern: highlightPattern)) ?? base
         cachedTagRegex = base
         cachedHighlightRegex = highlight
