@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 private let appName = "hOCG_H"
 private let dbFileName = "hololive_ocg.sqlite"
@@ -34,7 +35,15 @@ final class AppPaths {
         decksURL.appendingPathComponent("deck_library.json")
     }
 
-    func localImageURL(cardNumber: String, variant: String = "") -> URL {
+    func localImageURL(cardNumber: String, variant: String = "", imageURL: String = "") -> URL {
+        let safe = sanitizeCardNumber(cardNumber)
+        let suffix = variant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "__\(sanitizeCardNumber(variant))"
+        let resolved = resolveImageURL(imageURL)?.absoluteString ?? ""
+        let urlSuffix = resolved.isEmpty ? "" : "__\(stableURLHash(resolved))"
+        return imagesURL.appendingPathComponent("\(safe)\(suffix)\(urlSuffix).png")
+    }
+
+    func legacyLocalImageURL(cardNumber: String, variant: String = "") -> URL {
         let safe = sanitizeCardNumber(cardNumber)
         let suffix = variant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "__\(sanitizeCardNumber(variant))"
         return imagesURL.appendingPathComponent("\(safe)\(suffix).png")
@@ -109,6 +118,11 @@ final class AppPaths {
             options: .regularExpression,
         )
         return safe.isEmpty ? "unknown" : safe
+    }
+
+    private func stableURLHash(_ text: String) -> String {
+        let digest = SHA256.hash(data: Data(text.utf8))
+        return digest.compactMap { String(format: "%02x", $0) }.joined().prefix(12).description
     }
 }
 

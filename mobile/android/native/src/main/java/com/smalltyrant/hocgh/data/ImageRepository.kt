@@ -16,12 +16,32 @@ class ImageRepository(private val paths: AppPaths) {
     private val lock = Any()
     private val downloading = mutableSetOf<String>()
 
+    private fun shouldIgnoreLegacyCache(cardNumber: String): Boolean {
+        val normalized = cardNumber.trim().uppercase()
+        return normalized.startsWith("HY")
+    }
+
+    private fun cachedLocalFile(cardNumber: String, imageUrl: String, variant: String): File? {
+        val resolved = paths.resolveImageUrl(imageUrl)
+        val current = paths.localImageFile(cardNumber, variant, resolved)
+        if (current.exists()) {
+            return current
+        }
+        if (!shouldIgnoreLegacyCache(cardNumber)) {
+            val legacy = paths.legacyLocalImageFile(cardNumber, variant)
+            if (legacy.exists()) {
+                return legacy
+            }
+        }
+        return null
+    }
+
     fun resolveLocalOrRemote(cardNumber: String, imageUrl: String, variant: String = ""): ImageState {
         if (cardNumber.isBlank()) {
             return ImageState.Placeholder("이미지 없음")
         }
-        val local = paths.localImageFile(cardNumber, variant)
-        if (local.exists()) {
+        val local = cachedLocalFile(cardNumber, imageUrl, variant)
+        if (local != null) {
             return ImageState.Local(local)
         }
         val resolved = paths.resolveImageUrl(imageUrl)
@@ -40,8 +60,8 @@ class ImageRepository(private val paths: AppPaths) {
             return ImageState.Placeholder("이미지 없음")
         }
 
-        val local = paths.localImageFile(cardNumber, variant)
-        if (local.exists()) {
+        val local = cachedLocalFile(cardNumber, imageUrl, variant)
+        if (local != null) {
             return ImageState.Local(local)
         }
 
@@ -49,9 +69,10 @@ class ImageRepository(private val paths: AppPaths) {
         if (resolved.isBlank()) {
             return ImageState.Placeholder("이미지 URL 없음")
         }
+        val destination = paths.localImageFile(cardNumber, variant, resolved)
 
         val shouldDownload = synchronized(lock) {
-            val downloadKey = "$cardNumber|$variant"
+            val downloadKey = "$cardNumber|$variant|$resolved"
             if (downloading.contains(downloadKey)) {
                 false
             } else {
@@ -65,8 +86,8 @@ class ImageRepository(private val paths: AppPaths) {
         }
 
         return try {
-            download(resolved, local)
-            ImageState.Local(local)
+            download(resolved, destination)
+            ImageState.Local(destination)
         } catch (_: Throwable) {
             if (!paths.hasNetworkConnection()) {
                 ImageState.Error(offlineImageMessage)
@@ -75,7 +96,7 @@ class ImageRepository(private val paths: AppPaths) {
             }
         } finally {
             synchronized(lock) {
-                downloading -= "$cardNumber|$variant"
+                downloading -= "$cardNumber|$variant|$resolved"
             }
         }
     }

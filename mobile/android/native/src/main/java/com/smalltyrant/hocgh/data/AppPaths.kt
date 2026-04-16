@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
 import java.io.File
+import java.security.MessageDigest
 
 private const val APP_NAME = "hOCG_H"
 private const val DB_FILE_NAME = "hololive_ocg.sqlite"
@@ -19,7 +20,15 @@ class AppPaths(private val context: Context) {
     val deckDir: File = File(rootDir, "decks").apply { mkdirs() }
     val deckLibraryFile: File = File(deckDir, "deck_library.json")
 
-    fun localImageFile(cardNumber: String, variant: String = ""): File {
+    fun localImageFile(cardNumber: String, variant: String = "", imageUrl: String = ""): File {
+        val safe = sanitizeCardNumber(cardNumber)
+        val suffix = variant.trim().takeIf { it.isNotEmpty() }?.let { "__${sanitizeCardNumber(it)}" } ?: ""
+        val resolved = resolveImageUrl(imageUrl)
+        val urlSuffix = resolved.takeIf { it.isNotBlank() }?.let { "__${stableUrlHash(it)}" } ?: ""
+        return File(imageDir, "$safe$suffix$urlSuffix.png")
+    }
+
+    fun legacyLocalImageFile(cardNumber: String, variant: String = ""): File {
         val safe = sanitizeCardNumber(cardNumber)
         val suffix = variant.trim().takeIf { it.isNotEmpty() }?.let { "__${sanitizeCardNumber(it)}" } ?: ""
         return File(imageDir, "$safe$suffix.png")
@@ -100,5 +109,10 @@ class AppPaths(private val context: Context) {
         val stripped = cardNumber.trim().replace('/', '_')
         val safe = SAFE_CARD_NUMBER_RE.replace(stripped, "_")
         return safe.ifEmpty { "unknown" }
+    }
+
+    private fun stableUrlHash(text: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(text.toByteArray())
+        return digest.joinToString("") { "%02x".format(it) }.take(12)
     }
 }

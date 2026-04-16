@@ -39,33 +39,52 @@ final class ImageRepository {
         monitor.cancel()
     }
 
+    private func shouldIgnoreLegacyCache(cardNumber: String) -> Bool {
+        let normalized = cardNumber.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return normalized.hasPrefix("HY")
+    }
+
+    private func cachedLocalURL(cardNumber: String, imageURL: String, variant: String) -> URL? {
+        let current = paths.localImageURL(cardNumber: cardNumber, variant: variant, imageURL: imageURL)
+        if FileManager.default.fileExists(atPath: current.path) {
+            return current
+        }
+        if !shouldIgnoreLegacyCache(cardNumber: cardNumber) {
+            let legacy = paths.legacyLocalImageURL(cardNumber: cardNumber, variant: variant)
+            if FileManager.default.fileExists(atPath: legacy.path) {
+                return legacy
+            }
+        }
+        return nil
+    }
+
     func downloadIfNeeded(cardNumber: String, imageURL: String, variant: String = "") async -> CardImageState {
         let trimmedCard = cardNumber.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedCard.isEmpty else {
             return .placeholder("이미지 없음")
         }
 
-        let localURL = paths.localImageURL(cardNumber: trimmedCard, variant: variant)
-        if FileManager.default.fileExists(atPath: localURL.path) {
+        if let localURL = cachedLocalURL(cardNumber: trimmedCard, imageURL: imageURL, variant: variant) {
             return .local(localURL)
         }
 
         guard let resolved = paths.resolveImageURL(imageURL) else {
             return .placeholder("이미지 URL 없음")
         }
+        let localURL = paths.localImageURL(cardNumber: trimmedCard, variant: variant, imageURL: resolved.absoluteString)
 
         if monitor.currentPath.status == .unsatisfied {
             return .error(offlineImageMessage)
         }
 
-        let shouldDownload = await tracker.start("\(trimmedCard)|\(variant)")
+        let shouldDownload = await tracker.start("\(trimmedCard)|\(variant)|\(resolved.absoluteString)")
         if !shouldDownload {
             return .remote(resolved)
         }
 
         defer {
             Task {
-                await tracker.finish("\(trimmedCard)|\(variant)")
+                await tracker.finish("\(trimmedCard)|\(variant)|\(resolved.absoluteString)")
             }
         }
 

@@ -532,7 +532,7 @@ final class HocgViewModel: ObservableObject {
     }
 
     private func downloadBulkImageTarget(_ target: (cardNumber: String, imageURL: String)) async -> BulkImageOutcome {
-        let localURL = paths.localImageURL(cardNumber: target.cardNumber)
+        let localURL = paths.localImageURL(cardNumber: target.cardNumber, imageURL: target.imageURL)
         let existedBefore = FileManager.default.fileExists(atPath: localURL.path)
 
         var imageState = await imageRepository.downloadIfNeeded(

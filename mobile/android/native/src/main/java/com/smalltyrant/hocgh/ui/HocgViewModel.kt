@@ -588,7 +588,7 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun downloadBulkImageTarget(target: DbRepository.ImageTarget): BulkImageOutcome {
-        val localFile = paths.localImageFile(target.cardNumber)
+        val localFile = paths.localImageFile(target.cardNumber, imageUrl = target.imageUrl)
         val existedBefore = localFile.exists()
 
         var imageState = imageRepository.downloadIfNeeded(target.cardNumber, target.imageUrl)
