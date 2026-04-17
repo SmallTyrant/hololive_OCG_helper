@@ -113,14 +113,12 @@ python3 scripts/analyze_ci_failures.py --log-dir <dir>
 - OpenCode 운영 규칙: `CLAUDE.md`
 - 일반 에이전트용 fallback 가이드: `AGENTS.md`
 - 병렬 작업 운영 가이드: `docs/opencode_parallel.md`
-- Discord / cmux 브리지: `docs/discord_cmux_bot.md`
 - 품질 루프 문서: `docs/parallel_agent_loop.md`
 - GitHub Secrets 설정: `.github/SECRETS_SETUP.md`
 
 ## 환경 변수 / 시크릿
 
 - 이 저장소는 기본 로컬 실행에 `.env`를 전제하지 않습니다.
-- Discord 브리지를 쓰려면 `DISCORD_BOT_TOKEN`, `OPENAI_API_KEY`, `DISCORD_ALLOWED_USER_IDS` 등을 추가로 설정하세요.
 - CI/CD와 스토어 배포용 시크릿은 `.github/SECRETS_SETUP.md`를 기준 문서로 사용합니다.
 - `.p8`, `.jks`, `.keystore`, `keystore.properties`, `.env*` 같은 파일은 커밋하면 안 됩니다.
 
