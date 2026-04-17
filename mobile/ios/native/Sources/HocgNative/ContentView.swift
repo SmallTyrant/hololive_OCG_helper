@@ -1440,7 +1440,7 @@ struct ContentView: View {
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
-            .overlay(alignment: .leading) {
+            .overlay(alignment: .trailing) {
                 if isMobileLayout && !showingDeckList && !showingDeckEditor && !showingMenu {
                     Color.clear
                         .frame(width: 28)
@@ -1448,8 +1448,8 @@ struct ContentView: View {
                         .gesture(
                             DragGesture(minimumDistance: 10)
                                 .onEnded { value in
-                                    guard value.startLocation.x <= 36 else { return }
-                                    guard value.translation.width > 52 else { return }
+                                    guard value.startLocation.x >= geo.size.width - 36 else { return }
+                                    guard value.translation.width < -52 else { return }
                                     guard abs(value.translation.height) < 90 else { return }
                                     withAnimation(.easeInOut(duration: 0.22)) {
                                         showingMenu = true

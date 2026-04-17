@@ -81,6 +81,7 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -108,8 +109,10 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Velocity
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.input.ImeAction
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -1600,294 +1603,298 @@ fun HocgScreen(
         )
     }
 
-    ModalNavigationDrawer(
-        modifier = Modifier
-            .fillMaxSize()
-            .clearFocusOnTap(focusManager),
-        drawerState = drawerState,
-        gesturesEnabled = isMobileLayout || forceDesktopLandscape,
-        drawerContent = {
-            ModalDrawerSheet {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Text("메뉴", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    ElevatedButton(
-                        onClick = {
-                            scope.launch {
-                                drawerState.close()
-                            }
-                            viewModel.onBulkImageDownload()
-                        },
-                        enabled = !state.updateRunning,
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+        ModalNavigationDrawer(
+            modifier = Modifier
+                .fillMaxSize()
+                .clearFocusOnTap(focusManager),
+            drawerState = drawerState,
+            gesturesEnabled = isMobileLayout || forceDesktopLandscape,
+            drawerContent = {
+                ModalDrawerSheet {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Text("이미지 일괄 다운로드 (오프라인)")
-                    }
-                    ElevatedButton(
-                        onClick = {
-                            scope.launch {
-                                drawerState.close()
-                            }
-                            viewModel.onManualUpdate()
-                        },
-                        enabled = !state.updateRunning,
-                    ) {
-                        Text("DB 수동갱신")
-                    }
-                    HorizontalDivider()
-                    Text("테마", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    AppThemeMode.entries.forEach { mode ->
-                        ThemeModeItem(
-                            mode = mode,
-                            selectedMode = themeMode,
-                            onSelected = onThemeModeChange,
+                        Text("메뉴", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        ElevatedButton(
+                            onClick = {
+                                scope.launch {
+                                    drawerState.close()
+                                }
+                                viewModel.onBulkImageDownload()
+                            },
+                            enabled = !state.updateRunning,
+                        ) {
+                            Text("이미지 일괄 다운로드 (오프라인)")
+                        }
+                        ElevatedButton(
+                            onClick = {
+                                scope.launch {
+                                    drawerState.close()
+                                }
+                                viewModel.onManualUpdate()
+                            },
+                            enabled = !state.updateRunning,
+                        ) {
+                            Text("DB 수동갱신")
+                        }
+                        HorizontalDivider()
+                        Text("테마", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        AppThemeMode.entries.forEach { mode ->
+                            ThemeModeItem(
+                                mode = mode,
+                                selectedMode = themeMode,
+                                onSelected = onThemeModeChange,
+                            )
+                        }
+                        HorizontalDivider()
+                        Text("선호 언어", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        PreferredLanguage.entries.forEach { language ->
+                            PreferredLanguageItem(
+                                language = language,
+                                selectedLanguage = preferredLanguage,
+                                onSelected = onPreferredLanguageChange,
+                            )
+                        }
+                        HorizontalDivider()
+                        Text("About", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Deck conversion uses hocg-deck-convert. Licensed under MIT.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.outline,
                         )
-                    }
-                    HorizontalDivider()
-                    Text("선호 언어", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    PreferredLanguage.entries.forEach { language ->
-                        PreferredLanguageItem(
-                            language = language,
-                            selectedLanguage = preferredLanguage,
-                            onSelected = onPreferredLanguageChange,
-                        )
-                    }
-                    HorizontalDivider()
-                    Text("About", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Text(
-                        text = "Deck conversion uses hocg-deck-convert. Licensed under MIT.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.outline,
-                    )
-                    TextButton(onClick = {
-                        openExternalUrl(context, "https://github.com/Qrimpuff/hocg-deck-convert")
-                    }) {
-                        Text("hocg-deck-convert GitHub")
-                    }
-                    TextButton(onClick = {
-                        openExternalUrl(context, "https://github.com/Qrimpuff/hocg-deck-convert/blob/main/LICENSE")
-                    }) {
-                        Text("MIT License")
+                        TextButton(onClick = {
+                            openExternalUrl(context, "https://github.com/Qrimpuff/hocg-deck-convert")
+                        }) {
+                            Text("hocg-deck-convert GitHub")
+                        }
+                        TextButton(onClick = {
+                            openExternalUrl(context, "https://github.com/Qrimpuff/hocg-deck-convert/blob/main/LICENSE")
+                        }) {
+                            Text("MIT License")
+                        }
                     }
                 }
-            }
-        },
-    ) {
-        Scaffold(
-            snackbarHost = { SnackbarHost(snackbarHostState) },
-        ) { innerPadding ->
-            if (showDeckList) {
-                DeckListScreen(
-                    innerPadding = innerPadding,
-                    decks = savedDecks,
-                    onBack = { showDeckList = false },
-                    onImport = {
-                        deckImportText = ""
-                        showingDeckImportDialog = true
-                    },
-                    onExportCode = { deck ->
-                        val entries = deck.entries.map { Triple(it.card.cardNumber, it.qty, it.card) }
-                        val code = DeckCodeConverter.exportHoloDuel(entries)
-                        if (code == null) {
-                            scope.launch { snackbarHostState.showSnackbar("오시 카드가 없습니다. 덱을 확인해 주세요.") }
-                        } else {
-                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                            clipboard?.setPrimaryClip(ClipData.newPlainText("holoduel_deck_code", code))
-                            scope.launch { snackbarHostState.showSnackbar("홀로듀얼 코드가 클립보드에 복사되었습니다.") }
-                        }
-                    },
-                    onExportDelta = { deck ->
-                        scope.launch {
-                            val entries = deck.entries.map { Triple(it.card.cardNumber, it.qty, it.card) }
-                            val code = DeckCodeConverter.exportHoloDelta(entries, title = deck.title)
-                            if (code.isNullOrBlank()) {
-                                snackbarHostState.showSnackbar("오시 카드가 없습니다. 덱을 확인해 주세요.")
-                            } else {
-                                val ok = saveDeckJsonToDownloads(
-                                    context = context,
-                                    deckTitle = deck.title,
-                                    jsonText = code,
-                                )
-                                if (ok) {
-                                    snackbarHostState.showSnackbar("홀로델타 .json 파일을 Downloads에 저장했습니다.")
+            },
+        ) {
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Scaffold(
+                    snackbarHost = { SnackbarHost(snackbarHostState) },
+                ) { innerPadding ->
+                    if (showDeckList) {
+                        DeckListScreen(
+                            innerPadding = innerPadding,
+                            decks = savedDecks,
+                            onBack = { showDeckList = false },
+                            onImport = {
+                                deckImportText = ""
+                                showingDeckImportDialog = true
+                            },
+                            onExportCode = { deck ->
+                                val entries = deck.entries.map { Triple(it.card.cardNumber, it.qty, it.card) }
+                                val code = DeckCodeConverter.exportHoloDuel(entries)
+                                if (code == null) {
+                                    scope.launch { snackbarHostState.showSnackbar("오시 카드가 없습니다. 덱을 확인해 주세요.") }
                                 } else {
-                                    snackbarHostState.showSnackbar("홀로델타 .json 파일 저장에 실패했습니다.")
+                                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                    clipboard?.setPrimaryClip(ClipData.newPlainText("holoduel_deck_code", code))
+                                    scope.launch { snackbarHostState.showSnackbar("홀로듀얼 코드가 클립보드에 복사되었습니다.") }
                                 }
-                            }
-                        }
-                    },
-                    onExportBushi = { deck ->
-                        scope.launch {
-                            snackbarHostState.showSnackbar("부시나비에 업로드 중...")
-                            val entries = deck.entries.map { Triple(it.card.cardNumber, it.qty, it.card) }
-                            runCatching {
-                                val dbRepo = viewModel.getDbRepository()
-                                val url = DeckCodeConverter.publishBushiDeck(
-                                    entries = entries,
-                                    title = deck.title,
-                                    manageIdLookup = { printId -> dbRepo.getManageIdJp(printId) },
-                                )
-                                val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                clipboard?.setPrimaryClip(ClipData.newPlainText("bushiroad_deck_url", url))
-                                snackbarHostState.showSnackbar("부시나비 URL이 클립보드에 복사되었습니다.")
-                            }.onFailure { e ->
-                                snackbarHostState.showSnackbar("부시나비 업로드 실패: ${e.message?.take(80)}")
-                            }
-                        }
-                    },
-                    onExportImage = { deck ->
-                        scope.launch {
-                            snackbarHostState.showSnackbar("덱 이미지를 생성하는 중입니다...")
-                            val bitmap = withContext(Dispatchers.IO) {
-                                buildDeckExportBitmap(
-                                    context = context,
-                                    imageLoader = imageLoader,
-                                    deck = deck,
-                                )
-                            }
-                            if (bitmap == null) {
-                                snackbarHostState.showSnackbar("덱 이미지 생성에 실패했습니다.")
-                                return@launch
-                            }
-                            val ok = saveDeckBitmapToGallery(
-                                context = context,
-                                deckTitle = deck.title,
-                                bitmap = bitmap,
-                            )
-                            snackbarHostState.showSnackbar(
-                                if (ok) "덱 이미지가 갤러리에 저장되었습니다." else "덱 이미지 저장에 실패했습니다. 권한을 확인해 주세요."
-                            )
-                        }
-                    },
-                    onAdd = {
-                        deckTitle = "새 덱"
-                        deckDraft.clear()
-                        editingDeckId = null
-                        openDeckBuilder()
-                    },
-                    onEdit = { deck ->
-                        editingDeckId = deck.id
-                        deckTitle = deck.title
-                        deckDraft.clear()
-                        deckDraft.addAll(deck.entries.map { it.copy() })
-                        openDeckBuilder()
-                    },
-                    onRename = { deck ->
-                        renamingDeckId = deck.id
-                        renamingDeckTitle = deck.title
-                    },
-                    onDelete = { deck ->
-                        savedDecks.removeAll { it.id == deck.id }
-                        if (editingDeckId == deck.id) {
-                            editingDeckId = null
-                            deckDraft.clear()
-                            deckTitle = "새 덱"
-                        }
-                        scope.launch(Dispatchers.IO) {
-                            deckStorage.saveLibrary(DeckLibraryRecord(decks = toDeckRecords(savedDecks)))
-                        }
-                    },
-                )
-            } else if (showDeckEditor) {
-                DeckEditorScreen(
-                    innerPadding = innerPadding,
-                    title = deckTitle,
-                    entries = deckDraft,
-                    searchQuery = deckSearchQuery,
-                    candidates = deckCandidates,
-                    onTitleChange = { deckTitle = it },
-                    onCancel = { showDeckEditor = false },
-                    onOpenDeckList = {
-                        showDeckEditor = false
-                        showDeckList = true
-                    },
-                    onSave = {
-                        val snapshot = deckDraft.groupBy { it.card.printId }.values.map { g ->
-                            val first = g.first()
-                            DeckEntryUi(first.card, g.sumOf { it.qty }, first.maxPerCard, first.selectedRarity)
-                        }
-                        val now = System.currentTimeMillis()
-                        val targetId = editingDeckId ?: UUID.randomUUID().toString()
-                        val deck = DeckUi(
-                            id = targetId,
-                            title = deckTitle.ifBlank { "덱" },
-                            entries = snapshot,
-                            updatedAt = now,
+                            },
+                            onExportDelta = { deck ->
+                                scope.launch {
+                                    val entries = deck.entries.map { Triple(it.card.cardNumber, it.qty, it.card) }
+                                    val code = DeckCodeConverter.exportHoloDelta(entries, title = deck.title)
+                                    if (code.isNullOrBlank()) {
+                                        snackbarHostState.showSnackbar("오시 카드가 없습니다. 덱을 확인해 주세요.")
+                                    } else {
+                                        val ok = saveDeckJsonToDownloads(
+                                            context = context,
+                                            deckTitle = deck.title,
+                                            jsonText = code,
+                                        )
+                                        if (ok) {
+                                            snackbarHostState.showSnackbar("홀로델타 .json 파일을 Downloads에 저장했습니다.")
+                                        } else {
+                                            snackbarHostState.showSnackbar("홀로델타 .json 파일 저장에 실패했습니다.")
+                                        }
+                                    }
+                                }
+                            },
+                            onExportBushi = { deck ->
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("부시나비에 업로드 중...")
+                                    val entries = deck.entries.map { Triple(it.card.cardNumber, it.qty, it.card) }
+                                    runCatching {
+                                        val dbRepo = viewModel.getDbRepository()
+                                        val url = DeckCodeConverter.publishBushiDeck(
+                                            entries = entries,
+                                            title = deck.title,
+                                            manageIdLookup = { printId -> dbRepo.getManageIdJp(printId) },
+                                        )
+                                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                        clipboard?.setPrimaryClip(ClipData.newPlainText("bushiroad_deck_url", url))
+                                        snackbarHostState.showSnackbar("부시나비 URL이 클립보드에 복사되었습니다.")
+                                    }.onFailure { e ->
+                                        snackbarHostState.showSnackbar("부시나비 업로드 실패: ${e.message?.take(80)}")
+                                    }
+                                }
+                            },
+                            onExportImage = { deck ->
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("덱 이미지를 생성하는 중입니다...")
+                                    val bitmap = withContext(Dispatchers.IO) {
+                                        buildDeckExportBitmap(
+                                            context = context,
+                                            imageLoader = imageLoader,
+                                            deck = deck,
+                                        )
+                                    }
+                                    if (bitmap == null) {
+                                        snackbarHostState.showSnackbar("덱 이미지 생성에 실패했습니다.")
+                                        return@launch
+                                    }
+                                    val ok = saveDeckBitmapToGallery(
+                                        context = context,
+                                        deckTitle = deck.title,
+                                        bitmap = bitmap,
+                                    )
+                                    snackbarHostState.showSnackbar(
+                                        if (ok) "덱 이미지가 갤러리에 저장되었습니다." else "덱 이미지 저장에 실패했습니다. 권한을 확인해 주세요."
+                                    )
+                                }
+                            },
+                            onAdd = {
+                                deckTitle = "새 덱"
+                                deckDraft.clear()
+                                editingDeckId = null
+                                openDeckBuilder()
+                            },
+                            onEdit = { deck ->
+                                editingDeckId = deck.id
+                                deckTitle = deck.title
+                                deckDraft.clear()
+                                deckDraft.addAll(deck.entries.map { it.copy() })
+                                openDeckBuilder()
+                            },
+                            onRename = { deck ->
+                                renamingDeckId = deck.id
+                                renamingDeckTitle = deck.title
+                            },
+                            onDelete = { deck ->
+                                savedDecks.removeAll { it.id == deck.id }
+                                if (editingDeckId == deck.id) {
+                                    editingDeckId = null
+                                    deckDraft.clear()
+                                    deckTitle = "새 덱"
+                                }
+                                scope.launch(Dispatchers.IO) {
+                                    deckStorage.saveLibrary(DeckLibraryRecord(decks = toDeckRecords(savedDecks)))
+                                }
+                            },
                         )
-                        val existing = savedDecks.indexOfFirst { it.id == targetId }
-                        if (existing >= 0) {
-                            savedDecks[existing] = deck
-                        } else {
-                            savedDecks.add(deck)
-                        }
-                        editingDeckId = targetId
-                        scope.launch(Dispatchers.IO) {
-                            deckStorage.saveLibrary(DeckLibraryRecord(decks = toDeckRecords(savedDecks)))
-                        }
-                        showDeckEditor = false
-                        showDeckList = true
-                    },
-                    onSearchQueryChange = {
-                        deckSearchQuery = it
-                        scope.launch { deckCandidates = viewModel.searchDeckCards(deckSearchQuery) }
-                    },
-                    onSelectCandidate = { card ->
-                        if (card.hasMultipleRarities) {
-                            rarityPickerNewCard = card
-                        } else {
-                            val reason = addCardToDeck(deckDraft, card)
-                            if (reason != null) {
-                                scope.launch { snackbarHostState.showSnackbar(reason) }
-                            }
-                        }
-                    },
-                    onChangeRarity = { entry ->
-                        rarityPickerEntry = entry
-                    },
-                    quantityForCard = { card -> deckQuantity(deckDraft, card) },
-                    onIncrease = { printId ->
-                        val reason = increaseDeckEntryByPrintId(deckDraft, printId)
-                        if (reason != null) {
-                            scope.launch { snackbarHostState.showSnackbar(reason) }
-                        }
-                    },
-                    onDecrease = { printId ->
-                        decreaseDeckEntryByPrintId(deckDraft, printId)
-                    },
-                )
-            } else if (isMobileLayout) {
-                MobileLayout(
-                    state = state,
-                    innerPadding = innerPadding,
-                    onSearchQueryChanged = viewModel::onSearchQueryChanged,
-                    onOpenDeckBuilder = openDeckBuilder,
-                    onOpenMenu = { scope.launch { drawerState.open() } },
-                    onDismissKeyboard = { focusManager.clearFocus() },
-                    onSelectPrint = viewModel::onSelectPrint,
-                    onSelectIllustration = viewModel::onSelectIllustration,
-                    onToggleImagePanel = viewModel::onToggleImagePanel,
-                    preferredLanguage = preferredLanguage,
-                    multiWordTags = viewModel.multiWordTags,
-                )
-            } else {
-                DesktopLayout(
-                    state = state,
-                    innerPadding = innerPadding,
-                    onSearchQueryChanged = viewModel::onSearchQueryChanged,
-                    onOpenDeckBuilder = openDeckBuilder,
-                    onDismissKeyboard = { focusManager.clearFocus() },
-                    onOpenMenu = { scope.launch { drawerState.open() } },
-                    showMenuButton = forceDesktopLandscape,
-                    keepSearchBarTop = forceDesktopLandscape,
-                    twoPaneLandscape = forceDesktopLandscape,
-                    onSelectPrint = viewModel::onSelectPrint,
-                    onSelectIllustration = viewModel::onSelectIllustration,
-                    preferredLanguage = preferredLanguage,
-                    multiWordTags = viewModel.multiWordTags,
-                )
+                    } else if (showDeckEditor) {
+                        DeckEditorScreen(
+                            innerPadding = innerPadding,
+                            title = deckTitle,
+                            entries = deckDraft,
+                            searchQuery = deckSearchQuery,
+                            candidates = deckCandidates,
+                            onTitleChange = { deckTitle = it },
+                            onCancel = { showDeckEditor = false },
+                            onOpenDeckList = {
+                                showDeckEditor = false
+                                showDeckList = true
+                            },
+                            onSave = {
+                                val snapshot = deckDraft.groupBy { it.card.printId }.values.map { g ->
+                                    val first = g.first()
+                                    DeckEntryUi(first.card, g.sumOf { it.qty }, first.maxPerCard, first.selectedRarity)
+                                }
+                                val now = System.currentTimeMillis()
+                                val targetId = editingDeckId ?: UUID.randomUUID().toString()
+                                val deck = DeckUi(
+                                    id = targetId,
+                                    title = deckTitle.ifBlank { "덱" },
+                                    entries = snapshot,
+                                    updatedAt = now,
+                                )
+                                val existing = savedDecks.indexOfFirst { it.id == targetId }
+                                if (existing >= 0) {
+                                    savedDecks[existing] = deck
+                                } else {
+                                    savedDecks.add(deck)
+                                }
+                                editingDeckId = targetId
+                                scope.launch(Dispatchers.IO) {
+                                    deckStorage.saveLibrary(DeckLibraryRecord(decks = toDeckRecords(savedDecks)))
+                                }
+                                showDeckEditor = false
+                                showDeckList = true
+                            },
+                            onSearchQueryChange = {
+                                deckSearchQuery = it
+                                scope.launch { deckCandidates = viewModel.searchDeckCards(deckSearchQuery) }
+                            },
+                            onSelectCandidate = { card ->
+                                if (card.hasMultipleRarities) {
+                                    rarityPickerNewCard = card
+                                } else {
+                                    val reason = addCardToDeck(deckDraft, card)
+                                    if (reason != null) {
+                                        scope.launch { snackbarHostState.showSnackbar(reason) }
+                                    }
+                                }
+                            },
+                            onChangeRarity = { entry ->
+                                rarityPickerEntry = entry
+                            },
+                            quantityForCard = { card -> deckQuantity(deckDraft, card) },
+                            onIncrease = { printId ->
+                                val reason = increaseDeckEntryByPrintId(deckDraft, printId)
+                                if (reason != null) {
+                                    scope.launch { snackbarHostState.showSnackbar(reason) }
+                                }
+                            },
+                            onDecrease = { printId ->
+                                decreaseDeckEntryByPrintId(deckDraft, printId)
+                            },
+                        )
+                    } else if (isMobileLayout) {
+                        MobileLayout(
+                            state = state,
+                            innerPadding = innerPadding,
+                            onSearchQueryChanged = viewModel::onSearchQueryChanged,
+                            onOpenDeckBuilder = openDeckBuilder,
+                            onOpenMenu = { scope.launch { drawerState.open() } },
+                            onDismissKeyboard = { focusManager.clearFocus() },
+                            onSelectPrint = viewModel::onSelectPrint,
+                            onSelectIllustration = viewModel::onSelectIllustration,
+                            onToggleImagePanel = viewModel::onToggleImagePanel,
+                            preferredLanguage = preferredLanguage,
+                            multiWordTags = viewModel.multiWordTags,
+                        )
+                    } else {
+                        DesktopLayout(
+                            state = state,
+                            innerPadding = innerPadding,
+                            onSearchQueryChanged = viewModel::onSearchQueryChanged,
+                            onOpenDeckBuilder = openDeckBuilder,
+                            onDismissKeyboard = { focusManager.clearFocus() },
+                            onOpenMenu = { scope.launch { drawerState.open() } },
+                            showMenuButton = forceDesktopLandscape,
+                            keepSearchBarTop = forceDesktopLandscape,
+                            twoPaneLandscape = forceDesktopLandscape,
+                            onSelectPrint = viewModel::onSelectPrint,
+                            onSelectIllustration = viewModel::onSelectIllustration,
+                            preferredLanguage = preferredLanguage,
+                            multiWordTags = viewModel.multiWordTags,
+                        )
+                    }
+                }
             }
         }
     }
