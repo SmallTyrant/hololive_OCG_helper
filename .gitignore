@@ -38,3 +38,15 @@ bootstrap_opencode_parallel_final_ko.sh
 .omx/
 .worktrees/
 .artifacts/
+*.webp
+*.png
+*.txt
+*.md
+tools
+scripts/opencode_parallel
+ReleaseDbInfoTest.kt
+.env.example
+.claude/role-presets
+.cursor/rules
+.opencode/plugins
+.vscode
