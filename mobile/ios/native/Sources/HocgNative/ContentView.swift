@@ -201,10 +201,12 @@ private enum DetailTextLanguage {
 struct ContentView: View {
     @StateObject private var viewModel = HocgViewModel()
     @State private var showingMenu = false
+    @State private var zoomedCardImage: ZoomedCardImage?
     @State private var koExpanded = true
     @State private var jaExpanded = false
     @State private var showingDeckList = false
     @State private var showingDeckEditor = false
+    @State private var deckSelectedCardsExpanded = true
     @State private var editingDeckID: UUID?
     @State private var deckTitle = "새 덱"
     @State private var deckEntries: [DeckEntryState] = []
@@ -296,6 +298,27 @@ struct ContentView: View {
         let url: URL
     }
 
+    fileprivate enum ZoomedCardImage: Identifiable {
+        case local(URL)
+        case remote(URL)
+
+        var id: String {
+            switch self {
+            case .local(let url):
+                "local:\(url.absoluteString)"
+            case .remote(let url):
+                "remote:\(url.absoluteString)"
+            }
+        }
+
+        var url: URL {
+            switch self {
+            case .local(let url), .remote(let url):
+                url
+            }
+        }
+    }
+
     private func isOshi(_ card: DeckCardCandidate) -> Bool {
         card.cardType.contains("오시") || card.cardType.contains("推し")
     }
@@ -369,7 +392,34 @@ struct ContentView: View {
     private func openDeckBuilder() {
         showingDeckList = false
         showingDeckEditor = true
+        deckSelectedCardsExpanded = true
         Task { deckCandidates = await viewModel.searchDeckCards(deckSearchQuery) }
+    }
+
+    private func currentZoomedCardImage() -> ZoomedCardImage? {
+        switch viewModel.state.imageState {
+        case .local(let url):
+            return .local(url)
+        case .remote(let url):
+            return .remote(url)
+        default:
+            return nil
+        }
+    }
+
+    private func selectAdjacentIllustration(direction: Int) {
+        let options = viewModel.state.selectedIllustrations
+        guard options.count > 1, direction != 0 else { return }
+
+        let currentIndex = max(0, options.firstIndex(where: { $0.rarity == viewModel.state.selectedRarity }) ?? 0)
+        let nextIndex = min(max(currentIndex + direction, 0), options.count - 1)
+        guard nextIndex != currentIndex else { return }
+
+        let option = options[nextIndex]
+        let imageURL = option.imageUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? viewModel.state.selectedImageUrl
+            : option.imageUrl
+        viewModel.onSelectIllustration(rarity: option.rarity, imageURL: imageURL)
     }
 
     private func deckQuantity(for card: DeckCardCandidate) -> Int {
@@ -1390,6 +1440,63 @@ struct ContentView: View {
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
+            .overlay(alignment: .leading) {
+                if isMobileLayout && !showingDeckList && !showingDeckEditor && !showingMenu {
+                    Color.clear
+                        .frame(width: 28)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 10)
+                                .onEnded { value in
+                                    guard value.startLocation.x <= 36 else { return }
+                                    guard value.translation.width > 52 else { return }
+                                    guard abs(value.translation.height) < 90 else { return }
+                                    withAnimation(.easeInOut(duration: 0.22)) {
+                                        showingMenu = true
+                                    }
+                                }
+                        )
+                        .ignoresSafeArea()
+                }
+            }
+            .overlay {
+                if showingMenu && isMobileLayout && !showingDeckList && !showingDeckEditor {
+                    ZStack(alignment: .trailing) {
+                        Color.black.opacity(0.28)
+                            .ignoresSafeArea()
+                            .onTapGesture {
+                                withAnimation(.easeInOut(duration: 0.22)) {
+                                    showingMenu = false
+                                }
+                            }
+
+                        MenuSheet(
+                            state: viewModel.state,
+                            themeMode: selectedThemeModeBinding,
+                            preferredLanguage: selectedPreferredLanguageBinding,
+                            onBulkImageDownload: {
+                                withAnimation(.easeInOut(duration: 0.22)) {
+                                    showingMenu = false
+                                }
+                                viewModel.onBulkImageDownload()
+                            },
+                            onManualUpdate: {
+                                withAnimation(.easeInOut(duration: 0.22)) {
+                                    showingMenu = false
+                                }
+                                viewModel.onManualUpdate()
+                            }
+                        )
+                        .frame(width: min(geo.size.width * 0.84, 340), height: geo.size.height)
+                        .background(Color(uiColor: .systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                        .shadow(color: .black.opacity(0.18), radius: 18, x: -8, y: 0)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                        .padding(.vertical, 10)
+                        .padding(.trailing, 8)
+                    }
+                }
+            }
             .simultaneousGesture(
                 TapGesture().onEnded {
                     dismissKeyboard()
@@ -1402,24 +1509,6 @@ struct ContentView: View {
                 },
                 including: .all
             )
-            .sheet(isPresented: Binding(
-                get: { showingMenu && isMobileLayout },
-                set: { showingMenu = $0 }
-            )) {
-                MenuSheet(
-                    state: viewModel.state,
-                    themeMode: selectedThemeModeBinding,
-                    preferredLanguage: selectedPreferredLanguageBinding,
-                    onBulkImageDownload: {
-                        showingMenu = false
-                        viewModel.onBulkImageDownload()
-                    },
-                    onManualUpdate: {
-                        showingMenu = false
-                        viewModel.onManualUpdate()
-                    }
-                )
-            }
             .alert(
                 "DB 업데이트",
                 isPresented: Binding(
@@ -1581,6 +1670,10 @@ struct ContentView: View {
             }
             .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
             .animation(.easeInOut(duration: 0.2), value: deckToastMessage)
+            .animation(.easeInOut(duration: 0.22), value: showingMenu)
+            .fullScreenCover(item: $zoomedCardImage) { item in
+                ZoomedCardImageViewer(item: item)
+            }
             .task {
                 let tags = await Task.detached {
                     DatabaseRepository(paths: AppPaths()).loadMultiWordTags()
@@ -1687,16 +1780,11 @@ struct ContentView: View {
                     .textFieldStyle(.roundedBorder)
                     .disabled(viewModel.state.updateRunning)
 
-                    Button {
+                    Button("덱빌딩") {
                         openDeckBuilder()
-                    } label: {
-                        Text("덱빌딩")
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 6)
-                            .background(Color.blue.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
                     .disabled(viewModel.state.updateRunning)
 
                     Button {
@@ -1704,7 +1792,9 @@ struct ContentView: View {
                     } label: {
                         Image(systemName: "line.3.horizontal")
                             .font(.title3)
+                            .frame(width: 44, height: 44, alignment: .center)
                     }
+                    .buttonStyle(.plain)
                     .disabled(viewModel.state.updateRunning)
                 }
 
@@ -1736,7 +1826,7 @@ struct ContentView: View {
                 } else {
                     searchRaritySelector
                     panel(height: imageHeight) {
-                        imagePanel
+                        interactiveImagePanel
                     }
                 }
 
@@ -1782,6 +1872,7 @@ struct ContentView: View {
                     openDeckBuilder()
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.small)
                 .disabled(viewModel.state.updateRunning)
             }
 
@@ -1927,6 +2018,27 @@ struct ContentView: View {
         case .error(let message):
             placeholder(message: message, error: true)
         }
+    }
+
+    private var interactiveImagePanel: some View {
+        imagePanel
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if let item = currentZoomedCardImage() {
+                    zoomedCardImage = item
+                }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 18)
+                    .onEnded { value in
+                        guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                        if value.translation.width < -52 {
+                            selectAdjacentIllustration(direction: +1)
+                        } else if value.translation.width > 52 {
+                            selectAdjacentIllustration(direction: -1)
+                        }
+                    }
+            )
     }
 
     @ViewBuilder
@@ -2581,21 +2693,30 @@ struct ContentView: View {
 
     private var deckListLayout: some View {
         VStack(spacing: 8) {
-            HStack {
-                Button("뒤로") { showingDeckList = false }
-                Button("가져오기") {
-                    deckImportText = ""
-                    showingDeckImportSheet = true
+            ZStack {
+                HStack {
+                    Button("뒤로") { showingDeckList = false }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    Button("가져오기") {
+                        deckImportText = ""
+                        showingDeckImportSheet = true
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    Spacer()
+                    Button {
+                        deckTitle = "새 덱"
+                        deckEntries = []
+                        editingDeckID = nil
+                        openDeckBuilder()
+                    } label: { Image(systemName: "plus") }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
                 }
-                Spacer()
-                Text("덱 리스트").font(.headline)
-                Spacer()
-                Button {
-                    deckTitle = "새 덱"
-                    deckEntries = []
-                    editingDeckID = nil
-                    openDeckBuilder()
-                } label: { Image(systemName: "plus") }
+                Text("덱 리스트")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, alignment: .center)
             }
             List {
                 ForEach(savedDecks) { deck in
@@ -2659,13 +2780,19 @@ struct ContentView: View {
 
     private var deckEditorLayout: some View {
         VStack(spacing: 8) {
-            HStack {
+            HStack(spacing: 8) {
                 Button("취소") { showingDeckEditor = false }
-                TextField("덱 이름", text: $deckTitle).textFieldStyle(.roundedBorder)
+                    .buttonStyle(.bordered)
+
+                TextField("덱 이름", text: $deckTitle)
+                    .textFieldStyle(.roundedBorder)
+
                 Button("덱 목록") {
                     showingDeckEditor = false
                     showingDeckList = true
                 }
+                .buttonStyle(.bordered)
+
                 Button("저장") {
                     let normalized = deckEntries
                         .filter { $0.qty > 0 }
@@ -2694,6 +2821,7 @@ struct ContentView: View {
                     showingDeckEditor = false
                     showingDeckList = true
                 }
+                .buttonStyle(.borderedProminent)
             }
             HStack {
                 Text("오시 \(deckOshiCount)/1")
@@ -2735,27 +2863,6 @@ struct ContentView: View {
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text("\(card.cardNumber) | \((card.nameKo.isEmpty ? card.nameJa : card.nameKo))")
                                                 .lineLimit(1)
-                                            // 복수 레어리티 카드에는 선택 가능한 레어리티 칩 표시
-                                            if card.hasMultipleRarities {
-                                                HStack(spacing: 4) {
-                                                    ForEach(card.selectableIllustrations) { option in
-                                                        let isSelected = option.rarity == (deckEntries.first(where: { $0.id == card.printId })?.displayRarity ?? card.selectableIllustrations.first?.rarity ?? "")
-                                                        Text(option.rarity)
-                                                            .font(.caption2.bold())
-                                                            .padding(.horizontal, 6).padding(.vertical, 2)
-                                                            .background(isSelected ? Color.accentColor : Color.secondary.opacity(0.2))
-                                                            .foregroundColor(isSelected ? .white : .primary)
-                                                            .clipShape(Capsule())
-                                                    }
-                                                }
-                                            } else {
-                                                let rarity = (card.selectableIllustrations.first?.rarity ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                                                if !rarity.isEmpty {
-                                                    Text("레어리티 \(rarity)")
-                                                        .font(.caption2)
-                                                        .foregroundColor(.secondary)
-                                                }
-                                            }
                                         }
                                         Spacer()
                                         Text(maxQty == Int.max ? "\(qty)/∞" : "\(qty)/\(maxQty)")
@@ -2774,61 +2881,64 @@ struct ContentView: View {
                     .simultaneousGesture(DragGesture(), including: .all)
                 }
             }
-
-            Text("선택 카드")
-                .font(.headline)
-
-            ScrollView {
-                VStack(spacing: 8) {
-                    ForEach(deckEntries.indices, id: \.self) { i in
-                        HStack {
-                            deckThumbnail(
-                                url: deckEntries[i].effectiveImageUrl,
-                                qty: deckEntries[i].qty,
-                                width: 50,
-                                height: 70
-                            )
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("\(deckEntries[i].card.cardNumber) | \((deckEntries[i].card.nameKo.isEmpty ? deckEntries[i].card.nameJa : deckEntries[i].card.nameKo))")
-                                    .lineLimit(1)
-                                // 복수 레어리티이면 변경 버튼 표시
-                                if deckEntries[i].card.hasMultipleRarities {
-                                    Button {
-                                        pendingRarityChangeEntryId = deckEntries[i].id
-                                        pendingCardForRarity = deckEntries[i].card
-                                    } label: {
-                                        HStack(spacing: 4) {
-                                            Text(deckEntries[i].displayRarity)
-                                                .font(.caption2.bold())
-                                            Image(systemName: "chevron.down")
-                                                .font(.caption2)
+            if deckSelectedCardsExpanded && !deckEntries.isEmpty {
+                panel(height: nil) {
+                    ScrollView {
+                        VStack(spacing: 8) {
+                            ForEach(deckEntries.indices, id: \.self) { i in
+                                HStack {
+                                    deckThumbnail(
+                                        url: deckEntries[i].effectiveImageUrl,
+                                        qty: deckEntries[i].qty,
+                                        width: 50,
+                                        height: 70
+                                    )
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("\(deckEntries[i].card.cardNumber) | \((deckEntries[i].card.nameKo.isEmpty ? deckEntries[i].card.nameJa : deckEntries[i].card.nameKo))")
+                                            .lineLimit(1)
+                                        if deckEntries[i].card.hasMultipleRarities {
+                                            Button {
+                                                pendingRarityChangeEntryId = deckEntries[i].id
+                                                pendingCardForRarity = deckEntries[i].card
+                                            } label: {
+                                                HStack(spacing: 4) {
+                                                    Text(deckEntries[i].displayRarity)
+                                                        .font(.caption2.bold())
+                                                    Image(systemName: "chevron.down")
+                                                        .font(.caption2)
+                                                }
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 4)
+                                                .background(Color.accentColor.opacity(0.15))
+                                                .foregroundColor(.accentColor)
+                                                .clipShape(Capsule())
+                                            }
+                                            .buttonStyle(.plain)
                                         }
-                                        .padding(.horizontal, 6).padding(.vertical, 2)
-                                        .background(Color.accentColor.opacity(0.15))
-                                        .foregroundColor(.accentColor)
-                                        .clipShape(Capsule())
                                     }
-                                    .buttonStyle(.plain)
-                                } else {
-                                    let r = deckEntries[i].displayRarity
-                                    if !r.isEmpty {
-                                        Text(r).font(.caption2).foregroundColor(.secondary)
+                                    Spacer()
+                                    Button("-") { deckEntries[i].qty -= 1; if deckEntries[i].qty <= 0 { deckEntries.remove(at: i) } }
+                                    Button("+") {
+                                        let card = deckEntries[i].card
+                                        if let reason = blockReason(for: card) {
+                                            showDeckToast(reason)
+                                        } else {
+                                            deckEntries[i].qty += 1
+                                        }
                                     }
-                                }
-                            }
-                            Spacer()
-                            Button("-") { deckEntries[i].qty -= 1; if deckEntries[i].qty <= 0 { deckEntries.remove(at: i) } }
-                            Button("+") {
-                                let card = deckEntries[i].card
-                                if let reason = blockReason(for: card) {
-                                    showDeckToast(reason)
-                                } else {
-                                    deckEntries[i].qty += 1
                                 }
                             }
                         }
                     }
                 }
+            }
+            if !deckEntries.isEmpty {
+                SelectedCardsFooterBar(
+                    selectedCount: deckEntries.count,
+                    totalCount: deckTotalCount,
+                    expanded: deckSelectedCardsExpanded,
+                    onToggle: { deckSelectedCardsExpanded.toggle() }
+                )
             }
         }
         .padding(10)
@@ -2948,6 +3058,151 @@ private struct MenuSheet: View {
             .navigationTitle("메뉴")
             .navigationBarTitleDisplayMode(.inline)
         }
+    }
+}
+
+private struct SelectedCardsFooterBar: View {
+    let selectedCount: Int
+    let totalCount: Int
+    let expanded: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("선택 \(selectedCount)장")
+                    .font(.headline)
+                Text("덱 합계 \(totalCount)장")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+            Button(action: onToggle) {
+                HStack(spacing: 6) {
+                    Text(expanded ? "선택 카드 접기" : "선택 카드")
+                    Image(systemName: expanded ? "chevron.down" : "chevron.up")
+                        .font(.caption.weight(.bold))
+                }
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Color.accentColor.opacity(selectedCount > 0 ? 0.16 : 0.08), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(selectedCount > 0 ? .accentColor : .secondary)
+            .disabled(selectedCount == 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.secondary.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+        )
+    }
+}
+
+private struct ZoomedCardImageViewer: View {
+    let item: ContentView.ZoomedCardImage
+    @Environment(\.dismiss) private var dismiss
+    @State private var scale: CGFloat = 1
+    @State private var baseScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var baseOffset: CGSize = .zero
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.opacity(0.94)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    dismiss()
+                }
+
+            AsyncImage(url: item.url) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .scaleEffect(scale)
+                        .offset(offset)
+                        .gesture(
+                            dragGesture.simultaneously(with: magnificationGesture)
+                        )
+                case .failure:
+                    VStack(spacing: 10) {
+                        Image(systemName: "photo.badge.exclamationmark")
+                            .font(.system(size: 32))
+                        Text("이미지 로딩 실패")
+                            .font(.footnote)
+                    }
+                    .foregroundColor(.white.opacity(0.85))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                case .empty:
+                    ProgressView()
+                        .tint(.white)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                @unknown default:
+                    EmptyView()
+                }
+            }
+            .padding(18)
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.headline.weight(.bold))
+                    .foregroundColor(.white)
+                    .padding(12)
+                    .background(Color.black.opacity(0.35), in: Circle())
+            }
+            .padding(.top, 14)
+            .padding(.trailing, 14)
+        }
+    }
+
+    private var magnificationGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                scale = min(max(baseScale * value, 1), 4)
+                if scale <= 1.01 {
+                    offset = .zero
+                    baseOffset = .zero
+                }
+            }
+            .onEnded { _ in
+                baseScale = scale
+                if scale <= 1.01 {
+                    scale = 1
+                    offset = .zero
+                    baseOffset = .zero
+                }
+            }
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                guard scale > 1 else { return }
+                offset = CGSize(
+                    width: baseOffset.width + value.translation.width,
+                    height: baseOffset.height + value.translation.height
+                )
+            }
+            .onEnded { _ in
+                if scale <= 1 {
+                    offset = .zero
+                    baseOffset = .zero
+                } else {
+                    baseOffset = offset
+                }
+            }
     }
 }
 

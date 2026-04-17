@@ -49,6 +49,13 @@ data class ReleaseApkInfo(
     val versionCode: Long,
 )
 
+private data class ReleaseAsset(
+    val name: String,
+    val url: String,
+    val updatedAt: String = "",
+    val digest: String = "",
+)
+
 class UpdateRepository {
     private val http = OkHttpClient.Builder()
         .callTimeout(Duration.ofSeconds(120))
@@ -159,56 +166,47 @@ class UpdateRepository {
         val createdAt = payload.optString("created_at", "")
         val assets = payload.optJSONArray("assets") ?: JSONArray()
 
-        val picked = pickAsset(assets)
-        val assetName = picked.first
-        val assetUrl = picked.second
-
-        var updatedAt = ""
-        var digest = ""
-        for (i in 0 until assets.length()) {
-            val item = assets.optJSONObject(i) ?: continue
-            val name = item.optString("name", "")
-            val url = item.optString("browser_download_url", "")
-            if (name == assetName || url == assetUrl) {
-                updatedAt = item.optString("updated_at", "")
-                digest = normalizeHash(item.optString("digest", ""))
-                break
-            }
-        }
+        val asset = pickAsset(assets)
 
         return ReleaseDbInfo(
             tag = tag,
-            assetName = assetName,
-            assetUrl = assetUrl,
-            assetUpdatedAt = updatedAt,
-            assetDigest = digest,
+            assetName = asset.name,
+            assetUrl = asset.url,
+            assetUpdatedAt = asset.updatedAt,
+            assetDigest = asset.digest,
             publishedAt = publishedAt,
             createdAt = createdAt,
         )
     }
 
-    private fun pickAsset(assets: JSONArray): Pair<String, String> {
-        for (preferred in listOf("hololive_ocg.sqlite")) {
+    private fun pickAsset(assets: JSONArray): ReleaseAsset {
+        val parsedAssets = buildList {
             for (i in 0 until assets.length()) {
-                val item = assets.optJSONObject(i) ?: continue
-                val name = item.optString("name", "")
-                val url = item.optString("browser_download_url", "")
-                if (name == preferred && url.isNotBlank()) {
-                    return name to url
-                }
+                releaseAssetFromJson(assets.optJSONObject(i))?.let(::add)
             }
         }
 
-        for (i in 0 until assets.length()) {
-            val item = assets.optJSONObject(i) ?: continue
-            val name = item.optString("name", "")
-            val url = item.optString("browser_download_url", "")
-            if (url.isNotBlank() && DB_EXTENSIONS.any { ext -> name.endsWith(ext) }) {
-                return name to url
-            }
-        }
+        return parsedAssets.firstOrNull { asset -> asset.name == "hololive_ocg.sqlite" }
+            ?: parsedAssets.firstOrNull { asset -> DB_EXTENSIONS.any { ext -> asset.name.endsWith(ext) } }
+            ?: ReleaseAsset(
+                name = "hololive_ocg.sqlite",
+                url = DB_DIRECT_URL,
+            )
+    }
 
-        return "hololive_ocg.sqlite" to DB_DIRECT_URL
+    private fun releaseAssetFromJson(item: JSONObject?): ReleaseAsset? {
+        item ?: return null
+        val name = item.optString("name", "")
+        val url = item.optString("browser_download_url", "")
+        if (url.isBlank()) {
+            return null
+        }
+        return ReleaseAsset(
+            name = name,
+            url = url,
+            updatedAt = item.optString("updated_at", ""),
+            digest = normalizeHash(item.optString("digest", "")),
+        )
     }
 
     private fun fetchVersionJsonApkInfo(): ReleaseApkInfo {

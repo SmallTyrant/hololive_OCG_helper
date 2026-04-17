@@ -40,6 +40,13 @@ private enum UpdateRepositoryError: LocalizedError {
     }
 }
 
+private struct ReleaseAsset {
+    let name: String
+    let url: URL
+    let updatedAt: String
+    let digest: String
+}
+
 final class UpdateRepository {
 
     func latestReleaseDbInfo() async throws -> ReleaseDbInfo {
@@ -132,52 +139,39 @@ final class UpdateRepository {
         let assets = payload["assets"] as? [[String: Any]] ?? []
         let asset = pickAsset(from: assets)
 
-        let assetName = asset.name
-        let assetURL = asset.url
-
-        var assetUpdatedAt = ""
-        var assetDigest = ""
-        for item in assets {
-            let name = item["name"] as? String ?? ""
-            let urlString = item["browser_download_url"] as? String ?? ""
-            if (name == assetName || urlString == assetURL.absoluteString),
-               let updated = item["updated_at"] as? String {
-                assetUpdatedAt = updated
-                assetDigest = normalizeHash(item["digest"] as? String)
-                break
-            }
-        }
-
         return ReleaseDbInfo(
             tag: tag,
-            assetName: assetName,
-            assetURL: assetURL,
-            assetUpdatedAt: assetUpdatedAt,
-            assetDigest: assetDigest,
+            assetName: asset.name,
+            assetURL: asset.url,
+            assetUpdatedAt: asset.updatedAt,
+            assetDigest: asset.digest,
             publishedAt: publishedAt,
             createdAt: createdAt,
         )
     }
 
-    private func pickAsset(from assets: [[String: Any]]) -> (name: String, url: URL) {
-        for item in assets {
-            let name = item["name"] as? String ?? ""
-            let urlString = item["browser_download_url"] as? String ?? ""
-            if name == "hololive_ocg.sqlite", let url = URL(string: urlString) {
-                return (name, url)
-            }
-        }
+    private func pickAsset(from assets: [[String: Any]]) -> ReleaseAsset {
+        let parsedAssets = assets.compactMap(releaseAsset(from:))
 
-        for item in assets {
-            let name = item["name"] as? String ?? ""
-            let urlString = item["browser_download_url"] as? String ?? ""
-            if [".sqlite", ".sqlite3", ".db"].contains(where: { name.hasSuffix($0) }),
-               let url = URL(string: urlString) {
-                return (name, url)
-            }
-        }
+        return parsedAssets.first(where: { $0.name == "hololive_ocg.sqlite" })
+            ?? parsedAssets.first(where: { asset in
+                [".sqlite", ".sqlite3", ".db"].contains(where: { asset.name.hasSuffix($0) })
+            })
+            ?? ReleaseAsset(name: "hololive_ocg.sqlite", url: dbDirectURL, updatedAt: "", digest: "")
+    }
 
-        return ("hololive_ocg.sqlite", dbDirectURL)
+    private func releaseAsset(from item: [String: Any]) -> ReleaseAsset? {
+        let name = item["name"] as? String ?? ""
+        let urlString = item["browser_download_url"] as? String ?? ""
+        guard let url = URL(string: urlString) else {
+            return nil
+        }
+        return ReleaseAsset(
+            name: name,
+            url: url,
+            updatedAt: item["updated_at"] as? String ?? "",
+            digest: normalizeHash(item["digest"] as? String)
+        )
     }
 
     private func validateSQLite(fileURL: URL) throws {

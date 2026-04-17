@@ -31,13 +31,8 @@
 - **설명**: App Store Connect API Private Key (.p8 파일 내용)
 - **획득 방법**:
   1. API Key 생성 시 다운로드한 `.p8` 파일 열기
-  2. 전체 내용 복사 (-----BEGIN PRIVATE KEY----- 부터 -----END PRIVATE KEY----- 까지)
-- **예시**:
-```
------BEGIN PRIVATE KEY-----
-MIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQg...
------END PRIVATE KEY-----
-```
+  2. 전체 내용을 하나의 repository secret 값으로 복사
+- **예시 값 형식**: `App Store Connect에서 다운로드한 .p8 파일의 전체 내용을 그대로 붙여넣기`
 
 ### Android (GitHub Release)
 

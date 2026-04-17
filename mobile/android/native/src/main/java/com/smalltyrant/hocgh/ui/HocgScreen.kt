@@ -23,6 +23,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,18 +35,22 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
@@ -66,8 +72,11 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberDrawerState
@@ -84,6 +93,7 @@ import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -128,6 +138,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import java.util.Locale
 import java.util.UUID
 
@@ -931,6 +943,31 @@ private fun SearchRaritySelector(
                 }
             }
         }
+    }
+}
+
+private fun findAdjacentIllustration(
+    selectedRarity: String,
+    illustrations: List<com.smalltyrant.hocgh.model.IllustrationOption>,
+    fallbackImageUrl: String,
+    direction: Int,
+): Pair<String, String>? {
+    if (illustrations.size <= 1 || direction == 0) return null
+
+    val currentIndex = illustrations.indexOfFirst { it.rarity == selectedRarity }.takeIf { it >= 0 } ?: 0
+    val targetIndex = (currentIndex + direction).coerceIn(0, illustrations.lastIndex)
+    if (targetIndex == currentIndex) return null
+
+    val option = illustrations[targetIndex]
+    val imageUrl = option.imageUrl.takeIf { it.isNotBlank() } ?: fallbackImageUrl
+    return option.rarity to imageUrl
+}
+
+private fun currentImageModel(imageState: ImageState): Any? {
+    return when (imageState) {
+        is ImageState.Local -> imageState.file
+        is ImageState.Remote -> imageState.url
+        else -> null
     }
 }
 
@@ -1875,13 +1912,33 @@ private fun DeckListScreen(
         modifier = Modifier.fillMaxSize().padding(innerPadding).padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("취소") }
-            Text("덱 리스트", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onImport) { Text("가져오기") }
-                IconButton(onClick = onAdd) { Icon(Icons.Default.Add, contentDescription = "추가") }
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedButton(
+                    onClick = onBack,
+                    contentPadding = ButtonDefaults.ButtonWithIconContentPadding,
+                ) { Text("뒤로") }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(
+                        onClick = onImport,
+                        contentPadding = ButtonDefaults.ButtonWithIconContentPadding,
+                    ) { Text("가져오기") }
+                    FilledTonalButton(
+                        onClick = onAdd,
+                        contentPadding = ButtonDefaults.ButtonWithIconContentPadding,
+                    ) { Icon(Icons.Default.Add, contentDescription = "추가") }
+                }
             }
+            Text(
+                text = "덱 리스트",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.Center),
+            )
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(decks.indices.toList(), key = { decks[it].id }) { idx ->
@@ -2035,12 +2092,32 @@ private fun DeckEditorScreen(
     val yell = entries.filter { isYell(it.card) }.sumOf { it.qty }
     val main = entries.filter { !isOshi(it.card) && !isYell(it.card) }.sumOf { it.qty }
     val total = entries.sumOf { it.qty }
+    var showSelectedCards by rememberSaveable { mutableStateOf(true) }
     Column(modifier = Modifier.fillMaxSize().padding(innerPadding).padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onCancel) { Text("취소") }
-            OutlinedTextField(value = title, onValueChange = onTitleChange, singleLine = true, modifier = Modifier.weight(1f), label = { Text("덱 이름") })
-            TextButton(onClick = onOpenDeckList) { Text("덱 목록") }
-            TextButton(onClick = onSave) { Text("저장") }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedButton(
+                onClick = onCancel,
+                contentPadding = ButtonDefaults.ButtonWithIconContentPadding,
+            ) { Text("취소") }
+            OutlinedTextField(
+                value = title,
+                onValueChange = onTitleChange,
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+                label = { Text("덱 이름") },
+            )
+            OutlinedButton(
+                onClick = onOpenDeckList,
+                contentPadding = ButtonDefaults.ButtonWithIconContentPadding,
+            ) { Text("덱 목록") }
+            FilledTonalButton(
+                onClick = onSave,
+                contentPadding = ButtonDefaults.ButtonWithIconContentPadding,
+            ) { Text("저장") }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("오시 $oshi/1")
@@ -2088,32 +2165,6 @@ private fun DeckEditorScreen(
                             )
                             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text("${card.cardNumber} | ${card.nameKo.ifBlank { card.nameJa }}", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                if (card.hasMultipleRarities) {
-                                    // 복수 레어리티 칩
-                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        val currentRarity = entries.firstOrNull { it.card.printId == card.printId }?.displayRarity
-                                            ?: card.selectableIllustrations.firstOrNull()?.rarity
-                                            ?: ""
-                                        card.selectableIllustrations.take(5).forEach { option ->
-                                            Text(
-                                                option.rarity,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                modifier = Modifier
-                                                    .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(4.dp))
-                                                    .padding(horizontal = 4.dp, vertical = 1.dp),
-                                                color = if (option.rarity == currentRarity) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSecondaryContainer,
-                                            )
-                                        }
-                                    }
-                                } else if (card.rarity.isNotBlank()) {
-                                    Text(
-                                        "레어리티 ${card.rarity.trim()}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.outline,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
                             }
                             Text(
                                 text = if (maxQty == Int.MAX_VALUE) "${qty}/∞" else "${qty}/${maxQty}",
@@ -2126,45 +2177,51 @@ private fun DeckEditorScreen(
                 }
             }
         }
-        Text("선택 카드", style = MaterialTheme.typography.titleSmall)
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f, fill = true)) {
-            items(entries, key = { it.card.printId }) { entry ->
-                Row(modifier = Modifier.fillMaxWidth().border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(10.dp)).padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DeckThumbnail(
-                        imageUrl = entry.effectiveImageUrl,
-                        qty = entry.qty,
-                        width = 50.dp,
-                        height = 70.dp,
-                    )
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("${entry.card.cardNumber} | ${entry.card.nameKo.ifBlank { entry.card.nameJa }}", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        if (entry.card.hasMultipleRarities) {
-                            // 레어리티 변경 버튼
-                            Row(
-                                modifier = Modifier
-                                    .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(4.dp))
-                                    .clickable { onChangeRarity(entry) }
-                                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                            ) {
-                                Text(entry.displayRarity, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
-                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "레어리티 변경", modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+        if (showSelectedCards && entries.isNotEmpty()) {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f, fill = true)) {
+                items(entries, key = { it.card.printId }) { entry ->
+                    Row(modifier = Modifier.fillMaxWidth().border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(10.dp)).padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        DeckThumbnail(
+                            imageUrl = entry.effectiveImageUrl,
+                            qty = entry.qty,
+                            width = 50.dp,
+                            height = 70.dp,
+                        )
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("${entry.card.cardNumber} | ${entry.card.nameKo.ifBlank { entry.card.nameJa }}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (entry.card.hasMultipleRarities) {
+                                Row(
+                                    modifier = Modifier
+                                        .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(999.dp))
+                                        .clickable { onChangeRarity(entry) }
+                                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Text(entry.displayRarity, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "레어리티 변경", modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                                }
                             }
-                        } else if (entry.displayRarity.isNotBlank()) {
-                            Text(entry.displayRarity, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
                         }
+                        val blockedReason = blockReason(entries, entry.card)
+                        IconButton(
+                            onClick = { onDecrease(entry.card.printId) },
+                        ) { Icon(Icons.Default.Remove, contentDescription = "감소") }
+                        IconButton(
+                            onClick = { onIncrease(entry.card.printId) },
+                            enabled = blockedReason == null,
+                        ) { Icon(Icons.Default.Add, contentDescription = "증가") }
                     }
-                    val blockedReason = blockReason(entries, entry.card)
-                    IconButton(
-                        onClick = { onDecrease(entry.card.printId) },
-                    ) { Icon(Icons.Default.Remove, contentDescription = "감소") }
-                    IconButton(
-                        onClick = { onIncrease(entry.card.printId) },
-                        enabled = blockedReason == null,
-                    ) { Icon(Icons.Default.Add, contentDescription = "증가") }
                 }
             }
+        }
+        if (entries.isNotEmpty()) {
+            SelectedCardsActionBar(
+                selectedCount = entries.size,
+                totalCount = total,
+                expanded = showSelectedCards,
+                onToggle = { showSelectedCards = !showSelectedCards },
+            )
         }
     }
 }
@@ -2208,15 +2265,13 @@ private fun MobileLayout(
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { onDismissKeyboard() }),
             )
-            TextButton(
+            FilledTonalButton(
                 onClick = {
                     onDismissKeyboard()
                     onOpenDeckBuilder()
                 },
                 enabled = !state.updateRunning,
-            ) {
-                Text("덱빌딩")
-            }
+            ) { Text("덱빌딩") }
             IconButton(
                 onClick = {
                     onDismissKeyboard()
@@ -2271,7 +2326,13 @@ private fun MobileLayout(
                     .fillMaxWidth()
                     .height(imageHeight),
             ) {
-                ImagePanel(state.imageState)
+                InteractiveImagePanel(
+                    imageState = state.imageState,
+                    selectedRarity = state.selectedRarity,
+                    illustrations = state.selectedIllustrations,
+                    fallbackImageUrl = state.selectedImageUrl,
+                    onSelectIllustration = onSelectIllustration,
+                )
             }
         }
 
@@ -2327,15 +2388,13 @@ private fun DesktopLayout(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { onDismissKeyboard() }),
                 )
-                TextButton(
+                FilledTonalButton(
                     onClick = {
                         onDismissKeyboard()
                         onOpenDeckBuilder()
                     },
                     enabled = !state.updateRunning,
-                ) {
-                    Text("덱빌딩")
-                }
+                ) { Text("덱빌딩") }
                 if (state.updateRunning) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(20.dp),
@@ -2399,15 +2458,13 @@ private fun DesktopLayout(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { onDismissKeyboard() }),
                 )
-                TextButton(
+                FilledTonalButton(
                     onClick = {
                         onDismissKeyboard()
                         onOpenDeckBuilder()
                     },
                     enabled = !state.updateRunning,
-                ) {
-                    Text("덱빌딩")
-                }
+                ) { Text("덱빌딩") }
                 if (showMenuButton) {
                     IconButton(
                         onClick = {
@@ -2449,7 +2506,13 @@ private fun DesktopLayout(
                             onSelect = onSelectIllustration,
                         )
                         Panel(modifier = Modifier.fillMaxSize()) {
-                            ImagePanel(state.imageState)
+                            InteractiveImagePanel(
+                                imageState = state.imageState,
+                                selectedRarity = state.selectedRarity,
+                                illustrations = state.selectedIllustrations,
+                                fallbackImageUrl = state.selectedImageUrl,
+                                onSelectIllustration = onSelectIllustration,
+                            )
                         }
                     }
 
@@ -2488,7 +2551,13 @@ private fun DesktopLayout(
                         onSelect = onSelectIllustration,
                     )
                     Panel(modifier = Modifier.fillMaxSize()) {
-                        ImagePanel(state.imageState)
+                        InteractiveImagePanel(
+                            imageState = state.imageState,
+                            selectedRarity = state.selectedRarity,
+                            illustrations = state.selectedIllustrations,
+                            fallbackImageUrl = state.selectedImageUrl,
+                            onSelectIllustration = onSelectIllustration,
+                        )
                     }
                 }
 
@@ -2662,6 +2731,182 @@ private fun ImagePanel(imageState: ImageState) {
             is ImageState.Error -> {
                 Placeholder(imageState.message, error = true)
             }
+        }
+    }
+}
+
+@Composable
+private fun InteractiveImagePanel(
+    imageState: ImageState,
+    selectedRarity: String,
+    illustrations: List<com.smalltyrant.hocgh.model.IllustrationOption>,
+    fallbackImageUrl: String,
+    onSelectIllustration: (String, String) -> Unit,
+) {
+    var zoomedModel by remember { mutableStateOf<Any?>(null) }
+    val swipeThreshold = 72f
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(enabled = currentImageModel(imageState) != null) {
+                zoomedModel = currentImageModel(imageState)
+            }
+            .pointerInput(selectedRarity, illustrations, fallbackImageUrl) {
+                var totalDrag = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { totalDrag = 0f },
+                    onHorizontalDrag = { _, dragAmount ->
+                        totalDrag += dragAmount
+                    },
+                    onDragEnd = {
+                        val adjacent = when {
+                            totalDrag <= -swipeThreshold -> findAdjacentIllustration(selectedRarity, illustrations, fallbackImageUrl, +1)
+                            totalDrag >= swipeThreshold -> findAdjacentIllustration(selectedRarity, illustrations, fallbackImageUrl, -1)
+                            else -> null
+                        }
+                        adjacent?.let { (rarity, imageUrl) ->
+                            onSelectIllustration(rarity, imageUrl)
+                        }
+                    },
+                )
+            },
+    ) {
+        ImagePanel(imageState)
+    }
+
+    if (zoomedModel != null) {
+        FullscreenImageDialog(
+            model = zoomedModel!!,
+            onDismiss = { zoomedModel = null },
+        )
+    }
+}
+
+@Composable
+private fun FullscreenImageDialog(
+    model: Any,
+    onDismiss: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() },
+                    onClick = onDismiss,
+                )
+                .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.92f)),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(18.dp)
+                    .align(Alignment.Center)
+                    .clickable(
+                        indication = null,
+                        interactionSource = remember { MutableInteractionSource() },
+                        onClick = {},
+                    ),
+            ) {
+                ZoomableAsyncImage(
+                    model = model,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(12.dp)
+                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.45f), RoundedCornerShape(999.dp)),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "닫기",
+                    tint = androidx.compose.ui.graphics.Color.White,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ZoomableAsyncImage(
+    model: Any,
+    modifier: Modifier = Modifier,
+) {
+    var scale by remember(model) { mutableStateOf(1f) }
+    var offset by remember(model) { mutableStateOf(Offset.Zero) }
+
+    AsyncImage(
+        model = model,
+        contentDescription = "확대 카드 이미지",
+        contentScale = ContentScale.Fit,
+        modifier = modifier
+            .graphicsLayer(
+                scaleX = scale,
+                scaleY = scale,
+                translationX = offset.x,
+                translationY = offset.y,
+            )
+            .pointerInput(model) {
+                detectTransformGestures { _, pan, zoom, _ ->
+                    val newScale = (scale * zoom).coerceIn(1f, 4f)
+                    scale = newScale
+                    offset = if (newScale <= 1f) {
+                        Offset.Zero
+                    } else {
+                        offset + pan
+                    }
+                }
+            },
+    )
+}
+
+@Composable
+private fun SelectedCardsActionBar(
+    selectedCount: Int,
+    totalCount: Int,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text("선택 ${selectedCount}장", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text(
+                "덱 합계 ${totalCount}장",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+        }
+        TextButton(
+            onClick = onToggle,
+            enabled = selectedCount > 0,
+            colors = ButtonDefaults.textButtonColors(
+                containerColor = MaterialTheme.colorScheme.primary.copy(alpha = if (selectedCount > 0) 0.16f else 0.08f),
+                contentColor = MaterialTheme.colorScheme.primary,
+            ),
+        ) {
+            Text(if (expanded) "선택 카드 접기" else "선택 카드")
         }
     }
 }
