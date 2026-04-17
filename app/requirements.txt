@@ -1,5 +1,5 @@
-flet
-pillow
-requests
-openpyxl
-beautifulsoup4
+flet==0.80.5
+pillow==12.1.0
+requests==2.32.5
+openpyxl==3.1.5
+beautifulsoup4==4.14.3

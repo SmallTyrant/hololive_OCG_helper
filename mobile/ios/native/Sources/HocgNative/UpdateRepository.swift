@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import SQLite3
 
 private let githubRepo = "SmallTyrant/hololive_OCG_helper"
@@ -14,6 +15,29 @@ struct ReleaseDbInfo {
     let assetDigest: String
     let publishedAt: String
     let createdAt: String
+
+    var effectiveDateSource: String {
+        !assetUpdatedAt.isEmpty ? assetUpdatedAt : (!publishedAt.isEmpty ? publishedAt : createdAt)
+    }
+
+    var remoteDigestOrNil: String? {
+        assetDigest.isEmpty ? nil : assetDigest
+    }
+
+    var updateMarker: String? {
+        remoteDigestOrNil ?? (effectiveDateSource.isEmpty ? nil : effectiveDateSource)
+    }
+}
+
+private enum UpdateRepositoryError: LocalizedError {
+    case digestMismatch
+
+    var errorDescription: String? {
+        switch self {
+        case .digestMismatch:
+            return "Downloaded DB digest mismatch"
+        }
+    }
 }
 
 final class UpdateRepository {
@@ -40,11 +64,7 @@ final class UpdateRepository {
         guard let info = try? await latestReleaseDbInfo() else {
             return nil
         }
-        return formatIsoDateOrNil(
-            !info.assetUpdatedAt.isEmpty
-                ? info.assetUpdatedAt
-                : (!info.publishedAt.isEmpty ? info.publishedAt : info.createdAt)
-        )
+        return formatIsoDateOrNil(info.effectiveDateSource)
     }
 
     func downloadLatestDb(to targetDBURL: URL) async throws -> ReleaseDbInfo {
@@ -52,15 +72,7 @@ final class UpdateRepository {
         do {
             releaseInfo = try await latestReleaseDbInfo()
         } catch {
-            releaseInfo = ReleaseDbInfo(
-                tag: dbReleaseTag,
-                assetName: "hololive_ocg.sqlite",
-                assetURL: dbDirectURL,
-                assetUpdatedAt: "",
-                assetDigest: "",
-                publishedAt: "",
-                createdAt: "",
-            )
+            releaseInfo = fallbackReleaseDbInfo()
         }
 
         var request = URLRequest(url: releaseInfo.assetURL)
@@ -86,6 +98,7 @@ final class UpdateRepository {
 
         do {
             try validateSQLite(fileURL: tempTarget)
+            try verifyDigest(fileURL: tempTarget, expectedDigest: releaseInfo.assetDigest)
             if fm.fileExists(atPath: targetDBURL.path) {
                 _ = try fm.replaceItemAt(targetDBURL, withItemAt: tempTarget)
             } else {
@@ -97,6 +110,18 @@ final class UpdateRepository {
             try? fm.removeItem(at: tempTarget)
             throw error
         }
+    }
+
+    private func fallbackReleaseDbInfo() -> ReleaseDbInfo {
+        ReleaseDbInfo(
+            tag: dbReleaseTag,
+            assetName: "hololive_ocg.sqlite",
+            assetURL: dbDirectURL,
+            assetUpdatedAt: "",
+            assetDigest: "",
+            publishedAt: "",
+            createdAt: ""
+        )
     }
 
     private func releaseInfo(from payload: [String: Any]) -> ReleaseDbInfo {
@@ -172,6 +197,22 @@ final class UpdateRepository {
             return String(value.dropFirst("sha256:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return value
+    }
+
+    private func verifyDigest(fileURL: URL, expectedDigest: String) throws {
+        let normalizedExpected = normalizeHash(expectedDigest)
+        guard !normalizedExpected.isEmpty else {
+            return
+        }
+
+        let data = try Data(contentsOf: fileURL, options: .mappedIfSafe)
+        let actualDigest = SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
+
+        guard actualDigest == normalizedExpected else {
+            throw UpdateRepositoryError.digestMismatch
+        }
     }
 
     private func writeReleaseMeta(dbURL: URL, info: ReleaseDbInfo) throws {

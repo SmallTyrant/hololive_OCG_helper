@@ -8,6 +8,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
+import java.security.MessageDigest
 import java.time.Duration
 
 private const val GITHUB_REPO = "SmallTyrant/hololive_OCG_helper"
@@ -28,7 +29,16 @@ data class ReleaseDbInfo(
     val assetDigest: String,
     val publishedAt: String,
     val createdAt: String,
-)
+) {
+    val effectiveDateSource: String
+        get() = assetUpdatedAt.ifEmpty { publishedAt.ifEmpty { createdAt } }
+
+    val remoteDigestOrNull: String?
+        get() = assetDigest.ifBlank { null }
+
+    val updateMarker: String?
+        get() = remoteDigestOrNull ?: effectiveDateSource.ifBlank { null }
+}
 
 data class ReleaseApkInfo(
     val tag: String,
@@ -52,11 +62,7 @@ class UpdateRepository {
     fun fetchRemoteDbDate(): String? {
         return runCatching {
             val info = getLatestReleaseDbInfo()
-            formatIsoDateOrNull(
-                info.assetUpdatedAt.ifEmpty {
-                    info.publishedAt.ifEmpty { info.createdAt }
-                },
-            )
+            formatIsoDateOrNull(info.effectiveDateSource)
         }.getOrNull()
     }
 
@@ -76,17 +82,7 @@ class UpdateRepository {
     }
 
     fun downloadLatestDb(targetDbFile: File): ReleaseDbInfo {
-        val releaseInfo = runCatching { getLatestReleaseDbInfo() }.getOrElse {
-            ReleaseDbInfo(
-                tag = DB_RELEASE_TAG,
-                assetName = "hololive_ocg.sqlite",
-                assetUrl = DB_DIRECT_URL,
-                assetUpdatedAt = "",
-                assetDigest = "",
-                publishedAt = "",
-                createdAt = "",
-            )
-        }
+        val releaseInfo = runCatching { getLatestReleaseDbInfo() }.getOrElse { fallbackReleaseDbInfo() }
 
         targetDbFile.parentFile?.mkdirs()
         val tempFile = File(targetDbFile.parentFile, "${targetDbFile.name}.download")
@@ -111,6 +107,7 @@ class UpdateRepository {
             }
 
             validateSqlite(tempFile)
+            verifyDigest(tempFile, releaseInfo.assetDigest)
             replaceFile(tempFile, targetDbFile)
             writeReleaseMeta(targetDbFile, releaseInfo)
             return releaseInfo
@@ -123,6 +120,18 @@ class UpdateRepository {
 
     private fun fetchLatestReleasePayload(): JSONObject {
         return fetchReleasePayload(DB_RELEASE_API)
+    }
+
+    private fun fallbackReleaseDbInfo(): ReleaseDbInfo {
+        return ReleaseDbInfo(
+            tag = DB_RELEASE_TAG,
+            assetName = "hololive_ocg.sqlite",
+            assetUrl = DB_DIRECT_URL,
+            assetUpdatedAt = "",
+            assetDigest = "",
+            publishedAt = "",
+            createdAt = "",
+        )
     }
 
     private fun fetchReleasePayload(url: String): JSONObject {
@@ -281,6 +290,32 @@ class UpdateRepository {
             if (!hasPrints) {
                 throw IOException("downloaded DB is missing prints table")
             }
+        }
+    }
+
+    private fun verifyDigest(dbFile: File, expectedDigest: String) {
+        val normalizedExpected = normalizeHash(expectedDigest)
+        if (normalizedExpected.isBlank()) {
+            return
+        }
+
+        val actualDigest = FileInputStream(dbFile).use { input ->
+            val digest = MessageDigest.getInstance("SHA-256")
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) {
+                    break
+                }
+                if (read > 0) {
+                    digest.update(buffer, 0, read)
+                }
+            }
+            digest.digest().joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+        }
+
+        if (actualDigest != normalizedExpected) {
+            throw IOException("downloaded DB digest mismatch")
         }
     }
 

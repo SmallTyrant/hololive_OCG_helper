@@ -2,6 +2,7 @@ name: Swarm Minimal (native-app full auto)
 
 env:
   DEFAULT_MODEL: "openai/gpt-5.3-codex"
+  OPENCODE_VERSION: "1.4.7"
 
 on:
   workflow_dispatch:
@@ -100,6 +101,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         with:
+          version: ${{ env.OPENCODE_VERSION }}
           model: ${{ github.event.inputs.model }}
           use_github_token: true
           prompt: |
@@ -113,7 +115,9 @@ jobs:
     if: |
       (github.event_name == 'issues' && github.event.label.name == 'go') ||
       (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'go') ||
-      (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/go'))
+      (github.event_name == 'issue_comment' &&
+        startsWith(github.event.comment.body, '/go') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -128,6 +132,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         with:
+          version: ${{ env.OPENCODE_VERSION }}
           model: ${{ env.DEFAULT_MODEL }}
           use_github_token: true
           prompt: |
@@ -382,6 +387,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         with:
+          version: ${{ env.OPENCODE_VERSION }}
           model: ${{ env.DEFAULT_MODEL }}
           use_github_token: true
           prompt: |

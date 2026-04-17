@@ -460,18 +460,14 @@ final class HocgViewModel: ObservableObject {
         guard let remoteInfo = try? await updateRepository.latestReleaseDbInfo() else {
             return
         }
-        let remoteDate = formatIsoDateOrNil(
-            !remoteInfo.assetUpdatedAt.isEmpty
-                ? remoteInfo.assetUpdatedAt
-                : (!remoteInfo.publishedAt.isEmpty ? remoteInfo.publishedAt : remoteInfo.createdAt)
-        )
+        let remoteDate = formatIsoDateOrNil(remoteInfo.effectiveDateSource)
         guard let remoteDate, !remoteDate.isEmpty else {
             return
         }
         let localDate = await localDateTask
         let localDigest = await localDigestTask
-        let remoteDigest = remoteInfo.assetDigest.isEmpty ? nil : remoteInfo.assetDigest
-        let remoteMarker = remoteDigest ?? (!remoteInfo.assetUpdatedAt.isEmpty ? remoteInfo.assetUpdatedAt : remoteDate)
+        let remoteDigest = remoteInfo.remoteDigestOrNil
+        let remoteMarker = remoteInfo.updateMarker ?? remoteDate
 
         let needsPrompt: Bool = {
             if let remoteDigest, !remoteDigest.isEmpty {

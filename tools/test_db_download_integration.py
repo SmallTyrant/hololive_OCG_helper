@@ -4,6 +4,7 @@ iOS 및 Android UpdateRepository 로직을 완전히 재현한 통합 테스트
 """
 
 import json
+import hashlib
 import sqlite3
 import sys
 import tempfile
@@ -18,13 +19,20 @@ DB_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/tags/{DB_
 DB_DIRECT_URL = f"https://github.com/{GITHUB_REPO}/releases/download/{DB_RELEASE_TAG}/hololive_ocg.sqlite"
 
 class ReleaseDbInfo:
-    def __init__(self, tag, asset_name, asset_url, asset_updated_at, published_at, created_at):
+    def __init__(self, tag, asset_name, asset_url, asset_updated_at, asset_digest, published_at, created_at):
         self.tag = tag
         self.asset_name = asset_name
         self.asset_url = asset_url
         self.asset_updated_at = asset_updated_at
+        self.asset_digest = asset_digest
         self.published_at = published_at
         self.created_at = created_at
+
+def normalize_hash(raw):
+    value = (raw or "").strip().lower()
+    if value.startswith("sha256:"):
+        value = value[len("sha256:"):].strip()
+    return value
 
 def get_latest_release_db_info():
     """GitHub API에서 DB 릴리스 정보 가져오기"""
@@ -51,6 +59,7 @@ def get_latest_release_db_info():
         asset_name = "hololive_ocg.sqlite"
         asset_url = DB_DIRECT_URL
         asset_updated_at = ""
+        asset_digest = ""
         
         for asset in assets:
             name = asset.get("name", "")
@@ -59,6 +68,7 @@ def get_latest_release_db_info():
                 asset_name = name
                 asset_url = url
                 asset_updated_at = asset.get("updated_at", "")
+                asset_digest = normalize_hash(asset.get("digest", ""))
                 break
         
         return ReleaseDbInfo(
@@ -66,6 +76,7 @@ def get_latest_release_db_info():
             asset_name=asset_name,
             asset_url=asset_url,
             asset_updated_at=asset_updated_at,
+            asset_digest=asset_digest,
             published_at=published_at,
             created_at=created_at
         )
@@ -107,6 +118,7 @@ def download_latest_db(target_path):
             asset_name="hololive_ocg.sqlite",
             asset_url=DB_DIRECT_URL,
             asset_updated_at="",
+            asset_digest="",
             published_at="",
             created_at=""
         )
@@ -115,6 +127,7 @@ def download_latest_db(target_path):
     print(f"      - 태그: {release_info.tag}")
     print(f"      - Asset: {release_info.asset_name}")
     print(f"      - URL: {release_info.asset_url}")
+    print(f"      - Digest: {release_info.asset_digest or '(없음)'}")
     
     # 2. DB 파일 다운로드
     request = urllib.request.Request(
@@ -140,6 +153,14 @@ def download_latest_db(target_path):
         
         card_count = validate_sqlite(str(temp_file))
         print(f"   ✅ SQLite 검증 성공: {card_count}개 카드")
+
+        actual_digest = hashlib.sha256(temp_file.read_bytes()).hexdigest()
+        if release_info.asset_digest:
+            if actual_digest != release_info.asset_digest:
+                raise Exception("Digest 검증 실패")
+            print(f"   ✅ SHA256 검증 성공: {actual_digest}")
+        else:
+            print("   ℹ️  Digest 정보 없음 - SHA256 검증 생략")
         
         # 4. 파일 교체
         if Path(target_path).exists():
@@ -166,6 +187,7 @@ def main():
         print(f"   ✅ Asset: {release_info.asset_name}")
         print(f"   ✅ URL: {release_info.asset_url}")
         print(f"   ✅ 업데이트: {release_info.asset_updated_at}")
+        print(f"   ✅ Digest: {release_info.asset_digest or '(없음)'}")
         
         # 테스트 2: 전체 다운로드 플로우
         print("\n📥 테스트 2: 전체 다운로드 플로우 (iOS/Android 로직 재현)")

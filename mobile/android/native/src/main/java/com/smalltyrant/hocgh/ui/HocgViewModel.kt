@@ -543,15 +543,11 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
                 runCatching { updateRepository.getLatestReleaseDbInfo() }.getOrNull()
             } ?: return@launch
 
-            val remoteDate = formatIsoDateOrNull(
-                remoteInfo.assetUpdatedAt.ifEmpty {
-                    remoteInfo.publishedAt.ifEmpty { remoteInfo.createdAt }
-                },
-            ) ?: return@launch
-            val remoteDigest = remoteInfo.assetDigest.ifBlank { null }
+            val remoteDate = formatIsoDateOrNull(remoteInfo.effectiveDateSource) ?: return@launch
+            val remoteDigest = remoteInfo.remoteDigestOrNull
             val localDate = localDateDeferred.await()
             val localDigest = localDigestDeferred.await()
-            val remoteMarker = remoteDigest ?: remoteInfo.assetUpdatedAt.ifEmpty { remoteDate }
+            val remoteMarker = remoteInfo.updateMarker ?: remoteDate
 
             val needsPrompt = if (!remoteDigest.isNullOrBlank()) {
                 remoteDigest != localDigest
