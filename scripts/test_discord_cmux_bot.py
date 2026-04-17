@@ -19,6 +19,7 @@ parse_id_set = MODULE.parse_id_set
 extract_openai_text = MODULE.extract_openai_text
 format_command_output = MODULE.format_command_output
 truncate_discord_text = MODULE.truncate_discord_text
+is_allowed_channel = MODULE.is_allowed_channel
 
 
 class DiscordCmuxBotTest(unittest.TestCase):
@@ -49,6 +50,21 @@ class DiscordCmuxBotTest(unittest.TestCase):
         result = truncate_discord_text("a" * 2000, limit=50)
         self.assertEqual(len(result), 50)
         self.assertTrue(result.endswith("…"))
+
+    def test_channel_allowlist_rejects_unknown_channel(self) -> None:
+        class DummyInteraction:
+            channel_id = 999
+
+        config = MODULE.BotConfig(
+            discord_token="x",
+            openai_api_key="",
+            openai_model="gpt-5.4-mini",
+            allowed_user_ids=frozenset(),
+            allowed_channel_ids=frozenset({111}),
+            guild_id=None,
+            ephemeral_responses=True,
+        )
+        self.assertFalse(is_allowed_channel(config, DummyInteraction()))
 
 
 if __name__ == "__main__":

@@ -9,7 +9,6 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 import discord
 import requests
@@ -49,6 +48,7 @@ class BotConfig:
     openai_api_key: str
     openai_model: str
     allowed_user_ids: frozenset[int]
+    allowed_channel_ids: frozenset[int]
     guild_id: int | None
     ephemeral_responses: bool
 
@@ -92,6 +92,7 @@ def load_config() -> BotConfig:
     openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
     openai_model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
     allowed_user_ids = parse_id_set(os.getenv("DISCORD_ALLOWED_USER_IDS"))
+    allowed_channel_ids = parse_id_set(os.getenv("DISCORD_ALLOWED_CHANNEL_IDS"))
     guild_id = parse_optional_int(os.getenv("DISCORD_GUILD_ID"))
     ephemeral_responses = parse_bool(os.getenv("DISCORD_EPHEMERAL_RESPONSES"), default=True)
 
@@ -103,6 +104,7 @@ def load_config() -> BotConfig:
         openai_api_key=openai_api_key,
         openai_model=openai_model,
         allowed_user_ids=allowed_user_ids,
+        allowed_channel_ids=allowed_channel_ids,
         guild_id=guild_id,
         ephemeral_responses=ephemeral_responses,
     )
@@ -221,6 +223,13 @@ def is_authorized(config: BotConfig, interaction: discord.Interaction) -> bool:
     return isinstance(user_id, int) and user_id in config.allowed_user_ids
 
 
+def is_allowed_channel(config: BotConfig, interaction: discord.Interaction) -> bool:
+    if not config.allowed_channel_ids:
+        return True
+    channel_id = interaction.channel_id
+    return isinstance(channel_id, int) and channel_id in config.allowed_channel_ids
+
+
 def build_bot(config: BotConfig) -> commands.Bot:
     intents = discord.Intents.default()
     bot = commands.Bot(command_prefix="!", intents=intents)
@@ -243,10 +252,25 @@ def build_bot(config: BotConfig) -> commands.Bot:
         else:
             await interaction.response.send_message("이 봇은 허용된 사용자만 사용할 수 있습니다.", ephemeral=True)
 
+    async def respond_wrong_channel(interaction: discord.Interaction) -> None:
+        message = "이 봇은 지정된 채널에서만 사용할 수 있습니다."
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+
     async def ensure_authorized(interaction: discord.Interaction) -> bool:
         if is_authorized(config, interaction):
             return True
         await respond_unauthorized(interaction)
+        return False
+
+    async def ensure_allowed_context(interaction: discord.Interaction) -> bool:
+        if not await ensure_authorized(interaction):
+            return False
+        if is_allowed_channel(config, interaction):
+            return True
+        await respond_wrong_channel(interaction)
         return False
 
     cmux_group = app_commands.Group(name="cmux", description="cmux workspace commands")
@@ -254,7 +278,7 @@ def build_bot(config: BotConfig) -> commands.Bot:
     @bot.tree.command(name="ask", description="Ask OpenAI and get a reply in Discord")
     @app_commands.describe(prompt="질문 또는 명령")
     async def ask(interaction: discord.Interaction, prompt: str) -> None:
-        if not await ensure_authorized(interaction):
+        if not await ensure_allowed_context(interaction):
             return
         await interaction.response.defer(ephemeral=config.ephemeral_responses)
         try:
@@ -265,7 +289,7 @@ def build_bot(config: BotConfig) -> commands.Bot:
 
     @cmux_group.command(name="status", description="List cmux workspaces")
     async def status(interaction: discord.Interaction) -> None:
-        if not await ensure_authorized(interaction):
+        if not await ensure_allowed_context(interaction):
             return
         await interaction.response.defer(ephemeral=config.ephemeral_responses)
         code, stdout, stderr = await run_command(["cmux", "list-workspaces"], cwd=ROOT, timeout=60)
@@ -279,7 +303,7 @@ def build_bot(config: BotConfig) -> commands.Bot:
     @app_commands.describe(role="워크스페이스 역할")
     @app_commands.choices(role=[app_commands.Choice(name=role, value=role) for role in ALLOWED_ROLES])
     async def start(interaction: discord.Interaction, role: app_commands.Choice[str]) -> None:
-        if not await ensure_authorized(interaction):
+        if not await ensure_allowed_context(interaction):
             return
         await interaction.response.defer(ephemeral=config.ephemeral_responses)
         code, stdout, stderr = await run_command(["bash", str(cmux_script), role.value], cwd=ROOT, timeout=120)
@@ -301,7 +325,7 @@ def build_bot(config: BotConfig) -> commands.Bot:
         surface_ref: str,
         lines: app_commands.Range[int, 1, 200] = 80,
     ) -> None:
-        if not await ensure_authorized(interaction):
+        if not await ensure_allowed_context(interaction):
             return
         await interaction.response.defer(ephemeral=config.ephemeral_responses)
         code, stdout, stderr = await run_command(
