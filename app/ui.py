@@ -449,6 +449,7 @@ def launch_app(db_path: str) -> None:
         btn_menu = ft.IconButton(icon=MENU_ICON, tooltip="메뉴")
         update_progress = ft.ProgressRing(width=18, height=18, stroke_width=2, visible=False)
         update_status = ft.Text("", size=12, color=COLORS.RED_300, visible=False)
+        menu_swipe_state = {"start_x": None, "drag_dx": 0.0}
 
         # --- Results / Detail ---
         lv = ft.Column(spacing=2, scroll=ft.ScrollMode.AUTO, expand=True)
@@ -775,6 +776,57 @@ def launch_app(db_path: str) -> None:
             visible=False,
         )
         page.overlay.append(ft.TransparentPointer(content=toast_host, expand=True))
+
+        def reset_menu_swipe_state() -> None:
+            menu_swipe_state["start_x"] = None
+            menu_swipe_state["drag_dx"] = 0.0
+
+        def on_menu_swipe_start(e) -> None:
+            if not is_mobile_platform():
+                return
+            width, _ = get_view_size()
+            if width <= 0:
+                return
+            local_x = getattr(getattr(e, "local_position", None), "x", None)
+            if local_x is None:
+                return
+            if local_x < max(width - 40, 0):
+                return
+            menu_swipe_state["start_x"] = local_x
+            menu_swipe_state["drag_dx"] = 0.0
+
+        def on_menu_swipe_update(e) -> None:
+            if menu_swipe_state["start_x"] is None:
+                return
+            primary_delta = getattr(e, "primary_delta", None)
+            if primary_delta is not None:
+                menu_swipe_state["drag_dx"] += float(primary_delta)
+
+        def on_menu_swipe_end(e=None) -> None:
+            if menu_swipe_state["start_x"] is None:
+                return
+            should_open = menu_swipe_state["drag_dx"] <= -52
+            reset_menu_swipe_state()
+            if should_open:
+                page.run_task(open_menu_panel_async)
+
+        swipe_zone = ft.Container(
+            expand=True,
+            visible=is_mobile_platform(),
+            content=ft.GestureDetector(
+                content=ft.Container(
+                    width=32,
+                    expand=True,
+                    bgcolor=with_opacity(0.001, COLORS.BLACK),
+                ),
+                on_horizontal_drag_start=on_menu_swipe_start,
+                on_horizontal_drag_update=on_menu_swipe_update,
+                on_horizontal_drag_end=on_menu_swipe_end,
+                on_horizontal_drag_cancel=lambda e: reset_menu_swipe_state(),
+            ),
+            alignment=ft.alignment.center_right,
+        )
+        page.overlay.append(swipe_zone)
         page.update()
 
         toast_state = {"seq": 0, "message": None}
