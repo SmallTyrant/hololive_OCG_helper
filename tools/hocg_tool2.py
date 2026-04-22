@@ -326,15 +326,21 @@ def upsert_illustration_from_crawl(conn: sqlite3.Connection, card_number: str, d
 
     # 이미 해당 (card_number, rarity) 행이 있으면 manage_id_jp를 MIN으로 유지
     existing = conn.execute(
-        "SELECT illustration_id, manage_id_jp FROM card_illustrations WHERE card_number=? AND rarity=?",
+        "SELECT illustration_id, manage_id_jp, COALESCE(image_url, '') FROM card_illustrations WHERE card_number=? AND rarity=?",
         (card_number, rarity),
     ).fetchone()
 
     if existing:
-        # manage_id_jp 는 더 낮은 값(첫 등록)을 유지
-        if detail_id and (existing[1] is None or detail_id < existing[1]):
+        # 같은 공식 detail_id를 다시 긁었으면, 최신 공식 image_url 로 교정한다.
+        if detail_id and existing[1] == detail_id and image_url and existing[2] != image_url:
             conn.execute(
-                "UPDATE card_illustrations SET manage_id_jp=?, image_url=COALESCE(image_url,?) WHERE illustration_id=?",
+                "UPDATE card_illustrations SET image_url=? WHERE illustration_id=?",
+                (image_url, existing[0]),
+            )
+        # manage_id_jp 는 더 낮은 값(첫 등록)을 유지하되, image_url 이 비어 있으면 새 URL로 채운다.
+        elif detail_id and (existing[1] is None or detail_id < existing[1]):
+            conn.execute(
+                "UPDATE card_illustrations SET manage_id_jp=?, image_url=CASE WHEN TRIM(COALESCE(image_url,''))='' THEN ? ELSE image_url END WHERE illustration_id=?",
                 (detail_id, image_url, existing[0]),
             )
     else:
