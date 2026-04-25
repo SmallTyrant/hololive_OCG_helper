@@ -1678,7 +1678,11 @@ struct ContentView: View {
                             set: { viewModel.onSearchQueryChanged($0) }
                         )
                     )
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color(.separator), lineWidth: 1))
                     .disabled(viewModel.state.updateRunning)
 
                     ModernActionButton("덱빌딩", compact: true, action: openDeckBuilder)
@@ -1765,23 +1769,41 @@ struct ContentView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 4) {
                         ForEach(viewModel.state.results) { row in
-                            let title = resultTitle(row)
-                            Text(title)
-                                .font(.body)
-                                .lineLimit(1)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 9)
-                                .background(
-                                    (viewModel.state.selectedPrintId == row.printId
-                                        ? Color.blue.opacity(0.20)
-                                        : Color.clear),
-                                    in: RoundedRectangle(cornerRadius: 8),
-                                )
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    viewModel.onSelectPrint(row.printId)
+                            let isSelected = viewModel.state.selectedPrintId == row.printId
+                            let displayName: String = {
+                                switch selectedPreferredLanguage {
+                                case .korean:
+                                    let k = DatabaseRepository.cleanDisplayName(row.nameKo)
+                                    return k.isEmpty ? (row.nameJa.isEmpty ? "(이름 없음)" : row.nameJa) : k
+                                case .japanese:
+                                    return row.nameJa.isEmpty ? (row.nameKo.isEmpty ? "(이름 없음)" : DatabaseRepository.cleanDisplayName(row.nameKo)) : row.nameJa
                                 }
+                            }()
+                            HStack(spacing: 0) {
+                                Rectangle()
+                                    .fill(isSelected ? Color.accentColor : Color.clear)
+                                    .frame(width: 3)
+                                    .clipShape(UnevenRoundedRectangle(topLeadingRadius: 8, bottomLeadingRadius: 8))
+                                HStack(spacing: 6) {
+                                    if !row.cardNumber.isEmpty {
+                                        Text(row.cardNumber)
+                                            .font(.caption2)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.blue.opacity(0.18), in: RoundedRectangle(cornerRadius: 8))
+                                    }
+                                    Text(displayName)
+                                        .font(.body)
+                                        .fontWeight(isSelected ? .semibold : .regular)
+                                        .lineLimit(1)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 9)
+                            }
+                            .background(isSelected ? Color.blue.opacity(0.20) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                            .contentShape(Rectangle())
+                            .onTapGesture { viewModel.onSelectPrint(row.printId) }
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -2461,6 +2483,7 @@ struct ContentView: View {
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
             .background(Color.blue.opacity(0.15), in: Capsule())
+            .overlay(Capsule().stroke(Color.blue.opacity(0.35), lineWidth: 1))
     }
 
     private func panel<Content: View>(height: CGFloat?, fillHeight: Bool = false, @ViewBuilder content: () -> Content) -> some View {
