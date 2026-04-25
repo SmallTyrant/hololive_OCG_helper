@@ -2096,8 +2096,8 @@ def launch_app(db_path: str) -> None:
 
                 right_panel = ft.Column(
                     [
-                        img_container,
-                        ft.Container(detail_lv, expand=True, padding=4),
+                        ft.Container(content=img_container, expand=4),
+                        ft.Container(detail_lv, expand=6, padding=4),
                     ],
                     spacing=8,
                     expand=True,
@@ -2110,6 +2110,7 @@ def launch_app(db_path: str) -> None:
                         ft.Container(right_panel, expand=6),
                     ],
                     expand=True,
+                    vertical_alignment=ft.CrossAxisAlignment.STRETCH,
                 )
 
             # --- Tab 1: 덱빌더 ---
@@ -2414,6 +2415,7 @@ def launch_app(db_path: str) -> None:
             show_hamburger_menu = mobile or sys.platform == "darwin"
             width, height = get_view_size()
             size_key = (int(width or 0), int(height or 0))
+            prev_tablet = layout_state["tablet"]
             if (
                 not force
                 and layout_state["mobile"] == mobile
@@ -2424,6 +2426,17 @@ def launch_app(db_path: str) -> None:
             layout_state["mobile"] = mobile
             layout_state["tablet"] = tablet
             layout_state["size"] = size_key
+
+            # Tablet → Mobile/Desktop 전환: 탭 상태를 모바일 화면으로 매핑
+            if prev_tablet is True and not tablet:
+                tab = tablet_tab_state.get("tab", 0)
+                if tab == 2:
+                    deck_screen_state["name"] = "deck_list"
+                elif tab == 1:
+                    deck_screen_state["name"] = "deck_editor"
+                else:
+                    deck_screen_state["name"] = "main"
+                image_panel_state["collapsed"] = True  # 이미지 탭 초기화
 
             page.controls.clear()
 
