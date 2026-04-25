@@ -529,6 +529,8 @@ def launch_app(db_path: str) -> None:
         deck_cards_state = {"rows": []}
         deck_editor_state = {"title": "", "entries": []}
         deck_search_state = {"query": ""}
+        tablet_tab_state: dict = {"tab": 0}  # 0=카드검색, 1=덱빌더, 2=덱목록
+        tablet_deck_preview_state: dict = {"deck": None}
         deck_file = data_root / "deck_lists.json"
 
         def load_decks() -> list[dict]:
@@ -1687,7 +1689,7 @@ def launch_app(db_path: str) -> None:
                 append_log("[INFO] 메뉴의 'DB 수동갱신'으로 GitHub Releases 최신 DB를 내려받습니다.")
 
         # --- Layout ---
-        layout_state = {"mobile": None, "size": (0, 0)}
+        layout_state = {"mobile": None, "tablet": None, "size": (0, 0)}
 
         def image_toggle_label() -> str:
             return "이미지 펼치기" if image_panel_state["collapsed"] else "이미지 접기"
@@ -1749,6 +1751,15 @@ def launch_app(db_path: str) -> None:
                 # 초기 사이즈가 아직 확정되지 않은 모바일 환경은 플랫폼 정보로 우선 판정.
                 return is_mobile_platform() and not is_android_tablet()
             return bool(width) and width < 900 and not is_android_tablet()
+
+        def is_tablet_layout() -> bool:
+            width, height = get_view_size()
+            if width <= 0 or height <= 0:
+                return is_android_tablet()
+            # landscape tablet: wide AND in tablet form factor
+            return width >= 900 and height >= 500 and (
+                is_android_tablet() or (width / max(height, 1) >= 1.2)
+            )
 
         def grouped_deck_entries(entries: list[dict]) -> list[dict]:
             grouped: dict[int, dict] = {}
@@ -2022,18 +2033,396 @@ def launch_app(db_path: str) -> None:
                 expand=True,
             )
 
+        def build_tablet_layout() -> None:
+            page.controls.clear()
+
+            active_tab = tablet_tab_state["tab"]
+
+            def switch_tablet_tab(tab_idx: int) -> None:
+                tablet_tab_state["tab"] = tab_idx
+                if tab_idx == 1:
+                    try:
+                        rows = list_cards_for_deck(get_conn(), limit=800)
+                        deck_cards_state["rows"] = rows
+                    except Exception:
+                        pass
+                build_layout(force=True)
+                page.update()
+
+            def tab_button(label: str, idx: int) -> ft.Control:
+                is_active = active_tab == idx
+                return ft.Container(
+                    content=ft.TextButton(
+                        text=label,
+                        on_click=lambda e, i=idx: switch_tablet_tab(i),
+                        style=ft.ButtonStyle(
+                            color=COLORS.WHITE if is_active else COLORS.GREY_400,
+                        ),
+                    ),
+                    border=ft.border.only(
+                        bottom=ft.BorderSide(2, COLORS.WHITE) if is_active else ft.BorderSide(0, COLORS.TRANSPARENT)
+                    ),
+                )
+
+            tab_bar = ft.Row(
+                [
+                    tab_button("카드검색", 0),
+                    tab_button("덱빌더", 1),
+                    tab_button("덱목록", 2),
+                ],
+                spacing=4,
+            )
+
+            # --- Tab 0: 카드검색 ---
+            if active_tab == 0:
+                lv.expand = True
+                lv.scroll = ft.ScrollMode.AUTO
+                detail_lv.expand = True
+                detail_lv.scroll = ft.ScrollMode.AUTO
+
+                tf_search.border_radius = 28
+                tf_search.border = ft.InputBorder.OUTLINE
+                tf_search.content_padding = ft.padding.symmetric(horizontal=20, vertical=10)
+
+                left_panel = ft.Column(
+                    [
+                        tf_search,
+                        build_search_rarity_selector(),
+                        ft.Container(lv, expand=True, padding=4),
+                    ],
+                    spacing=8,
+                    expand=True,
+                )
+
+                right_panel = ft.Column(
+                    [
+                        img_container,
+                        ft.Container(detail_lv, expand=True, padding=4),
+                    ],
+                    spacing=8,
+                    expand=True,
+                )
+
+                content = ft.Row(
+                    [
+                        ft.Container(left_panel, expand=4),
+                        ft.VerticalDivider(width=1),
+                        ft.Container(right_panel, expand=6),
+                    ],
+                    expand=True,
+                )
+
+            # --- Tab 1: 덱빌더 ---
+            elif active_tab == 1:
+                tf_deck_search = ft.TextField(
+                    label="카드 검색",
+                    border_radius=28,
+                    border=ft.InputBorder.OUTLINE,
+                    content_padding=ft.padding.symmetric(horizontal=20, vertical=10),
+                    on_change=lambda e: _on_tablet_deck_search_change(e),
+                )
+
+                def _on_tablet_deck_search_change(e) -> None:
+                    query = (e.control.value or "").strip()
+                    try:
+                        rows = list_cards_for_deck(get_conn(), limit=800, query=query)
+                        deck_cards_state["rows"] = rows
+                    except Exception:
+                        pass
+                    build_layout(force=True)
+                    page.update()
+
+                card_rows = deck_cards_state.get("rows") or []
+                picker_items: list[ft.Control] = []
+                for row in card_rows:
+                    picker_items.append(
+                        ft.Container(
+                            content=ft.Row(
+                                [
+                                    ft.Text(row.get("card_number") or "", width=90, size=12),
+                                    ft.Text(row.get("name") or "", expand=True, size=12),
+                                    ft.ElevatedButton(
+                                        "추가",
+                                        on_click=lambda e, _row=row: _tablet_add_card(_row),
+                                        height=32,
+                                    ),
+                                ],
+                                spacing=6,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
+                            padding=ft.padding.symmetric(horizontal=6, vertical=4),
+                            border=ft.border.only(bottom=ft.BorderSide(1, with_opacity(0.1, COLORS.WHITE))),
+                        )
+                    )
+
+                def _tablet_add_card(row: dict) -> None:
+                    try_add_card_to_deck(row)
+                    build_layout(force=True)
+                    page.update()
+
+                left_panel = ft.Column(
+                    [
+                        tf_deck_search,
+                        ft.Column(
+                            picker_items or [ft.Text("카드 없음")],
+                            scroll=ft.ScrollMode.AUTO,
+                            expand=True,
+                            spacing=0,
+                        ),
+                    ],
+                    spacing=8,
+                    expand=True,
+                )
+
+                entries = grouped_deck_entries(deck_editor_state["entries"])
+                oshi_count, yell_count, main_count = get_entry_counts(entries)
+
+                entry_controls: list[ft.Control] = []
+                for entry in entries:
+                    qty = int(entry.get("qty", 0))
+                    entry_controls.append(
+                        ft.Container(
+                            content=ft.Row(
+                                [
+                                    ft.Text(
+                                        f"{entry.get('card_number') or ''} | {entry.get('name') or ''} x {qty}",
+                                        expand=True,
+                                        size=12,
+                                    ),
+                                    ft.IconButton(icon=ICONS.REMOVE, on_click=lambda e, _entry=entry: on_remove_entry_click(_entry)),
+                                    ft.IconButton(icon=ICONS.ADD, on_click=lambda e, _entry=entry: on_add_entry_click(_entry)),
+                                ],
+                                spacing=4,
+                            ),
+                            border=ft.border.all(1, with_opacity(0.15, COLORS.WHITE)),
+                            border_radius=8,
+                            padding=6,
+                        )
+                    )
+
+                def _tablet_save_deck(e=None) -> None:
+                    decks = load_decks()
+                    deck_id = deck_screen_state.get("deck_id")
+                    payload = {
+                        "id": int(time.time() * 1000) if deck_id is None else deck_id,
+                        "title": (deck_editor_state.get("title") or "덱").strip() or "덱",
+                        "entries": grouped_deck_entries(deck_editor_state["entries"]),
+                    }
+                    if deck_id is None:
+                        decks.append(payload)
+                    else:
+                        decks = [payload if int(d.get("id", -1)) == int(deck_id) else d for d in decks]
+                    save_decks(decks)
+                    show_toast("덱이 저장되었습니다.", duration_ms=1200)
+                    deck_screen_state["deck_id"] = None
+                    deck_editor_state["title"] = ""
+                    deck_editor_state["entries"] = []
+                    build_layout(force=True)
+                    page.update()
+
+                right_panel = ft.Column(
+                    [
+                        ft.TextField(
+                            value=deck_editor_state.get("title") or "",
+                            on_change=lambda e: deck_editor_state.update({"title": e.control.value}),
+                            label="덱 이름",
+                            border_radius=28,
+                            border=ft.InputBorder.OUTLINE,
+                            content_padding=ft.padding.symmetric(horizontal=20, vertical=10),
+                        ),
+                        ft.Row(
+                            [
+                                ft.Text(f"오시 {oshi_count}/1"),
+                                ft.Text(f"엘 {yell_count}/20"),
+                                ft.Text(f"기타 {main_count}/50"),
+                            ],
+                            spacing=14,
+                        ),
+                        ft.Column(
+                            entry_controls or [ft.Text("카드를 추가해주세요.")],
+                            scroll=ft.ScrollMode.AUTO,
+                            expand=True,
+                            spacing=4,
+                        ),
+                        ft.ElevatedButton("저장", on_click=_tablet_save_deck),
+                    ],
+                    spacing=8,
+                    expand=True,
+                )
+
+                content = ft.Row(
+                    [
+                        ft.Container(left_panel, expand=4),
+                        ft.VerticalDivider(width=1),
+                        ft.Container(right_panel, expand=6),
+                    ],
+                    expand=True,
+                )
+
+            # --- Tab 2: 덱목록 ---
+            else:
+                decks = load_decks()
+                selected_deck = tablet_deck_preview_state.get("deck")
+
+                deck_list_items: list[ft.Control] = []
+                for deck in decks:
+                    entries = grouped_deck_entries(deck.get("entries") or [])
+                    total_qty = sum(int(e.get("qty", 0)) for e in entries)
+                    is_selected = selected_deck is not None and int(deck.get("id", -1)) == int(selected_deck.get("id", -2))
+                    deck_list_items.append(
+                        ft.Container(
+                            content=ft.Column(
+                                [
+                                    ft.Text(deck.get("title") or "덱", weight=ft.FontWeight.BOLD, size=13),
+                                    ft.Text(f"카드 {total_qty}장", size=11, color=COLORS.GREY_400),
+                                ],
+                                spacing=2,
+                            ),
+                            padding=ft.padding.symmetric(horizontal=10, vertical=8),
+                            border=ft.border.all(1, with_opacity(0.3 if is_selected else 0.1, COLORS.WHITE)),
+                            border_radius=8,
+                            bgcolor=with_opacity(0.12, COLORS.WHITE) if is_selected else None,
+                            on_click=lambda e, _deck=deck: _select_tablet_deck(_deck),
+                        )
+                    )
+
+                def _select_tablet_deck(deck: dict) -> None:
+                    tablet_deck_preview_state["deck"] = deck
+                    build_layout(force=True)
+                    page.update()
+
+                left_panel = ft.Column(
+                    [
+                        ft.Text("덱 목록", weight=ft.FontWeight.BOLD, size=14),
+                        ft.ElevatedButton("새 덱", on_click=lambda e: _tablet_new_deck()),
+                        ft.Column(
+                            deck_list_items or [ft.Text("저장된 덱 없음")],
+                            scroll=ft.ScrollMode.AUTO,
+                            expand=True,
+                            spacing=6,
+                        ),
+                    ],
+                    spacing=8,
+                    expand=True,
+                )
+
+                def _tablet_new_deck() -> None:
+                    tablet_tab_state["tab"] = 1
+                    deck_screen_state["deck_id"] = None
+                    deck_editor_state["title"] = "새 덱"
+                    deck_editor_state["entries"] = []
+                    try:
+                        rows = list_cards_for_deck(get_conn(), limit=800)
+                        deck_cards_state["rows"] = rows
+                    except Exception:
+                        pass
+                    build_layout(force=True)
+                    page.update()
+
+                if selected_deck is not None:
+                    preview_entries = grouped_deck_entries(selected_deck.get("entries") or [])
+                    preview_items: list[ft.Control] = []
+                    for entry in preview_entries:
+                        qty = int(entry.get("qty", 0))
+                        preview_items.append(
+                            ft.Row(
+                                [
+                                    ft.Image(src=(entry.get("image_url") or ""), width=48, height=68, fit=IMAGE_FIT_COVER),
+                                    ft.Text(f"{entry.get('card_number') or ''} | {entry.get('name') or ''} x {qty}", expand=True, size=12),
+                                ],
+                                spacing=8,
+                            )
+                        )
+
+                    def _tablet_edit_deck(e=None) -> None:
+                        open_deck_editor(int(selected_deck.get("id")))
+                        tablet_tab_state["tab"] = 1
+                        try:
+                            rows = list_cards_for_deck(get_conn(), limit=800)
+                            deck_cards_state["rows"] = rows
+                        except Exception:
+                            pass
+                        build_layout(force=True)
+                        page.update()
+
+                    def _tablet_delete_deck(e=None) -> None:
+                        did = int(selected_deck.get("id", -1))
+                        decks2 = [d for d in load_decks() if int(d.get("id", -1)) != did]
+                        save_decks(decks2)
+                        tablet_deck_preview_state["deck"] = None
+                        build_layout(force=True)
+                        page.update()
+
+                    right_panel = ft.Column(
+                        [
+                            ft.Row(
+                                [
+                                    ft.Text(selected_deck.get("title") or "덱", weight=ft.FontWeight.BOLD, size=15),
+                                    ft.TextButton("편집", on_click=_tablet_edit_deck),
+                                    ft.TextButton("삭제", on_click=_tablet_delete_deck),
+                                ],
+                                spacing=8,
+                            ),
+                            ft.Column(
+                                preview_items or [ft.Text("카드 없음")],
+                                scroll=ft.ScrollMode.AUTO,
+                                expand=True,
+                                spacing=6,
+                            ),
+                        ],
+                        spacing=8,
+                        expand=True,
+                    )
+                else:
+                    right_panel = ft.Column(
+                        [ft.Text("왼쪽에서 덱을 선택하세요.", color=COLORS.GREY_400)],
+                        expand=True,
+                    )
+
+                content = ft.Row(
+                    [
+                        ft.Container(left_panel, expand=3),
+                        ft.VerticalDivider(width=1),
+                        ft.Container(right_panel, expand=7),
+                    ],
+                    expand=True,
+                )
+
+            tablet_root = ft.Column(
+                [
+                    tab_bar,
+                    ft.Divider(height=1),
+                    content,
+                ],
+                expand=True,
+                spacing=6,
+            )
+
+            page.add(
+                ft.SafeArea(
+                    content=ft.Container(
+                        content=tablet_root,
+                        padding=ft.padding.only(left=10, right=10, top=6, bottom=10),
+                    ),
+                    expand=True,
+                )
+            )
+
         def build_layout(force: bool = False) -> None:
             mobile = is_mobile_layout()
+            tablet = is_tablet_layout()
             show_hamburger_menu = mobile or sys.platform == "darwin"
             width, height = get_view_size()
             size_key = (int(width or 0), int(height or 0))
             if (
                 not force
                 and layout_state["mobile"] == mobile
+                and layout_state["tablet"] == tablet
                 and layout_state["size"] == size_key
             ):
                 return
             layout_state["mobile"] = mobile
+            layout_state["tablet"] = tablet
             layout_state["size"] = size_key
 
             page.controls.clear()
@@ -2043,6 +2432,10 @@ def launch_app(db_path: str) -> None:
                 return
             if deck_screen_state["name"] == "deck_editor":
                 page.add(render_deck_editor_screen())
+                return
+
+            if tablet:
+                build_tablet_layout()
                 return
 
             if mobile:

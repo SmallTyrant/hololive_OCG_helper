@@ -1821,6 +1821,80 @@ fun HocgScreen(
                         decreaseDeckEntryByPrintId(deckDraft, printId)
                     },
                 )
+            } else if (isTabletLandscape()) {
+                TabletLandscapeLayout(
+                    viewModel = viewModel,
+                    innerPadding = innerPadding,
+                    state = state,
+                    preferredLanguage = preferredLanguage,
+                    savedDecks = savedDecks,
+                    deckDraft = deckDraft,
+                    deckTitle = deckTitle,
+                    onDeckTitleChange = { deckTitle = it },
+                    deckSearchQuery = deckSearchQuery,
+                    onDeckSearchQueryChange = {
+                        deckSearchQuery = it
+                        scope.launch { deckCandidates = viewModel.searchDeckCards(deckSearchQuery) }
+                    },
+                    deckCandidates = deckCandidates,
+                    onSelectCandidate = { card ->
+                        if (card.hasMultipleRarities) {
+                            rarityPickerNewCard = card
+                        } else {
+                            val reason = addCardToDeck(deckDraft, card)
+                            if (reason != null) {
+                                scope.launch { snackbarHostState.showSnackbar(reason) }
+                            }
+                        }
+                    },
+                    onIncrease = { printId ->
+                        val reason = increaseDeckEntryByPrintId(deckDraft, printId)
+                        if (reason != null) {
+                            scope.launch { snackbarHostState.showSnackbar(reason) }
+                        }
+                    },
+                    onDecrease = { printId -> decreaseDeckEntryByPrintId(deckDraft, printId) },
+                    onSaveDeck = {
+                        val snapshot = deckDraft.groupBy { it.card.printId }.values.map { g ->
+                            val first = g.first()
+                            DeckEntryUi(first.card, g.sumOf { it.qty }, first.maxPerCard, first.selectedRarity)
+                        }
+                        val now = System.currentTimeMillis()
+                        val targetId = editingDeckId ?: UUID.randomUUID().toString()
+                        val deck = DeckUi(
+                            id = targetId,
+                            title = deckTitle.ifBlank { "덱" },
+                            entries = snapshot,
+                            updatedAt = now,
+                        )
+                        val existing = savedDecks.indexOfFirst { it.id == targetId }
+                        if (existing >= 0) savedDecks[existing] = deck else savedDecks.add(deck)
+                        editingDeckId = targetId
+                        scope.launch(Dispatchers.IO) {
+                            deckStorage.saveLibrary(DeckLibraryRecord(decks = toDeckRecords(savedDecks)))
+                        }
+                    },
+                    onEditDeck = { deck ->
+                        editingDeckId = deck.id
+                        deckTitle = deck.title
+                        deckDraft.clear()
+                        deckDraft.addAll(deck.entries)
+                        scope.launch { deckCandidates = viewModel.searchDeckCards(deckSearchQuery) }
+                    },
+                    onDeleteDeck = { deck ->
+                        savedDecks.removeAll { it.id == deck.id }
+                        scope.launch(Dispatchers.IO) {
+                            deckStorage.saveLibrary(DeckLibraryRecord(decks = toDeckRecords(savedDecks)))
+                        }
+                    },
+                    onNewDeck = {
+                        editingDeckId = null
+                        deckTitle = "새 덱"
+                        deckDraft.clear()
+                        scope.launch { deckCandidates = viewModel.searchDeckCards("") }
+                    },
+                    onChangeRarity = { entry -> rarityPickerEntry = entry },
+                )
             } else {
                 MobileLayout(
                     state = state,
@@ -3300,6 +3374,418 @@ private fun RarityPickerBottomSheet(
                             )
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun isTabletLandscape(): Boolean {
+    val config = androidx.compose.ui.platform.LocalConfiguration.current
+    return config.screenWidthDp >= 840 && config.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+}
+
+@Composable
+private fun TabletLandscapeLayout(
+    viewModel: HocgViewModel,
+    innerPadding: androidx.compose.foundation.layout.PaddingValues,
+    state: HocgUiState,
+    preferredLanguage: PreferredLanguage,
+    savedDecks: androidx.compose.runtime.snapshots.SnapshotStateList<DeckUi>,
+    deckDraft: androidx.compose.runtime.snapshots.SnapshotStateList<DeckEntryUi>,
+    deckTitle: String,
+    onDeckTitleChange: (String) -> Unit,
+    deckSearchQuery: String,
+    onDeckSearchQueryChange: (String) -> Unit,
+    deckCandidates: List<DeckCardCandidate>,
+    onSelectCandidate: (DeckCardCandidate) -> Unit,
+    onIncrease: (Long) -> Unit,
+    onDecrease: (Long) -> Unit,
+    onSaveDeck: () -> Unit,
+    onEditDeck: (DeckUi) -> Unit,
+    onDeleteDeck: (DeckUi) -> Unit,
+    onNewDeck: () -> Unit,
+    onChangeRarity: (DeckEntryUi) -> Unit,
+) {
+    var selectedTab by remember { mutableStateOf(0) }
+    val tabLabels = listOf("카드검색", "덱빌더", "덱목록")
+
+    Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+        androidx.compose.material3.TabRow(selectedTabIndex = selectedTab) {
+            tabLabels.forEachIndexed { index, label ->
+                androidx.compose.material3.Tab(
+                    selected = selectedTab == index,
+                    onClick = { selectedTab = index },
+                    text = { Text(label) },
+                )
+            }
+        }
+
+        when (selectedTab) {
+            0 -> TabletCardSearchPane(
+                state = state,
+                preferredLanguage = preferredLanguage,
+                multiWordTags = viewModel.multiWordTags,
+                onSearchQueryChanged = viewModel::onSearchQueryChanged,
+                onSelectPrint = viewModel::onSelectPrint,
+                onSelectIllustration = viewModel::onSelectIllustration,
+            )
+            1 -> TabletDeckBuilderPane(
+                state = state,
+                deckDraft = deckDraft,
+                deckTitle = deckTitle,
+                onDeckTitleChange = onDeckTitleChange,
+                deckSearchQuery = deckSearchQuery,
+                onDeckSearchQueryChange = onDeckSearchQueryChange,
+                deckCandidates = deckCandidates,
+                onSelectCandidate = onSelectCandidate,
+                onIncrease = onIncrease,
+                onDecrease = onDecrease,
+                onSaveDeck = onSaveDeck,
+                onChangeRarity = onChangeRarity,
+            )
+            2 -> TabletDeckListPane(
+                savedDecks = savedDecks,
+                onEditDeck = onEditDeck,
+                onDeleteDeck = onDeleteDeck,
+                onNewDeck = onNewDeck,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TabletCardSearchPane(
+    state: HocgUiState,
+    preferredLanguage: PreferredLanguage,
+    multiWordTags: List<String>,
+    onSearchQueryChanged: (String) -> Unit,
+    onSelectPrint: (Long) -> Unit,
+    onSelectIllustration: (String, String) -> Unit,
+) {
+    Row(modifier = Modifier.fillMaxSize()) {
+        // Left 38% — search list
+        Column(
+            modifier = Modifier
+                .weight(0.38f)
+                .fillMaxHeight()
+                .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedTextField(
+                modifier = Modifier.fillMaxWidth(),
+                value = state.searchQuery,
+                onValueChange = onSearchQueryChanged,
+                label = { Text("카드번호 / 이름 / 태그 검색") },
+                enabled = !state.updateRunning,
+                singleLine = true,
+                shape = RoundedCornerShape(28.dp),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            )
+            if (state.results.isEmpty()) {
+                Text(
+                    "검색 결과가 없습니다.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    items(state.results, key = { it.printId }) { row ->
+                        val displayName = when (preferredLanguage) {
+                            PreferredLanguage.KOREAN -> com.smalltyrant.hocgh.data.DbRepository.cleanDisplayName(row.nameKo).ifBlank { row.nameJa }
+                            PreferredLanguage.JAPANESE -> row.nameJa.ifBlank { com.smalltyrant.hocgh.data.DbRepository.cleanDisplayName(row.nameKo) }
+                        }.ifBlank { "(이름 없음)" }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    color = if (state.selectedPrintId == row.printId) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+                                    shape = RoundedCornerShape(8.dp),
+                                )
+                                .clickable { onSelectPrint(row.printId) }
+                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            if (row.cardNumber.isNotBlank()) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(8.dp))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                                ) {
+                                    Text(row.cardNumber, style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                            Text(displayName, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+        }
+
+        VerticalDivider()
+
+        // Right 62% — card detail
+        Column(
+            modifier = Modifier
+                .weight(0.62f)
+                .fillMaxHeight()
+                .padding(8.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SearchRaritySelector(
+                selectedRarity = state.selectedRarity,
+                illustrations = state.selectedIllustrations,
+                fallbackImageUrl = state.selectedImageUrl,
+                onSelect = onSelectIllustration,
+            )
+            Panel(modifier = Modifier.fillMaxWidth().height(340.dp)) {
+                ImagePanel(
+                    imageState = state.imageState,
+                    onTap = {},
+                    onSwipeRarity = {},
+                )
+            }
+            Text("효과", style = MaterialTheme.typography.titleSmall)
+            Panel(modifier = Modifier.fillMaxWidth()) {
+                DetailPanel(
+                    koText = state.detailKoText,
+                    jaText = state.detailJaText,
+                    detailLoading = state.detailLoading,
+                    preferredLanguage = preferredLanguage,
+                    scrollable = false,
+                    multiWordTags = multiWordTags,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TabletDeckBuilderPane(
+    state: HocgUiState,
+    deckDraft: List<DeckEntryUi>,
+    deckTitle: String,
+    onDeckTitleChange: (String) -> Unit,
+    deckSearchQuery: String,
+    onDeckSearchQueryChange: (String) -> Unit,
+    deckCandidates: List<DeckCardCandidate>,
+    onSelectCandidate: (DeckCardCandidate) -> Unit,
+    onIncrease: (Long) -> Unit,
+    onDecrease: (Long) -> Unit,
+    onSaveDeck: () -> Unit,
+    onChangeRarity: (DeckEntryUi) -> Unit,
+) {
+    val oshi = deckDraft.filter { isOshi(it.card) }.sumOf { it.qty }
+    val yell = deckDraft.filter { isYell(it.card) }.sumOf { it.qty }
+    val main = deckDraft.filter { !isOshi(it.card) && !isYell(it.card) }.sumOf { it.qty }
+
+    Row(modifier = Modifier.fillMaxSize()) {
+        // Left 38% — card picker
+        Column(
+            modifier = Modifier
+                .weight(0.38f)
+                .fillMaxHeight()
+                .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedTextField(
+                modifier = Modifier.fillMaxWidth(),
+                value = deckSearchQuery,
+                onValueChange = onDeckSearchQueryChange,
+                label = { Text("카드 검색") },
+                singleLine = true,
+                shape = RoundedCornerShape(28.dp),
+                enabled = !state.updateRunning,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            )
+            if (deckCandidates.isEmpty()) {
+                Text("검색 결과가 없습니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    items(deckCandidates, key = { it.printId }) { card ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onSelectCandidate(card) }
+                                .padding(horizontal = 6.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("${card.cardNumber} | ${card.nameKo.ifBlank { card.nameJa }}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                            }
+                            ModernActionButton(text = "추가", onClick = { onSelectCandidate(card) })
+                        }
+                    }
+                }
+            }
+        }
+
+        VerticalDivider()
+
+        // Right 62% — deck editor
+        Column(
+            modifier = Modifier
+                .weight(0.62f)
+                .fillMaxHeight()
+                .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = deckTitle,
+                    onValueChange = onDeckTitleChange,
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    label = { Text("덱 이름") },
+                )
+                ModernActionButton(text = "저장", onClick = onSaveDeck)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("오시 $oshi/1")
+                Text("메인 $main/50")
+                Text("옐 $yell/20")
+            }
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                items(deckDraft, key = { it.card.printId }) { entry ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(10.dp))
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        DeckThumbnail(imageUrl = entry.effectiveImageUrl, qty = entry.qty, width = 40.dp, height = 56.dp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("${entry.card.cardNumber} | ${entry.card.nameKo.ifBlank { entry.card.nameJa }}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                            if (entry.displayRarity.isNotBlank()) {
+                                Text(entry.displayRarity, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                            }
+                        }
+                        IconButton(onClick = { onDecrease(entry.card.printId) }) {
+                            Icon(Icons.Default.Remove, contentDescription = "감소")
+                        }
+                        IconButton(
+                            onClick = { onIncrease(entry.card.printId) },
+                            enabled = blockReason(deckDraft, entry.card) == null,
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = "증가")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TabletDeckListPane(
+    savedDecks: List<DeckUi>,
+    onEditDeck: (DeckUi) -> Unit,
+    onDeleteDeck: (DeckUi) -> Unit,
+    onNewDeck: () -> Unit,
+) {
+    var selectedDeck by remember { mutableStateOf<DeckUi?>(null) }
+
+    Row(modifier = Modifier.fillMaxSize()) {
+        // Left 35% — deck list
+        Column(
+            modifier = Modifier
+                .weight(0.35f)
+                .fillMaxHeight()
+                .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                items(savedDecks, key = { it.id }) { deck ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                if (selectedDeck?.id == deck.id) MaterialTheme.colorScheme.secondaryContainer
+                                else MaterialTheme.colorScheme.surface,
+                            )
+                            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(8.dp))
+                            .clickable { selectedDeck = deck }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(deck.title, modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+            ModernActionButton(text = "새 덱", onClick = onNewDeck, modifier = Modifier.fillMaxWidth())
+        }
+
+        VerticalDivider()
+
+        // Right 65% — deck preview
+        val deck = selectedDeck
+        Column(
+            modifier = Modifier
+                .weight(0.65f)
+                .fillMaxHeight()
+                .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (deck == null) {
+                Text("덱을 선택하면 미리보기가 표시됩니다.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.outline)
+            } else {
+                Text(deck.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val oshi = deck.entries.filter { isOshi(it.card) }.sumOf { it.qty }
+                val yell = deck.entries.filter { isYell(it.card) }.sumOf { it.qty }
+                val main = deck.entries.filter { !isOshi(it.card) && !isYell(it.card) }.sumOf { it.qty }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("오시 $oshi/1")
+                    Text("메인 $main/50")
+                    Text("옐 $yell/20")
+                }
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    items(deck.entries, key = { it.card.printId }) { entry ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            DeckThumbnail(imageUrl = entry.effectiveImageUrl, qty = entry.qty, width = 40.dp, height = 56.dp)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("${entry.card.cardNumber} | ${entry.card.nameKo.ifBlank { entry.card.nameJa }}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                                if (entry.displayRarity.isNotBlank()) {
+                                    Text(entry.displayRarity, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                                }
+                            }
+                            Text("x${entry.qty}", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ModernActionButton(text = "편집", onClick = { onEditDeck(deck) })
+                    ModernActionButton(text = "삭제", onClick = { onDeleteDeck(deck); selectedDeck = null })
                 }
             }
         }
