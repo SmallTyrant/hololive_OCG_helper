@@ -28,7 +28,15 @@ data class ReleaseDbInfo(
     val assetDigest: String,
     val publishedAt: String,
     val createdAt: String,
-)
+) {
+    val effectiveDateSource: String
+        get() = assetUpdatedAt.ifBlank {
+            publishedAt.ifBlank { createdAt }
+        }
+
+    val updateMarker: String?
+        get() = assetDigest.ifBlank { assetUpdatedAt }.ifBlank { null }
+}
 
 data class ReleaseApkInfo(
     val tag: String,
@@ -52,11 +60,7 @@ class UpdateRepository {
     fun fetchRemoteDbDate(): String? {
         return runCatching {
             val info = getLatestReleaseDbInfo()
-            formatIsoDateOrNull(
-                info.assetUpdatedAt.ifEmpty {
-                    info.publishedAt.ifEmpty { info.createdAt }
-                },
-            )
+            formatIsoDateOrNull(info.effectiveDateSource)
         }.getOrNull()
     }
 

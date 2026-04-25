@@ -15,19 +15,19 @@ permissions:
 
 jobs:
   build-and-release:
-    name: Android APK 빌드 및 GitHub Release 업로드
+    name: Android signed APK 빌드 및 install_file1 릴리즈 갱신
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: 코드 체크아웃
         uses: actions/checkout@v4
-      
+
       - name: JDK 17 설정
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-      
+
       - name: Gradle 캐시
         uses: actions/cache@v4
         with:
@@ -37,16 +37,48 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
-      
-      - name: 빌드 번호 설정
-        id: build_number
+
+      - name: 버전 정보 로드
+        id: version
+        working-directory: mobile/android/native-app
         run: |
-          BASE_BUILD_NUMBER=136
-          BUILD_NUMBER=$((BASE_BUILD_NUMBER + ${{ github.run_number }}))
-          echo "build_number=$BUILD_NUMBER" >> $GITHUB_OUTPUT
-          echo "version_name=1.2.13" >> $GITHUB_OUTPUT
-      
-      - name: keystore.properties 생성 (Release 빌드용)
+          set -euo pipefail
+          VERSION_NAME="$(jq -r '.versionName' version.json)"
+          VERSION_CODE="$(jq -r '.versionCode' version.json)"
+          APK_URL="$(jq -r '.apkUrl' version.json)"
+
+          if [ -z "$VERSION_NAME" ] || [ "$VERSION_NAME" = "null" ]; then
+            echo "❌ version.json에 versionName이 없습니다."
+            exit 1
+          fi
+          if ! [[ "$VERSION_CODE" =~ ^[0-9]+$ ]] || [ "$VERSION_CODE" -le 0 ]; then
+            echo "❌ version.json의 versionCode가 올바르지 않습니다: $VERSION_CODE"
+            exit 1
+          fi
+          if [ "$APK_URL" != "https://github.com/SmallTyrant/hololive_OCG_helper/releases/download/install_file1/app-release.apk" ]; then
+            echo "❌ version.json apkUrl은 install_file1/app-release.apk 고정 URL이어야 합니다: $APK_URL"
+            exit 1
+          fi
+
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "apk_url=$APK_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Android 서명 시크릿 확인
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "❌ Android 릴리즈는 반드시 현재 배포 인증서로 서명해야 합니다."
+            echo "ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD 시크릿을 확인하세요."
+            exit 1
+          fi
+
+      - name: keystore.properties 생성
         working-directory: mobile/android/native-app
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -54,142 +86,158 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            KEYSTORE_PATH="$(pwd)/hocg-release-new.jks"
-            echo "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
-            cat > keystore.properties <<EOF
-          storeFile=$KEYSTORE_PATH
-          storePassword=$KEYSTORE_PASSWORD
-          keyAlias=$KEY_ALIAS
-          keyPassword=$KEY_PASSWORD
-          EOF
-          else
-            echo "키스토어 시크릿이 없습니다. Debug APK만 빌드합니다."
-          fi
-      
+          set -euo pipefail
+          KEYSTORE_PATH="$(pwd)/hocg-release.jks"
+          echo "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
+          {
+            echo "storeFile=$KEYSTORE_PATH"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > keystore.properties
+
       - name: Gradlew 실행 권한 부여
         working-directory: mobile/android/native-app
         run: chmod +x ./gradlew
-      
+
       - name: Release APK 빌드
         working-directory: mobile/android/native-app
         env:
-          VERSION_CODE: ${{ steps.build_number.outputs.build_number }}
-          VERSION_NAME: ${{ steps.build_number.outputs.version_name }}
-        run: |
-          if [ -f keystore.properties ]; then
-            ./gradlew assembleRelease --no-daemon -PversionCode=$VERSION_CODE -PversionName=$VERSION_NAME
-            APK_PATH="app/build/outputs/apk/release/app-release.apk"
-            echo "apk_path=$APK_PATH" >> $GITHUB_ENV
-            echo "apk_name=hololive-ocg-helper-v${{ steps.build_number.outputs.version_name }}-build${{ steps.build_number.outputs.build_number }}.apk" >> $GITHUB_ENV
-          else
-            ./gradlew assembleDebug --no-daemon -PversionCode=$VERSION_CODE -PversionName=$VERSION_NAME
-            APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
-            echo "apk_path=$APK_PATH" >> $GITHUB_ENV
-            echo "apk_name=hololive-ocg-helper-v${{ steps.build_number.outputs.version_name }}-build${{ steps.build_number.outputs.build_number }}-debug.apk" >> $GITHUB_ENV
-          fi
-      
-      - name: APK 파일 확인 및 이름 변경
-        working-directory: mobile/android/native-app
-        run: |
-          ls -lh ${{ env.apk_path }}
-          echo "APK 크기: $(du -h ${{ env.apk_path }} | cut -f1)"
-          cp ${{ env.apk_path }} ${{ env.apk_name }}
-          cp ${{ env.apk_path }} android-latest.apk
-          echo "renamed_apk=mobile/android/native-app/${{ env.apk_name }}" >> $GITHUB_ENV
-          echo "latest_apk=mobile/android/native-app/android-latest.apk" >> $GITHUB_ENV
-      
-      - name: 태그 이름 설정
-        id: create_tag
-        run: |
-          TAG_NAME="android-v${{ steps.build_number.outputs.version_name }}-build${{ steps.build_number.outputs.build_number }}"
-          RELEASE_NAME="Android v${{ steps.build_number.outputs.version_name }} (build ${{ steps.build_number.outputs.build_number }})"
-          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
-          echo "release_name=$RELEASE_NAME" >> $GITHUB_OUTPUT
-
-      - name: 릴리즈 노트 로드
-        id: release_notes
-        run: |
-          NOTES_FILE=".github/release-notes/android/${{ steps.build_number.outputs.version_name }}.md"
-          if [ ! -f "$NOTES_FILE" ]; then
-            echo "❌ 릴리즈 노트 파일이 없습니다: $NOTES_FILE"
-            echo "버전이 올라갈 때마다 .github/release-notes/android/<version>.md 파일을 추가하세요."
-            exit 1
-          fi
-
-          echo "notes_path=$NOTES_FILE" >> $GITHUB_OUTPUT
-          {
-            echo "body<<EOF"
-            cat "$NOTES_FILE"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-      
-      - name: GitHub Release 생성 및 APK 업로드
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ steps.create_tag.outputs.tag_name }}
-          name: ${{ steps.create_tag.outputs.release_name }}
-          body: |
-            ## Android APK 빌드
-            
-            **빌드 번호**: ${{ steps.build_number.outputs.build_number }}
-            **버전**: ${{ steps.build_number.outputs.version_name }}
-            **커밋**: ${{ github.sha }}
-            
-            ### 변경사항
-            ${{ steps.release_notes.outputs.body }}
-            
-            ### 설치 방법
-            1. APK 파일을 Android 기기에 다운로드
-            2. 설치 허용 (출처를 알 수 없는 앱 설치 허용 필요)
-            3. 앱 실행
-          files: |
-            ${{ env.renamed_apk }}
-            ${{ env.latest_apk }}
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 릴리즈 자산 업로드 검증 및 요약
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
         run: |
           set -euo pipefail
+          ./gradlew assembleRelease --no-daemon -PversionCode="$VERSION_CODE" -PversionName="$VERSION_NAME"
 
-          TAG="${{ steps.create_tag.outputs.tag_name }}"
-          ASSET_NAME="${{ env.apk_name }}"
-          LATEST_ASSET_NAME="android-latest.apk"
+      - name: APK 서명 인증서 검증
+        working-directory: mobile/android/native-app
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          APK_PATH="app/build/outputs/apk/release/app-release.apk"
+          KEYSTORE_PATH="$(pwd)/hocg-release.jks"
 
-          RELEASE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}")"
-          RELEASE_URL="$(echo "$RELEASE_JSON" | jq -r '.html_url')"
-          APK_URL="$(echo "$RELEASE_JSON" | jq -r --arg n "$ASSET_NAME" '.assets[] | select(.name == $n) | .browser_download_url')"
-          LATEST_URL="$(echo "$RELEASE_JSON" | jq -r --arg n "$LATEST_ASSET_NAME" '.assets[] | select(.name == $n) | .browser_download_url')"
-
-          if [ -z "$APK_URL" ] || [ "$APK_URL" = "null" ]; then
-            echo "❌ 릴리즈에 빌드 APK가 업로드되지 않았습니다: $ASSET_NAME"
+          KEYSTORE_CERT_SHA256="$(keytool -list -v -keystore "$KEYSTORE_PATH" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" 2>/dev/null | awk -F': ' '/SHA256:/{gsub(" ", "", $2); print toupper($2); exit}')"
+          if [ -z "$KEYSTORE_CERT_SHA256" ]; then
+            echo "❌ GitHub Secret 키스토어 인증서 지문을 읽지 못했습니다."
             exit 1
           fi
 
-          if [ -z "$LATEST_URL" ] || [ "$LATEST_URL" = "null" ]; then
-            echo "❌ 릴리즈에 최신 APK가 업로드되지 않았습니다: $LATEST_ASSET_NAME"
+          APKSIGNER="$(find "${ANDROID_HOME}/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          if [ -z "$APKSIGNER" ]; then
+            echo "❌ apksigner를 찾지 못했습니다."
+            exit 1
+          fi
+
+          APK_CERT_SHA256="$($APKSIGNER verify --print-certs "$APK_PATH" | awk -F': ' '/Signer #1 certificate SHA-256 digest:/{gsub(" ", "", $2); print toupper($2); exit}')"
+          if [ -z "$APK_CERT_SHA256" ]; then
+            echo "❌ APK 서명 인증서 지문을 읽지 못했습니다."
+            exit 1
+          fi
+
+          if [ "$APK_CERT_SHA256" != "$KEYSTORE_CERT_SHA256" ]; then
+            echo "❌ APK 서명 인증서가 GitHub Secret 키스토어 인증서와 다릅니다."
+            exit 1
+          fi
+
+          echo "✅ APK 서명 인증서가 GitHub Secret 키스토어 인증서와 일치합니다."
+
+      - name: 릴리즈 업로드 파일 준비
+        working-directory: mobile/android/native-app
+        run: |
+          set -euo pipefail
+          APK_PATH="app/build/outputs/apk/release/app-release.apk"
+          if [ ! -s "$APK_PATH" ]; then
+            echo "❌ Release APK가 생성되지 않았습니다: $APK_PATH"
+            exit 1
+          fi
+          cp "$APK_PATH" app-release.apk
+          jq '.tag = "install_file1" | .apkUrl = "https://github.com/SmallTyrant/hololive_OCG_helper/releases/download/install_file1/app-release.apk"' version.json > version.release.json
+          mv version.release.json version.json
+          ls -lh app-release.apk version.json
+          echo "apk_path=mobile/android/native-app/app-release.apk" >> "$GITHUB_ENV"
+          echo "version_json_path=mobile/android/native-app/version.json" >> "$GITHUB_ENV"
+
+      - name: install_file1 릴리즈 준비
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view install_file1 >/dev/null 2>&1; then
+            gh release edit install_file1 \
+              --title "Android 설치 파일" \
+              --notes "현재 Android 배포 인증서로 서명된 최신 APK 1개만 유지합니다. DB는 앱에 번들하지 않고 DB 릴리즈에서 다운로드합니다."
+          else
+            gh release create install_file1 \
+              --title "Android 설치 파일" \
+              --notes "현재 Android 배포 인증서로 서명된 최신 APK 1개만 유지합니다. DB는 앱에 번들하지 않고 DB 릴리즈에서 다운로드합니다."
+          fi
+
+      - name: 기존 릴리즈 자산 정리
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/install_file1" \
+            --jq '.assets[] | select(.name != "app-release.apk" and .name != "version.json") | [.id, .name] | @tsv' |
+          while IFS=$'\t' read -r asset_id asset_name; do
+            [ -n "$asset_id" ] || continue
+            echo "Deleting stale release asset: $asset_name"
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
+          done
+
+      - name: 단일 APK 및 version.json 업로드
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload install_file1 \
+            "${{ env.apk_path }}" \
+            "${{ env.version_json_path }}" \
+            --clobber
+
+      - name: 릴리즈 자산 검증 및 요약
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RELEASE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/install_file1")"
+          RELEASE_URL="$(echo "$RELEASE_JSON" | jq -r '.html_url')"
+          APK_COUNT="$(echo "$RELEASE_JSON" | jq '[.assets[] | select(.name | endswith(".apk"))] | length')"
+          APK_URL="$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name == "app-release.apk") | .browser_download_url')"
+          VERSION_JSON_URL="$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name == "version.json") | .browser_download_url')"
+
+          if [ "$APK_COUNT" != "1" ]; then
+            echo "❌ install_file1 릴리즈에는 APK가 1개만 있어야 합니다. 현재: $APK_COUNT"
+            exit 1
+          fi
+          if [ -z "$APK_URL" ] || [ "$APK_URL" = "null" ]; then
+            echo "❌ app-release.apk 업로드 검증 실패"
+            exit 1
+          fi
+          if [ -z "$VERSION_JSON_URL" ] || [ "$VERSION_JSON_URL" = "null" ]; then
+            echo "❌ version.json 업로드 검증 실패"
             exit 1
           fi
 
           {
             echo "## Android Release 결과"
             echo ""
-            echo "- 태그: \\`$TAG\\`"
+            echo "- 태그: \`install_file1\`"
             echo "- 릴리즈: $RELEASE_URL"
-            echo "- 빌드 APK: [$ASSET_NAME]($APK_URL)"
-            echo "- 최신 APK: [$LATEST_ASSET_NAME]($LATEST_URL)"
+            echo "- APK: [app-release.apk]($APK_URL)"
+            echo "- version.json: [version.json]($VERSION_JSON_URL)"
+            echo "- versionName: ${{ steps.version.outputs.version_name }}"
+            echo "- versionCode: ${{ steps.version.outputs.version_code }}"
           } >> "$GITHUB_STEP_SUMMARY"
-      
+
       - name: APK 아티팩트 업로드
         uses: actions/upload-artifact@v4
         with:
-          name: android-apk-${{ github.run_number }}
+          name: android-release-apk-${{ steps.version.outputs.version_code }}
           path: |
-            ${{ env.renamed_apk }}
-            ${{ env.latest_apk }}
+            ${{ env.apk_path }}
+            ${{ env.version_json_path }}
           retention-days: 30

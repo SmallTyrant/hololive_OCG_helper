@@ -31,3 +31,11 @@ CLAUDE.md
 *.txt
 *.png
 *.webp
+.omx/
+# Android signing materials
+*.jks
+*.keystore
+keystore.properties
+mobile/android/native-app/keystore.properties
+
+.worktrees/

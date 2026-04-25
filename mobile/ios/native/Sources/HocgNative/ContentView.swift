@@ -200,6 +200,7 @@ private enum DetailTextLanguage {
 struct ContentView: View {
     @StateObject private var viewModel = HocgViewModel()
     @State private var showingMenu = false
+    @State private var imageExpanded = false
     @State private var koExpanded = true
     @State private var jaExpanded = false
     @State private var showingDeckList = false
@@ -1365,17 +1366,17 @@ struct ContentView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let isMobileLayout = geo.size.width < 900
-
             ZStack(alignment: .top) {
                 if showingDeckList {
                     deckListLayout
                 } else if showingDeckEditor {
                     deckEditorLayout
-                } else if isMobileLayout {
-                    mobileLayout(screenHeight: geo.size.height)
                 } else {
-                    desktopLayout()
+                    mobileLayout(screenHeight: geo.size.height)
+                }
+
+                if imageExpanded {
+                    expandedImageOverlay
                 }
 
                 if let toast = deckToastMessage ?? viewModel.toastMessage {
@@ -1395,14 +1396,8 @@ struct ContentView: View {
                 },
                 including: .all
             )
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 0).onChanged { _ in
-                    dismissKeyboard()
-                },
-                including: .all
-            )
             .sheet(isPresented: Binding(
-                get: { showingMenu && isMobileLayout },
+                get: { showingMenu },
                 set: { showingMenu = $0 }
             )) {
                 MenuSheet(
@@ -1686,19 +1681,11 @@ struct ContentView: View {
                     .textFieldStyle(.roundedBorder)
                     .disabled(viewModel.state.updateRunning)
 
-                    Button {
-                        openDeckBuilder()
-                    } label: {
-                        Text("덱빌딩")
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 6)
-                            .background(Color.blue.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(viewModel.state.updateRunning)
+                    ModernActionButton("덱빌딩", compact: true, action: openDeckBuilder)
+                        .disabled(viewModel.state.updateRunning)
 
                     Button {
+                        dismissKeyboard()
                         showingMenu = true
                     } label: {
                         Image(systemName: "line.3.horizontal")
@@ -1721,11 +1708,9 @@ struct ContentView: View {
                     Text("이미지")
                         .font(.headline)
                     Spacer()
-                    Button(viewModel.state.imageCollapsed ? "이미지 펼치기" : "이미지 접기") {
+                    ModernActionButton(viewModel.state.imageCollapsed ? "이미지 펼치기" : "이미지 접기", compact: true) {
                         viewModel.onToggleImagePanel()
                     }
-                    .buttonStyle(.plain)
-                    .foregroundColor(.blue)
                 }
 
                 if viewModel.state.imageCollapsed {
@@ -1750,79 +1735,6 @@ struct ContentView: View {
         }
     }
 
-    private func desktopLayout() -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                TextField(
-                    "DB",
-                    text: .constant(viewModel.state.dbPath)
-                )
-                .textFieldStyle(.roundedBorder)
-                .disabled(true)
-
-                if viewModel.state.updateRunning {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-            }
-
-            HStack(spacing: 8) {
-                TextField(
-                    "카드번호 / 이름 / 태그 / 한국어 본문 검색",
-                    text: Binding(
-                        get: { viewModel.state.searchQuery },
-                        set: { viewModel.onSearchQueryChanged($0) }
-                    )
-                )
-                .textFieldStyle(.roundedBorder)
-                .disabled(viewModel.state.updateRunning)
-
-                Button("덱빌딩") {
-                    openDeckBuilder()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(viewModel.state.updateRunning)
-            }
-
-            updateStatusBlock
-            Divider()
-
-            GeometryReader { bodyGeo in
-                let totalWidth = max(bodyGeo.size.width - 2, 0)
-                let leftWidth = totalWidth * (3.0 / 13.0)
-                let middleWidth = totalWidth * (6.0 / 13.0)
-                let rightWidth = totalWidth * (4.0 / 13.0)
-
-                HStack(spacing: 0) {
-                    desktopColumn(title: "목록", width: leftWidth) {
-                        resultsList
-                    }
-
-                    Rectangle()
-                        .fill(Color.secondary.opacity(0.35))
-                        .frame(width: 1)
-
-                    desktopColumn(title: "이미지", width: middleWidth) {
-                        VStack(spacing: 8) {
-                            searchRaritySelector
-                            imagePanel
-                        }
-                    }
-
-                    Rectangle()
-                        .fill(Color.secondary.opacity(0.35))
-                        .frame(width: 1)
-
-                    desktopColumn(title: "효과", width: rightWidth) {
-                        detailPanel(scrollable: true)
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-    }
-
     private var updateStatusBlock: some View {
         VStack(alignment: .leading, spacing: 8) {
             if !viewModel.state.updateStatus.isEmpty {
@@ -1841,22 +1753,6 @@ struct ContentView: View {
                     .background(Color.red.opacity(0.13), in: RoundedRectangle(cornerRadius: 12))
             }
         }
-    }
-
-    private func desktopColumn<Content: View>(title: String, width: CGFloat, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(title)
-                .font(.headline)
-                .padding(.leading, 10)
-                .padding(.top, 4)
-
-            panel(height: nil, fillHeight: true) {
-                content()
-            }
-            .frame(maxHeight: .infinity)
-        }
-        .frame(width: width, alignment: .topLeading)
-        .frame(maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var resultsList: some View {
@@ -1896,8 +1792,50 @@ struct ContentView: View {
         }
     }
 
-    @ViewBuilder
     private var imagePanel: some View {
+        cardImageContent
+            .contentShape(Rectangle())
+            .onTapGesture { imageExpanded = true }
+            .simultaneousGesture(raritySwipeGesture)
+    }
+
+    private var expandedImageOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.92)
+                .ignoresSafeArea()
+
+            cardImageContent
+                .padding(16)
+                .contentShape(Rectangle())
+                .onTapGesture { imageExpanded = false }
+                .simultaneousGesture(raritySwipeGesture)
+        }
+        .zIndex(10)
+    }
+
+    private var raritySwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onEnded { value in
+                if value.translation.width <= -48 {
+                    selectAdjacentIllustration(direction: 1)
+                } else if value.translation.width >= 48 {
+                    selectAdjacentIllustration(direction: -1)
+                }
+            }
+    }
+
+    private func selectAdjacentIllustration(direction: Int) {
+        let options = viewModel.state.selectedIllustrations
+        guard options.count > 1, direction != 0 else { return }
+        let currentIndex = options.firstIndex { $0.rarity == viewModel.state.selectedRarity } ?? 0
+        let nextIndex = (currentIndex + direction).positiveModulo(options.count)
+        let option = options[nextIndex]
+        let imageURL = option.imageUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? viewModel.state.selectedImageUrl : option.imageUrl
+        viewModel.onSelectIllustration(rarity: option.rarity, imageURL: imageURL)
+    }
+
+    @ViewBuilder
+    private var cardImageContent: some View {
         switch viewModel.state.imageState {
         case .loading:
             VStack(spacing: 8) {
@@ -2580,21 +2518,25 @@ struct ContentView: View {
 
     private var deckListLayout: some View {
         VStack(spacing: 8) {
-            HStack {
-                Button("뒤로") { showingDeckList = false }
-                Button("가져오기") {
-                    deckImportText = ""
-                    showingDeckImportSheet = true
+            ZStack {
+                HStack(spacing: 8) {
+                    ModernActionButton("뒤로", compact: true) { showingDeckList = false }
+                    ModernActionButton("가져오기", compact: true) {
+                        deckImportText = ""
+                        showingDeckImportSheet = true
+                    }
+                    Spacer()
+                    ModernIconButton(systemName: "plus", accessibilityLabel: "덱 추가") {
+                        deckTitle = "새 덱"
+                        deckEntries = []
+                        editingDeckID = nil
+                        openDeckBuilder()
+                    }
                 }
-                Spacer()
-                Text("덱 리스트").font(.headline)
-                Spacer()
-                Button {
-                    deckTitle = "새 덱"
-                    deckEntries = []
-                    editingDeckID = nil
-                    openDeckBuilder()
-                } label: { Image(systemName: "plus") }
+                Text("덱 리스트")
+                    .font(.headline.weight(.bold))
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .allowsHitTesting(false)
             }
             List {
                 ForEach(savedDecks) { deck in
@@ -2658,14 +2600,14 @@ struct ContentView: View {
 
     private var deckEditorLayout: some View {
         VStack(spacing: 8) {
-            HStack {
-                Button("취소") { showingDeckEditor = false }
+            HStack(spacing: 8) {
+                ModernActionButton("취소", compact: true) { showingDeckEditor = false }
                 TextField("덱 이름", text: $deckTitle).textFieldStyle(.roundedBorder)
-                Button("덱 목록") {
+                ModernActionButton("덱 목록", compact: true) {
                     showingDeckEditor = false
                     showingDeckList = true
                 }
-                Button("저장") {
+                ModernActionButton("저장", compact: true) {
                     let normalized = deckEntries
                         .filter { $0.qty > 0 }
                         .map {
@@ -2901,13 +2843,15 @@ private struct MenuSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    Button("이미지 일괄 다운로드 (오프라인)") {
+                    ModernActionButton("이미지 일괄 다운로드 (오프라인)", maxWidth: true) {
                         onBulkImageDownload()
                     }
                     .disabled(state.updateRunning)
+                    .listRowBackground(Color.clear)
 
-                    Button("DB 수동갱신", action: onManualUpdate)
+                    ModernActionButton("DB 수동갱신", maxWidth: true, action: onManualUpdate)
                         .disabled(state.updateRunning)
+                        .listRowBackground(Color.clear)
                 }
 
                 Section("테마") {
@@ -3075,6 +3019,62 @@ private struct RarityOptionCell: View {
     }
 }
 
+
+private struct ModernActionButton: View {
+    let title: String
+    var compact: Bool = false
+    var maxWidth: Bool = false
+    let action: () -> Void
+
+    init(_ title: String, compact: Bool = false, maxWidth: Bool = false, action: @escaping () -> Void) {
+        self.title = title
+        self.compact = compact
+        self.maxWidth = maxWidth
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font((compact ? Font.caption : Font.subheadline).weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+                .foregroundColor(.white)
+                .padding(.horizontal, compact ? 10 : 14)
+                .padding(.vertical, compact ? 7 : 10)
+                .frame(maxWidth: maxWidth ? .infinity : nil)
+                .background(Color.blue.opacity(0.22), in: RoundedRectangle(cornerRadius: compact ? 9 : 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: compact ? 9 : 12, style: .continuous)
+                        .stroke(Color.blue.opacity(0.20), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct ModernIconButton: View {
+    let systemName: String
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.headline.weight(.semibold))
+                .foregroundColor(.white)
+                .frame(width: 34, height: 34)
+                .background(Color.blue.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.blue.opacity(0.20), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
 private struct ActivityShareSheet: UIViewControllerRepresentable {
     let activityItems: [Any]
 
@@ -3083,4 +3083,10 @@ private struct ActivityShareSheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+private extension Int {
+    func positiveModulo(_ modulus: Int) -> Int {
+        ((self % modulus) + modulus) % modulus
+    }
 }

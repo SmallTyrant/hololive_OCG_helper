@@ -4,7 +4,6 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Intent
-import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -23,6 +22,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -101,6 +102,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.text.input.ImeAction
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.graphics.drawable.toBitmap
@@ -114,6 +117,7 @@ import com.smalltyrant.hocgh.data.DeckStorage
 import com.smalltyrant.hocgh.data.DbRepository
 import com.smalltyrant.hocgh.model.DeckEntryRecord
 import com.smalltyrant.hocgh.model.HocgUiState
+import com.smalltyrant.hocgh.model.IllustrationOption
 import com.smalltyrant.hocgh.model.ImageState
 import com.smalltyrant.hocgh.model.DeckLibraryRecord
 import com.smalltyrant.hocgh.model.PrintRow
@@ -942,10 +946,6 @@ fun HocgScreen(
     onPreferredLanguageChange: (PreferredLanguage) -> Unit,
 ) {
     val state = viewModel.state
-    val config = androidx.compose.ui.platform.LocalConfiguration.current
-    val forceDesktopLandscape =
-        config.orientation == Configuration.ORIENTATION_LANDSCAPE && config.screenWidthDp < 900
-    val isMobileLayout = config.screenWidthDp < 900 && !forceDesktopLandscape
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
 
@@ -1563,11 +1563,9 @@ fun HocgScreen(
     }
 
     ModalNavigationDrawer(
-        modifier = Modifier
-            .fillMaxSize()
-            .clearFocusOnTap(focusManager),
+        modifier = Modifier.fillMaxSize(),
         drawerState = drawerState,
-        gesturesEnabled = isMobileLayout || forceDesktopLandscape,
+        gesturesEnabled = true,
         drawerContent = {
             ModalDrawerSheet {
                 Column(
@@ -1639,6 +1637,9 @@ fun HocgScreen(
         },
     ) {
         Scaffold(
+            modifier = Modifier
+                .fillMaxSize()
+                .clearFocusOnTap(focusManager),
             snackbarHost = { SnackbarHost(snackbarHostState) },
         ) { innerPadding ->
             if (showDeckList) {
@@ -1820,7 +1821,7 @@ fun HocgScreen(
                         decreaseDeckEntryByPrintId(deckDraft, printId)
                     },
                 )
-            } else if (isMobileLayout) {
+            } else {
                 MobileLayout(
                     state = state,
                     innerPadding = innerPadding,
@@ -1831,22 +1832,6 @@ fun HocgScreen(
                     onSelectPrint = viewModel::onSelectPrint,
                     onSelectIllustration = viewModel::onSelectIllustration,
                     onToggleImagePanel = viewModel::onToggleImagePanel,
-                    preferredLanguage = preferredLanguage,
-                    multiWordTags = viewModel.multiWordTags,
-                )
-            } else {
-                DesktopLayout(
-                    state = state,
-                    innerPadding = innerPadding,
-                    onSearchQueryChanged = viewModel::onSearchQueryChanged,
-                    onOpenDeckBuilder = openDeckBuilder,
-                    onDismissKeyboard = { focusManager.clearFocus() },
-                    onOpenMenu = { scope.launch { drawerState.open() } },
-                    showMenuButton = forceDesktopLandscape,
-                    keepSearchBarTop = forceDesktopLandscape,
-                    twoPaneLandscape = forceDesktopLandscape,
-                    onSelectPrint = viewModel::onSelectPrint,
-                    onSelectIllustration = viewModel::onSelectIllustration,
                     preferredLanguage = preferredLanguage,
                     multiWordTags = viewModel.multiWordTags,
                 )
@@ -1874,13 +1859,26 @@ private fun DeckListScreen(
         modifier = Modifier.fillMaxSize().padding(innerPadding).padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("취소") }
-            Text("덱 리스트", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onImport) { Text("가져오기") }
-                IconButton(onClick = onAdd) { Icon(Icons.Default.Add, contentDescription = "추가") }
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    ModernActionButton(text = "취소", onClick = onBack)
+                    ModernActionButton(text = "가져오기", onClick = onImport)
+                }
+                ModernIconActionButton(onClick = onAdd) {
+                    Icon(Icons.Default.Add, contentDescription = "추가", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
             }
+            Text(
+                "덱 리스트",
+                modifier = Modifier.align(Alignment.Center),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(decks.indices.toList(), key = { decks[it].id }) { idx ->
@@ -2035,11 +2033,15 @@ private fun DeckEditorScreen(
     val main = entries.filter { !isOshi(it.card) && !isYell(it.card) }.sumOf { it.qty }
     val total = entries.sumOf { it.qty }
     Column(modifier = Modifier.fillMaxSize().padding(innerPadding).padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onCancel) { Text("취소") }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ModernActionButton(text = "취소", onClick = onCancel)
             OutlinedTextField(value = title, onValueChange = onTitleChange, singleLine = true, modifier = Modifier.weight(1f), label = { Text("덱 이름") })
-            TextButton(onClick = onOpenDeckList) { Text("덱 목록") }
-            TextButton(onClick = onSave) { Text("저장") }
+            ModernActionButton(text = "덱 목록", onClick = onOpenDeckList)
+            ModernActionButton(text = "저장", onClick = onSave)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("오시 $oshi/1")
@@ -2168,6 +2170,59 @@ private fun DeckEditorScreen(
     }
 }
 
+
+@Composable
+private fun ModernActionButton(
+    text: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier,
+) {
+    val alpha = if (enabled) 1f else 0.45f
+    Box(
+        modifier = modifier
+            .alpha(alpha)
+            .clip(RoundedCornerShape(9.dp))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f))
+            .border(
+                BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
+                RoundedCornerShape(9.dp),
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun ModernIconActionButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .size(36.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f))
+            .border(
+                BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
+                RoundedCornerShape(10.dp),
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+        content = content,
+    )
+}
+
 @Composable
 private fun MobileLayout(
     state: HocgUiState,
@@ -2184,15 +2239,28 @@ private fun MobileLayout(
 ) {
     val listHeight = snappedListHeightDp(scaledHeightDp(ratio = 0.30f, minPx = 190, maxPx = 360))
     val imageHeight = scaledHeightDp(ratio = 0.45f, minPx = 240, maxPx = 560)
+    var imageExpanded by rememberSaveable { mutableStateOf(false) }
+    val selectAdjacentRarity = remember(state.selectedRarity, state.selectedImageUrl, state.selectedIllustrations) {
+        { direction: Int ->
+            selectAdjacentIllustration(
+                selectedRarity = state.selectedRarity,
+                illustrations = state.selectedIllustrations,
+                fallbackImageUrl = state.selectedImageUrl,
+                direction = direction,
+                onSelect = onSelectIllustration,
+            )
+        }
+    }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(innerPadding)
-            .padding(horizontal = 10.dp, vertical = 6.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2207,15 +2275,14 @@ private fun MobileLayout(
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { onDismissKeyboard() }),
             )
-            TextButton(
+            ModernActionButton(
+                text = "덱빌딩",
                 onClick = {
                     onDismissKeyboard()
                     onOpenDeckBuilder()
                 },
                 enabled = !state.updateRunning,
-            ) {
-                Text("덱빌딩")
-            }
+            )
             IconButton(
                 onClick = {
                     onDismissKeyboard()
@@ -2251,9 +2318,10 @@ private fun MobileLayout(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text("이미지", style = MaterialTheme.typography.titleSmall)
-            TextButton(onClick = onToggleImagePanel) {
-                Text(if (state.imageCollapsed) "이미지 펼치기" else "이미지 접기")
-            }
+            ModernActionButton(
+                text = if (state.imageCollapsed) "이미지 펼치기" else "이미지 접기",
+                onClick = onToggleImagePanel,
+            )
         }
 
         if (state.imageCollapsed) {
@@ -2270,7 +2338,11 @@ private fun MobileLayout(
                     .fillMaxWidth()
                     .height(imageHeight),
             ) {
-                ImagePanel(state.imageState)
+                ImagePanel(
+                    imageState = state.imageState,
+                    onTap = { imageExpanded = true },
+                    onSwipeRarity = selectAdjacentRarity,
+                )
             }
         }
 
@@ -2285,230 +2357,29 @@ private fun MobileLayout(
                 multiWordTags = multiWordTags,
             )
         }
+
+        if (imageExpanded) {
+            Dialog(
+                onDismissRequest = { imageExpanded = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.92f))
+                        .padding(16.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    ImagePanel(
+                        imageState = state.imageState,
+                        onTap = { imageExpanded = false },
+                        onSwipeRarity = selectAdjacentRarity,
+                    )
+                }
+            }
+        }
     }
 }
-
-@Composable
-private fun DesktopLayout(
-    state: HocgUiState,
-    innerPadding: androidx.compose.foundation.layout.PaddingValues,
-    onSearchQueryChanged: (String) -> Unit,
-    onOpenDeckBuilder: () -> Unit,
-    onDismissKeyboard: () -> Unit,
-    onOpenMenu: () -> Unit,
-    showMenuButton: Boolean,
-    keepSearchBarTop: Boolean,
-    twoPaneLandscape: Boolean,
-    onSelectPrint: (Long) -> Unit,
-    onSelectIllustration: (String, String) -> Unit,
-    preferredLanguage: PreferredLanguage,
-    multiWordTags: List<String> = emptyList(),
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(innerPadding)
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        if (keepSearchBarTop) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                OutlinedTextField(
-                    modifier = Modifier.weight(1f),
-                    value = state.searchQuery,
-                    onValueChange = onSearchQueryChanged,
-                    label = { Text("카드번호 / 이름 / 태그 / 한국어 본문 검색") },
-                    enabled = !state.updateRunning,
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { onDismissKeyboard() }),
-                )
-                TextButton(
-                    onClick = {
-                        onDismissKeyboard()
-                        onOpenDeckBuilder()
-                    },
-                    enabled = !state.updateRunning,
-                ) {
-                    Text("덱빌딩")
-                }
-                if (state.updateRunning) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp,
-                    )
-                }
-                if (showMenuButton) {
-                    IconButton(
-                        onClick = {
-                            onDismissKeyboard()
-                            onOpenMenu()
-                        },
-                        enabled = !state.updateRunning,
-                    ) {
-                        Icon(Icons.Default.Menu, contentDescription = "메뉴")
-                    }
-                }
-            }
-            if (state.dbPath.isNotBlank()) {
-                Text(
-                    text = "DB: ${state.dbPath}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.outline,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        } else {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                OutlinedTextField(
-                    modifier = Modifier.weight(1f),
-                    value = state.dbPath,
-                    onValueChange = {},
-                    readOnly = true,
-                    enabled = !state.updateRunning,
-                    label = { Text("DB") },
-                    singleLine = true,
-                )
-                if (state.updateRunning) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp,
-                    )
-                }
-            }
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                OutlinedTextField(
-                    modifier = Modifier.weight(1f),
-                    value = state.searchQuery,
-                    onValueChange = onSearchQueryChanged,
-                    label = { Text("카드번호 / 이름 / 태그 / 한국어 본문 검색") },
-                    enabled = !state.updateRunning,
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { onDismissKeyboard() }),
-                )
-                TextButton(
-                    onClick = {
-                        onDismissKeyboard()
-                        onOpenDeckBuilder()
-                    },
-                    enabled = !state.updateRunning,
-                ) {
-                    Text("덱빌딩")
-                }
-                if (showMenuButton) {
-                    IconButton(
-                        onClick = {
-                            onDismissKeyboard()
-                            onOpenMenu()
-                        },
-                        enabled = !state.updateRunning,
-                    ) {
-                        Icon(Icons.Default.Menu, contentDescription = "메뉴")
-                    }
-                }
-            }
-        }
-
-        UpdateStatusBlock(state)
-        HorizontalDivider()
-
-        if (twoPaneLandscape) {
-            Row(modifier = Modifier.fillMaxSize()) {
-                Column(modifier = Modifier.weight(4f).fillMaxSize()) {
-                    Text("목록", modifier = Modifier.padding(start = 10.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall)
-                    Panel(modifier = Modifier.fillMaxSize()) {
-                        ResultsList(state = state, onSelect = onSelectPrint, preferredLanguage = preferredLanguage, multiWordTags = multiWordTags)
-                    }
-                }
-
-                VerticalDivider(modifier = Modifier.width(1.dp))
-
-                Column(
-                    modifier = Modifier.weight(7f).fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Column(modifier = Modifier.weight(6f).fillMaxWidth()) {
-                        Text("이미지", modifier = Modifier.padding(start = 10.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall)
-                        SearchRaritySelector(
-                            selectedRarity = state.selectedRarity,
-                            illustrations = state.selectedIllustrations,
-                            fallbackImageUrl = state.selectedImageUrl,
-                            onSelect = onSelectIllustration,
-                        )
-                        Panel(modifier = Modifier.fillMaxSize()) {
-                            ImagePanel(state.imageState)
-                        }
-                    }
-
-                    Column(modifier = Modifier.weight(4f).fillMaxWidth()) {
-                        Text("효과", modifier = Modifier.padding(start = 10.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall)
-                        Panel(modifier = Modifier.fillMaxSize()) {
-                            DetailPanel(
-                                koText = state.detailKoText,
-                                jaText = state.detailJaText,
-                                detailLoading = state.detailLoading,
-                                preferredLanguage = preferredLanguage,
-                                scrollable = true,
-                                multiWordTags = multiWordTags,
-                            )
-                        }
-                    }
-                }
-            }
-        } else {
-            Row(modifier = Modifier.fillMaxSize()) {
-                Column(modifier = Modifier.weight(3f)) {
-                    Text("목록", modifier = Modifier.padding(start = 10.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall)
-                    Panel(modifier = Modifier.fillMaxSize()) {
-                        ResultsList(state = state, onSelect = onSelectPrint, preferredLanguage = preferredLanguage, multiWordTags = multiWordTags)
-                    }
-                }
-
-                VerticalDivider(modifier = Modifier.width(1.dp))
-
-                Column(modifier = Modifier.weight(6f)) {
-                    Text("이미지", modifier = Modifier.padding(start = 10.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall)
-                    SearchRaritySelector(
-                        selectedRarity = state.selectedRarity,
-                        illustrations = state.selectedIllustrations,
-                        fallbackImageUrl = state.selectedImageUrl,
-                        onSelect = onSelectIllustration,
-                    )
-                    Panel(modifier = Modifier.fillMaxSize()) {
-                        ImagePanel(state.imageState)
-                    }
-                }
-
-                VerticalDivider(modifier = Modifier.width(1.dp))
-
-                Column(modifier = Modifier.weight(4f)) {
-                    Text("효과", modifier = Modifier.padding(start = 10.dp, top = 4.dp), style = MaterialTheme.typography.titleSmall)
-                    Panel(modifier = Modifier.fillMaxSize()) {
-                        DetailPanel(
-                            koText = state.detailKoText,
-                            jaText = state.detailJaText,
-                            detailLoading = state.detailLoading,
-                            preferredLanguage = preferredLanguage,
-                            scrollable = true,
-                            multiWordTags = multiWordTags,
-                        )
-                    }
-                }
-            }
-        }
-    }
 }
 
 @Composable
@@ -2624,15 +2495,71 @@ private fun ResultItem(row: PrintRow, selected: Boolean, onClick: () -> Unit, pr
     }
 }
 
+private fun selectAdjacentIllustration(
+    selectedRarity: String,
+    illustrations: List<IllustrationOption>,
+    fallbackImageUrl: String,
+    direction: Int,
+    onSelect: (String, String) -> Unit,
+) {
+    if (illustrations.size <= 1 || direction == 0) return
+    val currentIndex = illustrations.indexOfFirst { it.rarity == selectedRarity }.takeIf { it >= 0 } ?: 0
+    val nextIndex = (currentIndex + direction).floorMod(illustrations.size)
+    val option = illustrations[nextIndex]
+    val imageUrl = option.imageUrl.trim().ifEmpty { fallbackImageUrl }
+    onSelect(option.rarity, imageUrl)
+}
+
+private fun Int.floorMod(modulus: Int): Int = ((this % modulus) + modulus) % modulus
+
 @Composable
-private fun ImagePanel(imageState: ImageState) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+private fun ImagePanel(
+    imageState: ImageState,
+    onTap: (() -> Unit)? = null,
+    onSwipeRarity: ((Int) -> Unit)? = null,
+) {
+    var totalHorizontalDrag by remember { mutableStateOf(0f) }
+    val gestureModifier = Modifier
+        .fillMaxSize()
+        .then(
+            if (onSwipeRarity == null) {
+                Modifier
+            } else {
+                Modifier.pointerInput(onSwipeRarity) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { totalHorizontalDrag = 0f },
+                        onHorizontalDrag = { change, dragAmount ->
+                            totalHorizontalDrag += dragAmount
+                            change.consume()
+                        },
+                        onDragEnd = {
+                            when {
+                                totalHorizontalDrag <= -48f -> onSwipeRarity(1)
+                                totalHorizontalDrag >= 48f -> onSwipeRarity(-1)
+                            }
+                            totalHorizontalDrag = 0f
+                        },
+                        onDragCancel = { totalHorizontalDrag = 0f },
+                    )
+                }
+            },
+        )
+        .then(
+            if (onTap == null) {
+                Modifier
+            } else {
+                Modifier.pointerInput(onTap) { detectTapGestures(onTap = { onTap() }) }
+            },
+        )
+
+    Box(modifier = gestureModifier, contentAlignment = Alignment.Center) {
         when (imageState) {
             is ImageState.Local -> {
                 AsyncImage(
                     model = imageState.file,
                     contentDescription = "카드 이미지",
                     modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
                 )
             }
 
@@ -2641,6 +2568,7 @@ private fun ImagePanel(imageState: ImageState) {
                     model = imageState.url,
                     contentDescription = "카드 이미지",
                     modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
                 )
             }
 

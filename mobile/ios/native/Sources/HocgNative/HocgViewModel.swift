@@ -1,9 +1,8 @@
 import Foundation
 
-private let dbMissingToast = "DB파일이 존재하지 않습니다. 메뉴에서 DB 수동갱신을 실행해주세요"
+private let dbMissingToast = "DB파일이 없습니다. 네트워크 연결 후 메뉴에서 DB 수동갱신을 실행해주세요"
 private let dbUpdatingToast = "갱신중..."
 private let dbUpdatedToast = "갱신완료"
-private let dbRestoredToast = "번들 DB 복원완료"
 private let bulkImageMaxConcurrency = 10
 private let bulkImageRetryCount = 1
 private let detailPrefetchLimit = 20
@@ -139,26 +138,11 @@ final class HocgViewModel: ObservableObject {
                 state.updateStatusError = true
                 pushToast(message)
 
-                let recovered = await runIO {
-                    let missingBeforeRecover = self.dbRepository.needsDbUpdate()
-                    guard missingBeforeRecover else {
-                        return false
-                    }
-                    return self.paths.restoreBundledDb() && !self.dbRepository.needsDbUpdate()
+                let stillMissing = await runIO {
+                    self.dbRepository.needsDbUpdate()
                 }
-                if recovered {
-                    state.updateStatus = "DB 복원 완료"
-                    state.updateStatusError = false
-                    state.persistentMessage = nil
-                    pushToast(dbRestoredToast)
-                    refreshList()
-                } else {
-                    let stillMissing = await runIO {
-                        self.dbRepository.needsDbUpdate()
-                    }
-                    if stillMissing {
-                        applyMissingDbState()
-                    }
+                if stillMissing {
+                    applyMissingDbState()
                 }
             }
 

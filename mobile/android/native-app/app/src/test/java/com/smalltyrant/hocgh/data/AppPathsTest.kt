@@ -55,3 +55,14 @@ class AppPathsTest {
         )
     }
 }
+
+@RunWith(RobolectricTestRunner::class)
+class AppPathsBundledDbTest {
+    private val paths = AppPaths(ApplicationProvider.getApplicationContext())
+
+    @Test
+    fun `mobile build does not copy a bundled database`() {
+        assertEquals(false, paths.copyBundledDbIfMissing())
+        assertEquals(false, paths.restoreBundledDb())
+    }
+}

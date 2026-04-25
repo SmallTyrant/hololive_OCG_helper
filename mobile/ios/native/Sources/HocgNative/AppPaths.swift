@@ -54,48 +54,15 @@ final class AppPaths {
         return imageBaseURL.appendingPathComponent(input)
     }
 
+    /// Mobile builds intentionally do not bundle hololive_ocg.sqlite.
+    /// The app creates its private data directory first and downloads the DB
+    /// from the GitHub DB release on first launch/update.
     @discardableResult
-    func copyBundledDbIfMissing() -> Bool {
-        copyBundledDb(forceReplace: false)
-    }
+    func copyBundledDbIfMissing() -> Bool { false }
 
+    /// No bundled DB fallback exists; users recover by downloading the DB again.
     @discardableResult
-    func restoreBundledDb() -> Bool {
-        copyBundledDb(forceReplace: true)
-    }
-
-    @discardableResult
-    private func copyBundledDb(forceReplace: Bool) -> Bool {
-        if fileManager.fileExists(atPath: dbURL.path),
-           let attrs = try? fileManager.attributesOfItem(atPath: dbURL.path),
-           let fileSize = attrs[.size] as? NSNumber,
-           fileSize.intValue > 0,
-           !forceReplace {
-            return false
-        }
-
-        let bundled = Bundle.main.url(forResource: "hololive_ocg", withExtension: "sqlite")
-            ?? Bundle.main.url(forResource: "hololive_ocg", withExtension: "sqlite", subdirectory: "Data")
-        guard let bundled else {
-            return false
-        }
-
-        let temp = dbURL.appendingPathExtension("tmp")
-        do {
-            if fileManager.fileExists(atPath: temp.path) {
-                try fileManager.removeItem(at: temp)
-            }
-            try fileManager.copyItem(at: bundled, to: temp)
-            if fileManager.fileExists(atPath: dbURL.path) {
-                try fileManager.removeItem(at: dbURL)
-            }
-            try fileManager.moveItem(at: temp, to: dbURL)
-            return true
-        } catch {
-            try? fileManager.removeItem(at: temp)
-            return false
-        }
-    }
+    func restoreBundledDb() -> Bool { false }
 
     private func sanitizeCardNumber(_ cardNumber: String) -> String {
         let trimmed = cardNumber.trimmingCharacters(in: .whitespacesAndNewlines)

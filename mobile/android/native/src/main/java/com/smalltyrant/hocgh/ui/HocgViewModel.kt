@@ -32,10 +32,9 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
-private const val DB_MISSING_TOAST = "DB파일이 존재하지 않습니다. 메뉴에서 DB 수동갱신을 실행해주세요"
+private const val DB_MISSING_TOAST = "DB파일이 없습니다. 네트워크 연결 후 메뉴에서 DB 수동갱신을 실행해주세요"
 private const val DB_UPDATING_TOAST = "갱신중..."
 private const val DB_UPDATED_TOAST = "갱신완료"
-private const val DB_RESTORED_TOAST = "번들 DB 복원완료"
 private const val APP_UPDATE_AVAILABLE_TOAST = "앱 업데이트가 있습니다"
 private const val BULK_IMAGE_MAX_CONCURRENCY = 10
 private const val BULK_IMAGE_RETRY_COUNT = 1
@@ -171,28 +170,11 @@ class HocgViewModel(application: Application) : AndroidViewModel(application) {
                 state = state.copy(updateStatus = message, updateStatusError = true)
                 pushToast(message)
 
-                val recovered = withContext(Dispatchers.IO) {
-                    val missingBeforeRecover = dbRepository.needsDbUpdate()
-                    if (!missingBeforeRecover) {
-                        return@withContext false
-                    }
-                    paths.restoreBundledDb() && !dbRepository.needsDbUpdate()
+                val stillMissing = withContext(Dispatchers.IO) {
+                    dbRepository.needsDbUpdate()
                 }
-                if (recovered) {
-                    state = state.copy(
-                        updateStatus = "DB 복원 완료",
-                        updateStatusError = false,
-                        persistentMessage = null,
-                    )
-                    pushToast(DB_RESTORED_TOAST)
-                    refreshList()
-                } else {
-                    val stillMissing = withContext(Dispatchers.IO) {
-                        dbRepository.needsDbUpdate()
-                    }
-                    if (stillMissing) {
-                        applyMissingDbState()
-                    }
+                if (stillMissing) {
+                    applyMissingDbState()
                 }
             } finally {
                 state = state.copy(updateRunning = false)

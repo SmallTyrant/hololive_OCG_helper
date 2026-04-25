@@ -57,13 +57,15 @@ class AppPaths(private val context: Context) {
         }.build().toString()
     }
 
-    fun copyBundledDbIfMissing(): Boolean {
-        return copyBundledDb(forceReplace = false)
-    }
+    /**
+     * Mobile builds intentionally do not bundle hololive_ocg.sqlite.
+     * The app creates its private data directory first and downloads the DB
+     * from the GitHub DB release on first launch/update.
+     */
+    fun copyBundledDbIfMissing(): Boolean = false
 
-    fun restoreBundledDb(): Boolean {
-        return copyBundledDb(forceReplace = true)
-    }
+    /** No bundled DB fallback exists; users recover by downloading the DB again. */
+    fun restoreBundledDb(): Boolean = false
 
     fun hasNetworkConnection(): Boolean {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
@@ -71,29 +73,6 @@ class AppPaths(private val context: Context) {
         val network = cm.activeNetwork ?: return false
         val caps = cm.getNetworkCapabilities(network) ?: return false
         return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-    }
-
-    private fun copyBundledDb(forceReplace: Boolean): Boolean {
-        if (!forceReplace && dbFile.exists() && dbFile.length() > 0) {
-            return false
-        }
-        dbFile.parentFile?.mkdirs()
-        return runCatching {
-            context.assets.open(DB_FILE_NAME).use { input ->
-                val temp = File(dbFile.parentFile, "${dbFile.name}.tmp")
-                if (temp.exists()) {
-                    temp.delete()
-                }
-                temp.outputStream().use { output ->
-                    input.copyTo(output)
-                }
-                if (dbFile.exists()) {
-                    dbFile.delete()
-                }
-                temp.renameTo(dbFile)
-            }
-            true
-        }.getOrDefault(false)
     }
 
     private fun sanitizeCardNumber(cardNumber: String): String {

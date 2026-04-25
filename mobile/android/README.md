@@ -3,7 +3,7 @@
 ## 권장 스택
 - Kotlin
 - Jetpack Compose
-- Room (SQLite prepackaged DB)
+- SQLite 파일 다운로드/로컬 저장
 - Hilt (DI)
 - Kotlin Coroutines / Flow
 
@@ -22,27 +22,11 @@
 ./gradlew bundleRelease
 ```
 
-## DB 포함 (Prepackaged SQLite)
-1. 현재 저장소의 `data/hololive_ocg.sqlite`를 앱 `assets/`에 복사
-2. Room에서 prepackaged DB로 로드
-
-### 예시 (Room DB)
-```kotlin
-@Database(
-    entities = [CardEntity::class, PrintEntity::class, CardTextKoEntity::class],
-    version = 1,
-    exportSchema = false
-)
-abstract class HololiveDb : RoomDatabase() {
-    abstract fun cardDao(): CardDao
-}
-
-fun provideDatabase(context: Context): HololiveDb =
-    Room.databaseBuilder(context, HololiveDb::class.java, "hololive_ocg.sqlite")
-        .createFromAsset("hololive_ocg.sqlite")
-        .fallbackToDestructiveMigration()
-        .build()
-```
+## DB 배포 방식
+- 모바일 앱 빌드에는 `hololive_ocg.sqlite`를 포함하지 않습니다.
+- 최초 실행 시 앱 전용 저장소(`filesDir/hOCG_H/hololive_ocg.sqlite`)를 만들고, GitHub `DB` 릴리즈의 `hololive_ocg.sqlite`를 다운로드합니다.
+- DB 갱신도 같은 GitHub 릴리즈 자산을 내려받아 SHA-256/SQLite 유효성 검증 후 교체하는 흐름을 유지합니다.
+- `app/assets/hololive_ocg.sqlite`는 DB 릴리즈 업로드 소스이며 APK/AAB에 번들하지 않습니다.
 
 ## 기본 화면 흐름 (예시)
 1. 카드 리스트 화면 (필터/검색)
@@ -71,8 +55,8 @@ cd android/kotlin
 gradle assembleDebug
 ```
 
-- 빌드 시 `data/hololive_ocg.sqlite`가 존재하면 자동으로 `assets`에 복사됩니다.
-- 저장소 정책에 따라 DB 파일은 커밋하지 않습니다.
+- 빌드 시 DB 파일을 `assets`에 복사하지 않습니다.
+- 앱은 실행 후 GitHub `DB` 릴리즈에서 DB를 다운로드해 앱 전용 저장소에 저장합니다.
 
 ## Flet 동작 대응 네이티브 소스
 `app/ui.py`와 기능을 맞춘 최신 Kotlin 레퍼런스는 아래 경로에 있습니다.
