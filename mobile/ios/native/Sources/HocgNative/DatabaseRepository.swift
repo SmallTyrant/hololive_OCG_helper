@@ -4,6 +4,9 @@ import SQLite3
 private let tagAlias: [String: [String]] = [
     "동물귀": ["인권없음"],
     "인권없음": ["동물귀"],
+    "soraz": ["소라즈", "소라아즈"],
+    "소라즈": ["soraz", "소라아즈"],
+    "소라아즈": ["soraz", "소라즈"],
 ]
 
 final class DatabaseRepository {

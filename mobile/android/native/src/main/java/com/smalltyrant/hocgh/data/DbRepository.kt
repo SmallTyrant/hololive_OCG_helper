@@ -12,6 +12,9 @@ import java.time.ZoneOffset
 private val TAG_ALIAS: Map<String, List<String>> = mapOf(
     "동물귀" to listOf("인권없음"),
     "인권없음" to listOf("동물귀"),
+    "soraz" to listOf("소라즈", "소라아즈"),
+    "소라즈" to listOf("soraz", "소라아즈"),
+    "소라아즈" to listOf("soraz", "소라즈"),
 )
 
 class DbRepository(private val paths: AppPaths) {
