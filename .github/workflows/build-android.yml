@@ -119,7 +119,7 @@ jobs:
           APK_PATH="app/build/outputs/apk/release/app-release.apk"
           KEYSTORE_PATH="$(pwd)/hocg-release.jks"
 
-          KEYSTORE_CERT_SHA256="$(keytool -list -v -keystore "$KEYSTORE_PATH" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" 2>/dev/null | awk -F': ' '/SHA256:/{gsub(" ", "", $2); print toupper($2); exit}')"
+          KEYSTORE_CERT_SHA256="$(keytool -list -v -keystore "$KEYSTORE_PATH" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" 2>/dev/null | awk 'BEGIN{IGNORECASE=1} /SHA256:/{sub(/^.*SHA256:[[:space:]]*/, ""); gsub(" ", ""); print toupper($0); exit}')"
           if [ -z "$KEYSTORE_CERT_SHA256" ]; then
             echo "❌ GitHub Secret 키스토어 인증서 지문을 읽지 못했습니다."
             exit 1
@@ -131,7 +131,7 @@ jobs:
             exit 1
           fi
 
-          APK_CERT_SHA256="$($APKSIGNER verify --print-certs "$APK_PATH" | awk -F': ' '/Signer #1 certificate SHA-256 digest:/{gsub(" ", "", $2); print toupper($2); exit}')"
+          APK_CERT_SHA256="$($APKSIGNER verify --verbose --print-certs "$APK_PATH" | awk 'BEGIN{IGNORECASE=1} /SHA-256/ && /digest:/{sub(/^.*digest:[[:space:]]*/, ""); gsub(" ", ""); print toupper($0); exit}')"
           if [ -z "$APK_CERT_SHA256" ]; then
             echo "❌ APK 서명 인증서 지문을 읽지 못했습니다."
             exit 1
