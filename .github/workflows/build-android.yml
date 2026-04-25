@@ -105,9 +105,13 @@ jobs:
         env:
           VERSION_CODE: ${{ steps.version.outputs.version_code }}
           VERSION_NAME: ${{ steps.version.outputs.version_name }}
+          ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/mobile/android/native-app/hocg-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          ./gradlew assembleRelease --no-daemon -PversionCode="$VERSION_CODE" -PversionName="$VERSION_NAME"
+          ./gradlew clean :app:assembleRelease --no-daemon -PversionCode="$VERSION_CODE" -PversionName="$VERSION_NAME"
 
       - name: APK 서명 인증서 검증
         working-directory: mobile/android/native-app
@@ -119,7 +123,7 @@ jobs:
           APK_PATH="app/build/outputs/apk/release/app-release.apk"
           KEYSTORE_PATH="$(pwd)/hocg-release.jks"
 
-          KEYSTORE_CERT_SHA256="$(keytool -list -v -keystore "$KEYSTORE_PATH" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" 2>/dev/null | awk 'BEGIN{IGNORECASE=1} /SHA256:/{sub(/^.*SHA256:[[:space:]]*/, ""); gsub(" ", ""); print toupper($0); exit}')"
+          KEYSTORE_CERT_SHA256="$(keytool -list -v -keystore "$KEYSTORE_PATH" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" 2>/dev/null | awk 'BEGIN{IGNORECASE=1} /SHA256:/{sub(/^.*SHA256:[[:space:]]*/, ""); gsub(/[[:space:]:]/, ""); print toupper($0); exit}')"
           if [ -z "$KEYSTORE_CERT_SHA256" ]; then
             echo "❌ GitHub Secret 키스토어 인증서 지문을 읽지 못했습니다."
             exit 1
@@ -131,7 +135,7 @@ jobs:
             exit 1
           fi
 
-          APK_CERT_SHA256="$($APKSIGNER verify --verbose --print-certs "$APK_PATH" | awk 'BEGIN{IGNORECASE=1} /SHA-256/ && /digest:/{sub(/^.*digest:[[:space:]]*/, ""); gsub(" ", ""); print toupper($0); exit}')"
+          APK_CERT_SHA256="$($APKSIGNER verify --verbose --print-certs "$APK_PATH" | awk 'BEGIN{IGNORECASE=1} /SHA-256/ && /digest:/{sub(/^.*digest:[[:space:]]*/, ""); gsub(/[[:space:]:]/, ""); print toupper($0); exit}')"
           if [ -z "$APK_CERT_SHA256" ]; then
             echo "❌ APK 서명 인증서 지문을 읽지 못했습니다."
             exit 1
