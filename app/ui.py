@@ -1183,6 +1183,7 @@ def launch_app(db_path: str) -> None:
                 bgcolor=with_opacity(0.18, COLORS.BLUE_GREY_700),
                 padding=ft.padding.symmetric(horizontal=8, vertical=3),
                 border_radius=12,
+                border=ft.border.all(1, with_opacity(0.40, COLORS.BLUE_GREY_200)),
             )
 
         def build_detail_line(line: str) -> ft.Control:
@@ -1277,18 +1278,37 @@ def launch_app(db_path: str) -> None:
                 name_ko = (row.get("name_ko") or "").strip()
                 name_ja = (row.get("name_ja") or "").strip()
                 display_name = name_ko or name_ja or "(이름 없음)"
-                title = f"{card_number} | {display_name}" if card_number else display_name
                 is_selected = selected_print_id["id"] == pid
-                lv.controls.append(
-                    ft.ListTile(
-                        title=ft.Text(title),
-                        selected=is_selected,
-                        selected_tile_color=with_opacity(0.22, COLORS.BLUE_GREY_700),
-                        selected_color=COLORS.WHITE,
-                        dense=True,
-                        on_click=lambda e, _pid=pid: show_detail(_pid),
+
+                if is_mobile_layout():
+                    num_chip = ft.Container(
+                        content=ft.Text(card_number, size=10),
+                        bgcolor=with_opacity(0.30 if is_selected else 0.18, COLORS.BLUE_GREY_700),
+                        padding=ft.padding.symmetric(horizontal=6, vertical=2),
+                        border_radius=8,
+                    ) if card_number else ft.Container(width=0)
+                    accent_bar = ft.Container(width=3, bgcolor=COLORS.BLUE_400) if is_selected else ft.Container(width=0)
+                    lv.controls.append(
+                        ft.Container(
+                            content=ft.Row([accent_bar, num_chip, ft.Text(display_name, expand=True, weight=ft.FontWeight.BOLD if is_selected else ft.FontWeight.NORMAL)], spacing=6),
+                            bgcolor=with_opacity(0.22, COLORS.BLUE_GREY_700) if is_selected else None,
+                            padding=ft.padding.only(left=0 if is_selected else 10, right=10, top=6, bottom=6),
+                            border_radius=6,
+                            on_click=lambda e, _pid=pid: show_detail(_pid),
+                        )
                     )
-                )
+                else:
+                    title = f"{card_number} | {display_name}" if card_number else display_name
+                    lv.controls.append(
+                        ft.ListTile(
+                            title=ft.Text(title),
+                            selected=is_selected,
+                            selected_tile_color=with_opacity(0.22, COLORS.BLUE_GREY_700),
+                            selected_color=COLORS.WHITE,
+                            dense=True,
+                            on_click=lambda e, _pid=pid: show_detail(_pid),
+                        )
+                    )
 
         def show_detail(pid: int) -> None:
             selected_print_id["id"] = pid
@@ -1675,8 +1695,19 @@ def launch_app(db_path: str) -> None:
         def image_section_header_mobile() -> ft.Control:
             return ft.Row(
                 [
-                    ft.Text("이미지"),
-                    ft.TextButton(image_toggle_label(), on_click=toggle_image_panel),
+                    ft.Column(
+                        [
+                            ft.Text("이미지", weight=ft.FontWeight.BOLD, size=13),
+                            ft.Divider(height=1, thickness=1),
+                        ],
+                        spacing=2,
+                        expand=True,
+                    ),
+                    ft.IconButton(
+                        icon=ICONS.EXPAND_LESS if not image_panel_state["collapsed"] else ICONS.EXPAND_MORE,
+                        tooltip=image_toggle_label(),
+                        on_click=toggle_image_panel,
+                    ),
                 ],
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -2021,6 +2052,10 @@ def launch_app(db_path: str) -> None:
                 detail_lv.expand = True
                 detail_lv.scroll = ft.ScrollMode.AUTO
 
+                tf_search.border_radius = 28
+                tf_search.border = ft.InputBorder.OUTLINE
+                tf_search.content_padding = ft.padding.symmetric(horizontal=20, vertical=10)
+
                 top_row = ft.Row(
                     [
                         tf_search,
@@ -2042,7 +2077,7 @@ def launch_app(db_path: str) -> None:
                 list_section = ft.Container(
                     content=ft.Column(
                         [
-                            ft.Text("목록"),
+                            ft.Column([ft.Text("목록", weight=ft.FontWeight.BOLD, size=13), ft.Divider(height=1, thickness=1)], spacing=2),
                             ft.Container(
                                 content=lv,
                                 expand=True,
@@ -2094,7 +2129,7 @@ def launch_app(db_path: str) -> None:
                 detail_section = ft.Container(
                     content=ft.Column(
                         [
-                            ft.Text("효과"),
+                            ft.Column([ft.Text("효과", weight=ft.FontWeight.BOLD, size=13), ft.Divider(height=1, thickness=1)], spacing=2),
                             ft.Container(
                                 content=detail_lv,
                                 expand=True,

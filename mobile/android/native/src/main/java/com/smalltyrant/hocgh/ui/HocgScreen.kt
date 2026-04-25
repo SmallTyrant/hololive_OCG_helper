@@ -2272,6 +2272,7 @@ private fun MobileLayout(
                 label = { Text("카드번호 / 이름 / 태그 / 한국어 본문 검색") },
                 enabled = !state.updateRunning,
                 singleLine = true,
+                shape = RoundedCornerShape(28.dp),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { onDismissKeyboard() }),
             )
@@ -2470,11 +2471,6 @@ private fun ResultItem(row: PrintRow, selected: Boolean, onClick: () -> Unit, pr
         }
         PreferredLanguage.JAPANESE -> row.nameJa.ifBlank { DbRepository.cleanDisplayName(row.nameKo) }
     }.ifBlank { "(이름 없음)" }
-    val title = if (row.cardNumber.isNotBlank()) {
-        "${row.cardNumber} | $displayName"
-    } else {
-        displayName
-    }
 
     Row(
         modifier = Modifier
@@ -2483,15 +2479,41 @@ private fun ResultItem(row: PrintRow, selected: Boolean, onClick: () -> Unit, pr
                 color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
                 shape = RoundedCornerShape(8.dp),
             )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 9.dp),
+            .clickable(onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .height(32.dp)
+                .background(
+                    color = if (selected) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Transparent,
+                    shape = RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp),
+                )
         )
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 9.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (row.cardNumber.isNotBlank()) {
+                Box(
+                    modifier = Modifier
+                        .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                ) {
+                    Text(text = row.cardNumber, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            Text(
+                text = displayName,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
 
@@ -2729,6 +2751,7 @@ private fun SectionChip(text: String) {
     Box(
         modifier = Modifier
             .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(999.dp))
+            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.40f)), RoundedCornerShape(999.dp))
             .padding(horizontal = 9.dp, vertical = 4.dp),
     ) {
         Text(text = text, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
