@@ -1789,6 +1789,66 @@ struct ContentView: View {
                 showDeckToast("JSON 파일 선택에 실패했습니다.")
             }
         }
+        .sheet(isPresented: $showingDeckImportSheet) {
+            NavigationStack {
+                VStack(alignment: .leading, spacing: 12) {
+                    Picker("가져오기 방식", selection: $deckImportMode) {
+                        ForEach(DeckImportMode.allCases, id: \.self) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Text(
+                        deckImportMode == .holoDuel
+                        ? "홀로듀얼 덱 코드(Base64)를 붙여넣어 주세요."
+                        : deckImportMode == .holoDelta
+                            ? "홀로델타 코드(JSON 또는 Base64 URL-safe)를 붙여넣어 주세요."
+                            : "부시나비 URL 또는 코드를 붙여넣어 주세요.\n예: 6ADJR (URL 전체 입력 불필요)"
+                    )
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+
+                    TextEditor(text: $deckImportText)
+                        .font(.system(.footnote, design: .monospaced))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
+                        )
+
+                    if deckImportMode == .holoDelta {
+                        Button("홀로델타 JSON 파일 선택") {
+                            showingDeckJsonFileImporter = true
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    Button(
+                        deckImportMode == .holoDuel
+                        ? "홀로델타 코드로 변환"
+                        : deckImportMode == .holoDelta
+                            ? "부시나비 코드로 변환"
+                            : "홀로듀얼 코드로 변환"
+                    ) {
+                        convertDeckCodeFromText()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .padding(14)
+                .navigationTitle("덱 가져오기")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("취소") { showingDeckImportSheet = false }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("가져오기") { importDeckLibraryFromText() }
+                    }
+                }
+            }
+        }
         .sheet(item: $pendingCardForRarity) { card in
             RarityPickerSheet(
                 card: card,
@@ -2298,52 +2358,6 @@ struct ContentView: View {
                         .foregroundColor(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .sheet(isPresented: $showingDeckImportSheet) {
-            NavigationStack {
-                VStack(alignment: .leading, spacing: 12) {
-                    Picker("가져오기 방식", selection: $deckImportMode) {
-                        ForEach(DeckImportMode.allCases, id: \.self) { mode in
-                            Text(mode.rawValue).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-
-                    TextEditor(text: $deckImportText)
-                        .font(.system(.footnote, design: .monospaced))
-                        .frame(maxWidth: .infinity, minHeight: 200)
-                        .padding(8)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
-                        )
-
-                    Button("가져오기") {
-                        importDeckLibraryFromText()
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                .padding()
-                .navigationTitle("덱 가져오기")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("취소") { showingDeckImportSheet = false }
-                    }
-                }
-            }
-        }
-        .fileImporter(
-            isPresented: $showingDeckJsonFileImporter,
-            allowedContentTypes: [UTType.json],
-            allowsMultipleSelection: false
-        ) { result in
-            switch result {
-            case .success(let urls):
-                if let url = urls.first { importDeckFromJsonFile(url) }
-            case .failure:
-                showDeckToast("JSON 파일 선택에 실패했습니다.")
             }
         }
         .task(id: tabletSelectedTab) {
