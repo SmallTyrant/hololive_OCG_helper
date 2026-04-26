@@ -40,3 +40,5 @@ mobile/android/native-app/keystore.properties
 
 .worktrees/
 .omc
+hololive_ocg.sqlite-shm
+hololive_ocg.sqlite-wal
