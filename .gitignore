@@ -39,3 +39,4 @@ keystore.properties
 mobile/android/native-app/keystore.properties
 
 .worktrees/
+.omc
