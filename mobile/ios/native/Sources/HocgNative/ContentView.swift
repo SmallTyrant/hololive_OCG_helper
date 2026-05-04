@@ -276,11 +276,7 @@ struct ContentView: View {
 
         /// 현재 선택된 레어리티 표시 문자열
         var displayRarity: String {
-            if let rarity = selectedRarity,
-               card.selectableIllustrations.contains(where: { $0.rarity == rarity }) {
-                return rarity
-            }
-            return card.selectableIllustrations.first?.rarity ?? ""
+            selectedRarity ?? card.selectableIllustrations.first?.rarity ?? ""
         }
     }
 
@@ -462,7 +458,7 @@ struct ContentView: View {
 
     private func deckThumbnail(url: String, qty: Int, width: CGFloat, height: CGFloat) -> some View {
         ZStack(alignment: .topTrailing) {
-            AsyncImage(url: URL(string: url)) { phase in
+            AsyncImage(url: AppPaths().resolveImageURL(url)) { phase in
                 remotePhaseView(phase)
             }
             .frame(width: width, height: height)
@@ -900,7 +896,7 @@ struct ContentView: View {
         func selectedRarity(for card: DeckCardCandidate, artIndex: Int) -> String? {
             guard artIndex >= 0, artIndex < card.illustrations.count else { return nil }
             let rarity = card.illustrations[artIndex].rarity
-            return card.selectableIllustrations.contains(where: { $0.rarity == rarity }) ? rarity : nil
+            return rarity.isEmpty ? nil : rarity
         }
 
         var entries: [DeckEntryState] = []
@@ -2624,7 +2620,11 @@ struct ContentView: View {
         VStack(spacing: 8) {
             HStack(spacing: 8) {
                 ModernActionButton("취소", compact: true) { showingDeckEditor = false }
-                TextField("덱 이름", text: $deckTitle).textFieldStyle(.roundedBorder)
+                TextField("덱 이름", text: $deckTitle)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color(.separator), lineWidth: 1))
                 ModernActionButton("덱 목록", compact: true) {
                     showingDeckEditor = false
                     showingDeckList = true
@@ -2667,11 +2667,22 @@ struct ContentView: View {
             }
             .font(.footnote)
 
-            TextField("카드 검색", text: $deckSearchQuery)
-                .textFieldStyle(.roundedBorder)
-                .onChange(of: deckSearchQuery) { _ in
-                    Task { deckCandidates = await viewModel.searchDeckCards(deckSearchQuery) }
+            HStack(spacing: 8) {
+                TextField("카드 검색", text: $deckSearchQuery)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color(.separator), lineWidth: 1))
+                    .onChange(of: deckSearchQuery) { _ in
+                        Task { deckCandidates = await viewModel.searchDeckCards(deckSearchQuery) }
+                    }
+                Button(action: dismissKeyboard) {
+                    Image(systemName: "keyboard.chevron.compact.down")
+                        .foregroundColor(.secondary)
+                        .padding(8)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
+            }
 
             panel(height: 280) {
                 if deckCandidates.isEmpty {

@@ -875,6 +875,16 @@ private fun readTextFromUri(context: android.content.Context, uri: Uri): String?
     }.getOrNull()
 }
 
+private fun resolveCardImageUrl(url: String): String {
+    val s = url.trim()
+    return when {
+        s.isEmpty() -> ""
+        s.startsWith("http://") || s.startsWith("https://") -> s
+        s.startsWith("/") -> "https://hololive-official-cardgame.com$s"
+        else -> "https://hololive-official-cardgame.com/$s"
+    }
+}
+
 @Composable
 private fun DeckThumbnail(
     imageUrl: String,
@@ -888,7 +898,7 @@ private fun DeckThumbnail(
             .clip(RoundedCornerShape(6.dp)),
     ) {
         AsyncImage(
-            model = imageUrl,
+            model = resolveCardImageUrl(imageUrl),
             contentDescription = null,
             modifier = Modifier.fillMaxSize(),
         )
@@ -998,7 +1008,7 @@ fun HocgScreen(
                 fun selectedRarity(card: DeckCardCandidate, artIndex: Int): String? {
                     if (artIndex < 0 || artIndex >= card.illustrations.size) return null
                     val rarity = card.illustrations[artIndex].rarity
-                    return if (card.selectableIllustrations.any { it.rarity == rarity }) rarity else null
+                    return rarity.trim().ifEmpty { null }
                 }
 
                 val entries = mutableListOf<DeckEntryUi>()
@@ -1441,7 +1451,7 @@ fun HocgScreen(
                                     fun selectedRarity(card: DeckCardCandidate, artIndex: Int): String? {
                                         if (artIndex < 0 || artIndex >= card.illustrations.size) return null
                                         val rarity = card.illustrations[artIndex].rarity
-                                        return if (card.selectableIllustrations.any { it.rarity == rarity }) rarity else null
+                                        return rarity.trim().ifEmpty { null }
                                     }
 
                                     val entries = mutableListOf<DeckEntryUi>()
@@ -2029,6 +2039,7 @@ private fun DeckEditorScreen(
     onDecrease: (Long) -> Unit,
     onChangeRarity: (DeckEntryUi) -> Unit = {},
 ) {
+    val focusManager = LocalFocusManager.current
     val oshi = entries.filter { isOshi(it.card) }.sumOf { it.qty }
     val yell = entries.filter { isYell(it.card) }.sumOf { it.qty }
     val main = entries.filter { !isOshi(it.card) && !isYell(it.card) }.sumOf { it.qty }
@@ -2040,7 +2051,7 @@ private fun DeckEditorScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ModernActionButton(text = "취소", onClick = onCancel)
-            OutlinedTextField(value = title, onValueChange = onTitleChange, singleLine = true, modifier = Modifier.weight(1f), label = { Text("덱 이름") })
+            OutlinedTextField(value = title, onValueChange = onTitleChange, singleLine = true, modifier = Modifier.weight(1f), label = { Text("덱 이름") }, shape = RoundedCornerShape(28.dp))
             ModernActionButton(text = "덱 목록", onClick = onOpenDeckList)
             ModernActionButton(text = "저장", onClick = onSave)
         }
@@ -2056,6 +2067,12 @@ private fun DeckEditorScreen(
             label = { Text("카드 검색") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(28.dp),
+            trailingIcon = {
+                IconButton(onClick = { focusManager.clearFocus() }) {
+                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "키보드 닫기")
+                }
+            },
         )
         Box(
             modifier = Modifier
