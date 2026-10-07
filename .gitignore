@@ -24,6 +24,7 @@ CLAUDE.md
 *.log
 *.json
 *.md
+!.github/release-notes/android/*.md
 *.mdc
 *.js
 *.sh

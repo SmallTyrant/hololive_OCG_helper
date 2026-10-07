@@ -7,6 +7,7 @@ on:
     paths:
       - 'mobile/android/native-app/**'
       - 'mobile/android/native/**'
+      - '.github/release-notes/android/**'
       - '.github/workflows/build-android.yml'
   workflow_dispatch:
 
@@ -169,18 +170,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          NOTES_FILE=".github/release-notes/android/${{ steps.version.outputs.version_name }}.md"
+          if [ ! -f "$NOTES_FILE" ]; then
+            echo "❌ 릴리즈 노트 파일이 없습니다: $NOTES_FILE"
+            echo "버전이 올라갈 때마다 .github/release-notes/android/<version>.md 파일을 추가하세요."
+            exit 1
+          fi
+
           if gh release view install_file1 >/dev/null 2>&1; then
             gh release edit install_file1 \
               --draft=false \
               --prerelease=false \
               --latest \
               --title "Android 설치 파일" \
-              --notes "현재 Android 배포 인증서로 서명된 최신 APK 1개만 유지합니다. DB는 앱에 번들하지 않고 DB 릴리즈에서 다운로드합니다."
+              --notes-file "$NOTES_FILE"
           else
             gh release create install_file1 \
               --latest \
               --title "Android 설치 파일" \
-              --notes "현재 Android 배포 인증서로 서명된 최신 APK 1개만 유지합니다. DB는 앱에 번들하지 않고 DB 릴리즈에서 다운로드합니다."
+              --notes-file "$NOTES_FILE"
           fi
 
       - name: 기존 릴리즈 자산 정리
