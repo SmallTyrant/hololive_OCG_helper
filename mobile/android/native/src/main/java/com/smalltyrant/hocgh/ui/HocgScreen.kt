@@ -1582,11 +1582,27 @@ fun HocgScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text("메뉴", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     ElevatedButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            focusManager.clearFocus()
+                            scope.launch {
+                                drawerState.close()
+                                openDeckBuilder()
+                            }
+                        },
+                        enabled = !state.updateRunning,
+                    ) {
+                        Text("덱빌딩")
+                    }
+                    HorizontalDivider()
+                    ElevatedButton(
+                        modifier = Modifier.fillMaxWidth(),
                         onClick = {
                             scope.launch {
                                 drawerState.close()
@@ -1598,6 +1614,7 @@ fun HocgScreen(
                         Text("이미지 일괄 다운로드 (오프라인)")
                     }
                     ElevatedButton(
+                        modifier = Modifier.fillMaxWidth(),
                         onClick = {
                             scope.launch {
                                 drawerState.close()
@@ -1837,7 +1854,6 @@ fun HocgScreen(
                     state = state,
                     innerPadding = innerPadding,
                     onSearchQueryChanged = viewModel::onSearchQueryChanged,
-                    onOpenDeckBuilder = openDeckBuilder,
                     onOpenMenu = { scope.launch { drawerState.open() } },
                     onDismissKeyboard = { focusManager.clearFocus() },
                     onSelectPrint = viewModel::onSelectPrint,
@@ -2246,7 +2262,6 @@ private fun MobileLayout(
     state: HocgUiState,
     innerPadding: androidx.compose.foundation.layout.PaddingValues,
     onSearchQueryChanged: (String) -> Unit,
-    onOpenDeckBuilder: () -> Unit,
     onOpenMenu: () -> Unit,
     onDismissKeyboard: () -> Unit,
     onSelectPrint: (Long) -> Unit,
@@ -2293,14 +2308,6 @@ private fun MobileLayout(
                 shape = RoundedCornerShape(28.dp),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { onDismissKeyboard() }),
-            )
-            ModernActionButton(
-                text = "덱빌딩",
-                onClick = {
-                    onDismissKeyboard()
-                    onOpenDeckBuilder()
-                },
-                enabled = !state.updateRunning,
             )
             IconButton(
                 onClick = {

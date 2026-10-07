@@ -65,6 +65,12 @@
 ### Android
 - APK 설치
 
+Android 새 버전 배포 시 `mobile/android/native-app/version.json`의 버전과 빌드 번호를 갱신하고,
+`.github/release-notes/android/<version>.md`에 변경사항을 작성합니다.
+배포 워크플로는 `Android v<version> (build <build>)`라는 별도 릴리스를 만들고 APK를 보관합니다.
+태그는 `android-v<version>-build<build>`이며, 이미 공개된 버전의 APK는 덮어쓰지 않습니다.
+`install_file1`은 설치된 앱의 고정 업데이트 주소로 유지하고, 버전별 릴리스를 Latest로 지정합니다.
+
 ### iOS
 - TestFlight 참여
 https://testflight.apple.com/join/xfQ2hPbT

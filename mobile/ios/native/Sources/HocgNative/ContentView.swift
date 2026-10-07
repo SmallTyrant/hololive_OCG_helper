@@ -1399,6 +1399,11 @@ struct ContentView: View {
                     state: viewModel.state,
                     themeMode: selectedThemeModeBinding,
                     preferredLanguage: selectedPreferredLanguageBinding,
+                    onOpenDeckBuilder: {
+                        dismissKeyboard()
+                        showingMenu = false
+                        openDeckBuilder()
+                    },
                     onBulkImageDownload: {
                         showingMenu = false
                         viewModel.onBulkImageDownload()
@@ -1679,9 +1684,6 @@ struct ContentView: View {
                     .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color(.separator), lineWidth: 1))
                     .disabled(viewModel.state.updateRunning)
-
-                    ModernActionButton("덱빌딩", compact: true, action: openDeckBuilder)
-                        .disabled(viewModel.state.updateRunning)
 
                     Button {
                         dismissKeyboard()
@@ -2869,12 +2871,19 @@ private struct MenuSheet: View {
     let state: HocgUiState
     @Binding var themeMode: AppThemeMode
     @Binding var preferredLanguage: PreferredLanguage
+    let onOpenDeckBuilder: () -> Void
     let onBulkImageDownload: () -> Void
     let onManualUpdate: () -> Void
 
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    ModernActionButton("덱빌딩", maxWidth: true, action: onOpenDeckBuilder)
+                        .disabled(state.updateRunning)
+                        .listRowBackground(Color.clear)
+                }
+
                 Section {
                     ModernActionButton("이미지 일괄 다운로드 (오프라인)", maxWidth: true) {
                         onBulkImageDownload()

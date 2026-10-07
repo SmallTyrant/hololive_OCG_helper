@@ -25,6 +25,7 @@ CLAUDE.md
 *.json
 *.md
 !.github/release-notes/android/*.md
+!.github/release-notes/database/*.md
 *.mdc
 *.js
 *.sh
@@ -43,3 +44,7 @@ mobile/android/native-app/keystore.properties
 .omc
 hololive_ocg.sqlite-shm
 hololive_ocg.sqlite-wal
+data/pack_verification_sources/
+data/pack_verification_backups/
+!tools/complete_requested_packs.py
+!tools/reports/requested_packs_verification.json

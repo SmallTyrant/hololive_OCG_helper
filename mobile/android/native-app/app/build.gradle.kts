@@ -31,8 +31,8 @@ android {
         applicationId = "com.smalltyrant.hocgh"
         minSdk = 26
         targetSdk = 35
-        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 183
-        versionName = (project.findProperty("versionName") as String?) ?: "1.2.21"
+        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 184
+        versionName = (project.findProperty("versionName") as String?) ?: "1.2.22"
     }
 
     if (hasReleaseSigning) {

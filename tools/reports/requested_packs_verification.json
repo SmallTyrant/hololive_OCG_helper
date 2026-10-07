@@ -1,0 +1,75 @@
+{
+  "timestamp": "20261007T161138Z",
+  "databases": {
+    "data/hololive_ocg.sqlite": {
+      "added_cards": 0,
+      "updated_cards": 372,
+      "korean_texts_updated": 348,
+      "added_illustrations": 720,
+      "backup": "data/pack_verification_backups/20261007T161138Z/data_hololive_ocg.sqlite",
+      "original_sha256": "1441a58e72130130a2df0ca04d5098f833866b18038db6d48eafb5aba3e65eb6",
+      "verification": {
+        "integrity": "ok",
+        "foreign_key_errors": 0,
+        "missing_fields": 0,
+        "packs": {
+          "hBP08": {
+            "cards": 127,
+            "missing_cards": 0,
+            "official_variants": 251
+          },
+          "hEB01": {
+            "cards": 114,
+            "missing_cards": 0,
+            "official_variants": 214
+          },
+          "hBP09": {
+            "cards": 131,
+            "missing_cards": 0,
+            "official_variants": 255
+          }
+        }
+      },
+      "new_sha256": "1b4b457e04b7bf6de445dd4c8dff2314367d8f85802dba3b6092045ccea6bad9"
+    },
+    "app/assets/hololive_ocg.sqlite": {
+      "added_cards": 163,
+      "updated_cards": 209,
+      "korean_texts_updated": 348,
+      "added_illustrations": 356,
+      "backup": "data/pack_verification_backups/20261007T161138Z/app_assets_hololive_ocg.sqlite",
+      "original_sha256": "3a208963ef7ce8628730efd111ce4bbd59b59add527669ec000fea76f741df62",
+      "verification": {
+        "integrity": "ok",
+        "foreign_key_errors": 0,
+        "missing_fields": 0,
+        "packs": {
+          "hBP08": {
+            "cards": 127,
+            "missing_cards": 0,
+            "official_variants": 251
+          },
+          "hEB01": {
+            "cards": 114,
+            "missing_cards": 0,
+            "official_variants": 214
+          },
+          "hBP09": {
+            "cards": 131,
+            "missing_cards": 0,
+            "official_variants": 255
+          }
+        }
+      },
+      "new_sha256": "9772936ef6c30562d22c4cc9aa6352578f2a81cf20ffae80871d0f0bc0bfa611"
+    }
+  },
+  "source_notes": [
+    "Official AJAX pagination exhausted and checked against reported totals.",
+    "NamuWiki individual-table number typos resolved using card section IDs.",
+    "hEB01-025 table says hEB01-090: mapped by unique support name.",
+    "hBP09-111 source table name Bloom＆Gloom corrected to inventory/official Pemaloe.",
+    "Cheer cards have no ability text; blank effects are intentional.",
+    "Existing illustrations of the same card and rarity are preserved; schema stores one per pair."
+  ]
+}
