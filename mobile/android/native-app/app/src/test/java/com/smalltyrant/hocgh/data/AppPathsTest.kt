@@ -1,7 +1,12 @@
 package com.smalltyrant.hocgh.data
 
+import android.Manifest
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.PackageManager
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -53,6 +58,32 @@ class AppPathsTest {
             "data:image/png;base64,abcd",
             paths.resolveImageUrl("data:image/png;base64,abcd"),
         )
+    }
+
+    @Test
+    fun `app declares network state permission`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val packageInfo = context.packageManager.getPackageInfo(
+            context.packageName,
+            PackageManager.GET_PERMISSIONS,
+        )
+
+        assertTrue(packageInfo.requestedPermissions?.contains(Manifest.permission.ACCESS_NETWORK_STATE) == true)
+    }
+
+    @Test
+    fun `network permission failure does not crash image fallback`() {
+        val base = ApplicationProvider.getApplicationContext<Context>()
+        val deniedContext = object : ContextWrapper(base) {
+            override fun getSystemService(name: String): Any? {
+                if (name == Context.CONNECTIVITY_SERVICE) {
+                    throw SecurityException("network state permission denied")
+                }
+                return super.getSystemService(name)
+            }
+        }
+
+        assertTrue(AppPaths(deniedContext).hasNetworkConnection())
     }
 }
 
