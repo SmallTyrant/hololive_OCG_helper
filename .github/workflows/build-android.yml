@@ -171,10 +171,14 @@ jobs:
           set -euo pipefail
           if gh release view install_file1 >/dev/null 2>&1; then
             gh release edit install_file1 \
+              --draft=false \
+              --prerelease=false \
+              --latest \
               --title "Android 설치 파일" \
               --notes "현재 Android 배포 인증서로 서명된 최신 APK 1개만 유지합니다. DB는 앱에 번들하지 않고 DB 릴리즈에서 다운로드합니다."
           else
             gh release create install_file1 \
+              --latest \
               --title "Android 설치 파일" \
               --notes "현재 Android 배포 인증서로 서명된 최신 APK 1개만 유지합니다. DB는 앱에 번들하지 않고 DB 릴리즈에서 다운로드합니다."
           fi
